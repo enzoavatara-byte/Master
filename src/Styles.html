@@ -1,0 +1,85 @@
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #fff; --text: #1c1f23; --muted: #5f6b7a; --line: #dfe3e8;
+    --primary: #0b5cad; --primary-text: #fff;
+    --ok: #16794a; --ok-bg: #e3f4ea; --ng: #b42318; --ng-bg: #fdeceb;
+    --warn: #8a5a00; --warn-bg: #fff4d6; --info-bg: #e8f1fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --card: #1b1f25; --text: #e7eaee; --muted: #9aa5b1; --line: #2d333b;
+      --primary: #4c9aff; --primary-text: #0b1320;
+      --ok: #5dd39e; --ok-bg: #12301f; --ng: #ff8a80; --ng-bg: #3a1614;
+      --warn: #ffcc66; --warn-bg: #3a2c0a; --info-bg: #13263d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 12px 16px 96px; }
+  header.top { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line); }
+  header.top .inner { max-width: 720px; margin: 0 auto; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  header.top b { font-size: 16px; }
+  .who { color: var(--muted); font-size: 13px; text-align: right; }
+  nav.tabs { position: fixed; bottom: 0; left: 0; right: 0; background: var(--card); border-top: 1px solid var(--line); display: flex; z-index: 5; }
+  nav.tabs button { flex: 1; background: none; border: 0; padding: 12px 4px; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; position: relative; }
+  nav.tabs button.active { color: var(--primary); box-shadow: inset 0 3px 0 var(--primary); }
+  .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--ng); color: #fff; font-size: 11px; line-height: 18px; margin-left: 4px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 12px 0; }
+  .center { text-align: center; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  h2 { font-size: 17px; margin: 0 0 8px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+  .btn { display: block; width: 100%; border: 0; border-radius: 10px; padding: 14px; font-size: 16px; font-weight: 700; cursor: pointer; background: var(--primary); color: var(--primary-text); }
+  .btn.big { padding: 22px; font-size: 20px; }
+  .btn.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 600; }
+  .btn.danger { background: transparent; color: var(--ng); border: 1px solid var(--ng); }
+  .btn[disabled] { opacity: .5; cursor: wait; }
+  .row { display: flex; gap: 8px; } .row > * { flex: 1; }
+  .stack > * + * { margin-top: 10px; }
+  label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  input, select, textarea { width: 100%; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font-family: inherit; }
+  textarea { min-height: 72px; resize: vertical; }
+  .seg { display: flex; gap: 8px; } .seg label { flex: 1; margin: 0; }
+  .seg label { position: relative; }
+  .seg input { position: absolute; opacity: 0; width: 1px; height: 1px; left: 50%; bottom: 0; }
+  .seg input:focus-visible + span { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .seg span { display: block; text-align: center; padding: 12px; border: 2px solid var(--line); border-radius: 10px; font-weight: 700; cursor: pointer; }
+  .seg input:checked + span { border-color: var(--primary); background: var(--info-bg); color: var(--primary); }
+  .seg input[value=OK]:checked + span { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }
+  .seg input[value=NG]:checked + span { border-color: var(--ng); background: var(--ng-bg); color: var(--ng); }
+  .timer { font: 700 44px/1.1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: 1px; margin: 8px 0; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .st-IN_PROGRESS { background: var(--info-bg); color: var(--primary); }
+  .st-COMPLETED { background: var(--ok-bg); color: var(--ok); }
+  .st-CANCELLED { background: var(--line); color: var(--muted); }
+  .st-ABANDONED { background: var(--warn-bg); color: var(--warn); }
+  .alert { padding: 12px; border-radius: 10px; margin: 12px 0; font-size: 14px; }
+  .alert.err { background: var(--ng-bg); color: var(--ng); }
+  .alert.ok { background: var(--ok-bg); color: var(--ok); }
+  .alert.warn { background: var(--warn-bg); color: var(--warn); }
+  .list { list-style: none; padding: 0; margin: 0; }
+  .list li { padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .list li:last-child { border-bottom: 0; }
+  .link { color: var(--primary); cursor: pointer; background: none; border: 0; padding: 0; font: inherit; text-decoration: underline; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: top; }
+  th { position: sticky; top: 0; background: var(--card); }
+  td.wrap-cell { white-space: normal; min-width: 160px; }
+  .grid-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .qr-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; text-align: center; background: #fff; color: #000; break-inside: avoid; }
+  .qr-card .qr { display: flex; justify-content: center; margin: 8px 0; }
+  .loading { text-align: center; padding: 40px 0; color: var(--muted); }
+  .hidden { display: none !important; }
+  @media print {
+    header.top, nav.tabs, .no-print { display: none !important; }
+    body { background: #fff; }
+    .wrap { max-width: none; padding: 0; }
+    .card { border: 0; padding: 0; }
+  }
+</style>

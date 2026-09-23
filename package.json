@@ -1,0 +1,10 @@
+{
+  "name": "mttr-apps-script",
+  "private": true,
+  "description": "Web App MTTR (trial) - Google Apps Script + Google Sheets",
+  "scripts": {
+    "test": "node test/run.js",
+    "push": "clasp push",
+    "deploy": "clasp deploy"
+  }
+}
