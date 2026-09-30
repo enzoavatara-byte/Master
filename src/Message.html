@@ -1,14 +1,16 @@
 <!DOCTYPE html>
-<html>
+<html lang="id">
 <head>
   <base target="_top">
+  <meta charset="utf-8">
   <?!= include('Styles'); ?>
 </head>
 <body>
-  <main class="wrap">
-    <div class="card center">
-      <h1><?= title ?></h1>
-      <p><?!= body ?></p>
+  <main class="app">
+    <div class="card center" style="margin-top:40px">
+      <div class="avatar" style="margin:0 auto 14px;background:var(--accent)">!</div>
+      <h1 style="margin:0 0 8px"><?= title ?></h1>
+      <p class="muted"><?!= body ?></p>
     </div>
   </main>
 </body>

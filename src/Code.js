@@ -1,5 +1,5 @@
 /**
- * Entry point web app + setup + trigger ABANDONED.
+ * Entry point web app + setup + menu spreadsheet.
  */
 
 function doGet(e) {
@@ -8,11 +8,11 @@ function doGet(e) {
   try {
     user = getCurrentUser_();
   } catch (err) {
-    return renderMessage_('Konfigurasi belum lengkap', String(err.message || err));
+    return renderMessage_('Konfigurasi belum lengkap', escapeHtml_(String(err.message || err)));
   }
   if (!user.authorized) {
     return renderMessage_('Access Denied',
-      'Email <b>' + escapeHtml_(user.email || '(tidak terdeteksi)') + '</b> tidak terdaftar atau nonaktif di sistem. ' +
+      'Email <b>' + escapeHtml_(user.email || '(tidak terdeteksi)') + '</b> tidak terdaftar atau nonaktif. ' +
       'Hubungi Admin untuk didaftarkan.');
   }
   var t = HtmlService.createTemplateFromFile('Index');
@@ -42,47 +42,20 @@ function escapeHtml_(s) {
   });
 }
 
-// ---------- Trigger: ABANDONED ----------
-
-/**
- * Dijalankan time-driven trigger tiap 15 menit.
- * IN_PROGRESS yang Start Time-nya lebih lama dari ABANDON_HOURS -> ABANDONED.
- * Finish Time TIDAK diisi; record masuk antrian review Supervisor/Admin.
- */
-function markAbandoned() {
-  var hours = getAbandonHours_();
-  var cutoff = new Date(Date.now() - hours * 3600 * 1000);
-  var changed = 0;
-  withLock_(function () {
-    readTable_(APP.SHEETS.MAINT).forEach(function (r) {
-      if (r['Status'] !== APP.STATUS.IN_PROGRESS) return;
-      if (!(r['Start Time'] instanceof Date) || r['Start Time'] > cutoff) return;
-      r['Status'] = APP.STATUS.ABANDONED;
-      r['Note'] = 'AUTO: IN_PROGRESS > ' + hours + ' jam tanpa update (' + fmtDate_(new Date()) + ')';
-      writeObj_(APP.SHEETS.MAINT, r);
-      changed++;
-    });
-  });
-  if (changed) console.log('markAbandoned: ' + changed + ' record jadi ABANDONED');
-  return changed;
-}
-
-// ---------- Setup (jalankan sekali oleh pemilik spreadsheet) ----------
-
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('MTTR')
+  SpreadsheetApp.getUi().createMenu('MTTR 2.0')
     .addItem('Setup / perbaiki sheet & trigger', 'setup')
-    .addItem('Jalankan cek ABANDONED sekarang', 'markAbandoned')
+    .addItem('Jalankan cek 3/4 jam sekarang', 'checkTimeouts')
     .addToUi();
 }
 
 /**
  * Idempotent: aman dijalankan berulang kali.
  * - Membuat sheet + header yang belum ada (tidak menghapus data).
- * - Set timezone spreadsheet ke Asia/Jakarta.
- * - Mengisi Config default.
+ * - Mengisi Config dan Pilihan default (hanya jenis yang masih kosong).
+ * - Membuat ulang tab turunan (FILTER): Maintenance <Baterai> dan Pending Work.
  * - Mendaftarkan pemanggil sebagai Admin jika sheet Users masih kosong.
- * - Memasang trigger markAbandoned (tanpa duplikat).
+ * - Memasang trigger checkTimeouts (tanpa duplikat).
  */
 function setup() {
   var ss = SpreadsheetApp.getActive();
@@ -95,7 +68,6 @@ function setup() {
     if (have.length === 0) {
       sh.getRange(1, 1, 1, want.length).setValues([want]);
     } else {
-      // Tambahkan header yang hilang di kanan, jangan ubah yang sudah ada.
       var missing = want.filter(function (h) { return have.indexOf(h) === -1; });
       if (missing.length) sh.getRange(1, have.length + 1, 1, missing.length).setValues([missing]);
     }
@@ -103,31 +75,91 @@ function setup() {
     sh.getRange(1, 1, 1, sh.getLastColumn()).setFontWeight('bold');
   });
 
-  var maint = ss.getSheetByName(APP.SHEETS.MAINT);
-  var mh = headers_(maint);
-  ['Start Time', 'Finish Time', 'Reviewed At'].forEach(function (h) {
-    var c = mh.indexOf(h) + 1;
-    if (c > 0) maint.getRange(2, c, maint.getMaxRows() - 1, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  Object.keys(APP.DATE_COLUMNS).forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    var h = headers_(sh);
+    APP.DATE_COLUMNS[name].forEach(function (col) {
+      var c = h.indexOf(col) + 1;
+      if (c > 0) sh.getRange(2, c, sh.getMaxRows() - 1, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
+    });
   });
 
-  var cfgRows = readTable_(APP.SHEETS.CONFIG);
-  Object.keys(APP.CONFIG_DEFAULTS).forEach(function (key) {
-    var exists = cfgRows.some(function (r) { return String(r['Key']).trim() === key; });
-    if (!exists) {
-      appendObj_(APP.SHEETS.CONFIG, { 'Key': key, 'Value': APP.CONFIG_DEFAULTS[key].value, 'Description': APP.CONFIG_DEFAULTS[key].description });
+  // Log & Maintenance hanya boleh ditulis kode. Proteksi "warning only": editor manual
+  // mendapat peringatan (user tetap perlu akses Editor karena web app berjalan sebagai user).
+  [APP.SHEETS.MAINT, APP.SHEETS.LOG].forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) {
+      sh.protect().setDescription('Ditulis oleh aplikasi MTTR. Jangan diedit manual.').setWarningOnly(true);
     }
+  });
+
+  var cfg = readTable_(APP.SHEETS.CONFIG);
+  Object.keys(APP.CONFIG_DEFAULTS).forEach(function (key) {
+    if (!cfg.some(function (r) { return String(r['Key']).trim() === key; })) {
+      appendObj_(APP.SHEETS.CONFIG, { 'Key': key, 'Value': APP.CONFIG_DEFAULTS[key].value, 'Keterangan': APP.CONFIG_DEFAULTS[key].description });
+    }
+  });
+
+  var opts = readTable_(APP.SHEETS.OPTIONS);
+  Object.keys(APP.OPTION_DEFAULTS).forEach(function (jenis) {
+    if (opts.some(function (r) { return String(r['Jenis']).trim() === jenis; })) return;
+    APP.OPTION_DEFAULTS[jenis].forEach(function (v) {
+      appendObj_(APP.SHEETS.OPTIONS, { 'Jenis': jenis, 'Nilai': v, 'Aktif': 'Ya' });
+    });
   });
 
   if (readTable_(APP.SHEETS.USERS).length === 0) {
     var me = currentEmail_();
-    if (me) appendObj_(APP.SHEETS.USERS, { 'Email': me, 'Name': me.split('@')[0], 'Role': APP.ROLES.ADMIN, 'Department': '', 'Status': 'Active' });
+    if (me) appendObj_(APP.SHEETS.USERS, { 'Email': me, 'Nama': me.split('@')[0], 'Peran': APP.ROLES.ADMIN, 'Aktif': 'Ya' });
   }
 
-  var hasTrigger = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'markAbandoned'; });
-  if (!hasTrigger) ScriptApp.newTrigger('markAbandoned').timeBased().everyMinutes(APP.TRIGGER_MINUTES).create();
+  buildDerivedSheets_(ss);
+  ss.setRecalculationInterval(SpreadsheetApp.RecalculationInterval.HOUR); // "Lama pending" pakai NOW()
+
+  var hasTrigger = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'checkTimeouts'; });
+  if (!hasTrigger) ScriptApp.newTrigger('checkTimeouts').timeBased().everyMinutes(APP.TRIGGER_MINUTES).create();
 
   var blank = ss.getSheetByName('Sheet1');
   if (blank && ss.getSheets().length > 1 && blank.getLastRow() === 0) ss.deleteSheet(blank);
 
   return 'Setup selesai.';
+}
+
+/**
+ * Tab turunan hanya berisi rumus -> kode tidak pernah menambah/menghapus baris di sana.
+ * Rumus dibangun dari posisi header saat ini, jadi jalankan setup() lagi jika kolom Maintenance digeser.
+ */
+function buildDerivedSheets_(ss) {
+  var mh = headers_(ss.getSheetByName(APP.SHEETS.MAINT));
+  var col = function (name) { return colLetter_(mh.indexOf(name) + 1); };
+  var lastCol = colLetter_(mh.length);
+  var src = "'" + APP.SHEETS.MAINT + "'!";
+
+  getOptions_()['Baterai'].forEach(function (bat) {
+    var sh = prepDerived_(ss, APP.SHEETS.MAINT + ' ' + bat);
+    var c = col('Baterai');
+    sh.getRange('A1').setFormula('=FILTER(' + src + 'A:' + lastCol + ', (ROW(' + src + 'A:A)=1)+(' + src + c + ':' + c + '="' + bat.replace(/"/g, '') + '"))');
+    APP.DATE_COLUMNS.Maintenance.forEach(function (h) {
+      var i = mh.indexOf(h) + 1;
+      if (i > 0) sh.getRange(2, i, sh.getMaxRows() - 1, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
+    });
+  });
+
+  var pw = prepDerived_(ss, APP.SHEETS.PENDING);
+  var head = ['Maintenance ID', 'Line', 'Baterai', 'Yang tertunda', 'Tenggat', 'Teknisi terakhir', 'Lama pending (jam)'];
+  pw.getRange(1, 1, 1, head.length).setValues([head]).setFontWeight('bold');
+  var parts = ['Maintenance ID', 'Line', 'Baterai', 'Yang tertunda', 'Tenggat', 'Teknisi terakhir'].map(function (h) {
+    return src + col(h) + '2:' + col(h);
+  });
+  parts.push('ROUND((NOW()-' + src + col('Status sejak') + '2:' + col('Status sejak') + ')*24,1)');
+  pw.getRange('A2').setFormula('=IFERROR(SORT(FILTER({' + parts.join(', ') + '}, ' + src + col('Status') + '2:' + col('Status') + '="' +
+    APP.STATUS.PENDING + '"), 7, FALSE), "")');
+  pw.getRange(2, 5, pw.getMaxRows() - 1, 1).setNumberFormat('yyyy-mm-dd hh:mm');
+}
+
+function prepDerived_(ss, name) {
+  var sh = ss.getSheetByName(name) || ss.insertSheet(name);
+  sh.clear();
+  sh.setFrozenRows(1);
+  return sh;
 }

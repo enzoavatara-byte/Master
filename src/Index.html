@@ -1,32 +1,49 @@
 <!DOCTYPE html>
-<html>
+<html lang="id">
 <head>
   <base target="_top">
   <meta charset="utf-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;700;800&display=swap" rel="stylesheet">
   <?!= include('Styles'); ?>
 </head>
 <body>
-  <header class="top">
-    <div class="inner">
-      <b>MTTR</b>
-      <div class="who" id="who">Memuat…</div>
-    </div>
-  </header>
-
-  <main class="wrap">
-    <div id="flash"></div>
-    <section id="view-home"><div class="loading">Memuat…</div></section>
-    <section id="view-history" class="hidden"></section>
-    <section id="view-review" class="hidden"></section>
-    <section id="view-qr" class="hidden"></section>
+  <main class="app">
+    <section id="view-home" class="view"><div class="loading">Memuat…</div></section>
+    <section id="view-line" class="view hidden"></section>
+    <section id="view-history" class="view hidden"></section>
+    <section id="view-review" class="view hidden"></section>
+    <section id="view-pending" class="view hidden"></section>
+    <section id="view-qr" class="view hidden"></section>
   </main>
 
   <nav class="tabs" id="tabs">
-    <button data-tab="home" class="active">Beranda</button>
-    <button data-tab="history">Riwayat</button>
-    <button data-tab="review" class="hidden" id="tab-review">Review<span id="review-badge"></span></button>
-    <button data-tab="qr" class="hidden" id="tab-qr">QR Line</button>
+    <div class="inner">
+      <button data-tab="home" class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>
+        Beranda
+      </button>
+      <button data-tab="history">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>
+        Riwayat
+      </button>
+      <button data-tab="review">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></svg>
+        Review<span id="badge-review"></span>
+      </button>
+      <button data-tab="pending">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>
+        Pending<span id="badge-pending"></span>
+      </button>
+      <button data-tab="qr" id="tab-qr" class="hidden">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v7h-4M14 18v3"/></svg>
+        QR Line
+      </button>
+    </div>
   </nav>
+
+  <div id="sheet-root"></div>
+  <div id="toast-root"></div>
 
   <script>
     var INITIAL_LINE_ID = <?!= JSON.stringify(lineId) ?>;
