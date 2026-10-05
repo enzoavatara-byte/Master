@@ -18,6 +18,7 @@ function doGet(e) {
   var t = HtmlService.createTemplateFromFile('Index');
   // Whitelist karakter: nilai ini ditanam ke <script> di Index.html.
   t.lineId = String(params.line || '').trim().replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 50);
+  t.mesinId = String(params.mesin || '').trim().replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 50);
   return t.evaluate()
     .setTitle(APP.NAME)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1')
@@ -43,7 +44,7 @@ function escapeHtml_(s) {
 }
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('MTTR 2.0')
+  SpreadsheetApp.getUi().createMenu(APP.NAME)
     .addItem('Setup / perbaiki sheet & trigger', 'setup')
     .addItem('Jalankan cek 3/4 jam sekarang', 'checkTimeouts')
     .addToUi();
@@ -103,10 +104,36 @@ function setup() {
   var opts = readTable_(APP.SHEETS.OPTIONS);
   Object.keys(APP.OPTION_DEFAULTS).forEach(function (jenis) {
     if (opts.some(function (r) { return String(r['Jenis']).trim() === jenis; })) return;
-    APP.OPTION_DEFAULTS[jenis].forEach(function (v) {
-      appendObj_(APP.SHEETS.OPTIONS, { 'Jenis': jenis, 'Nilai': v, 'Aktif': 'Ya' });
+    APP.OPTION_DEFAULTS[jenis].forEach(function (v, i) {
+      appendObj_(APP.SHEETS.OPTIONS, { 'Jenis': jenis, 'Nilai': v, 'Urutan': i + 1, 'Aktif': 'Ya' });
     });
   });
+
+  if (readTable_(APP.SHEETS.FACTORY).length === 0) {
+    APP.FACTORY_DEFAULTS.forEach(function (f) {
+      appendObj_(APP.SHEETS.FACTORY, { 'Factory ID': f[0], 'Nama': f[1], 'Lokasi': f[2], 'Aktif': 'Ya' });
+    });
+  }
+  if (readTable_(APP.SHEETS.PROJECTS).length === 0) {
+    APP.PROJECT_DEFAULTS.forEach(function (p) {
+      appendObj_(APP.SHEETS.PROJECTS, { 'Factory ID': p[0], 'Baterai': p[1], 'Fase': '', 'Aktif': 'Ya' });
+    });
+  }
+
+  // Form: isi default jika kosong; kembalikan field sistem yang terhapus (tanpa menimpa yang sudah diubah).
+  var formRows = readTable_(APP.SHEETS.FORM);
+  APP.FORM_DEFAULTS.forEach(function (d) {
+    var key = d[0] + '.' + d[1];
+    var exists = formRows.some(function (r) { return String(r['Form']).trim() + '.' + String(r['Field']).trim() === key; });
+    var mustExist = formRows.length === 0 || APP.LOCKED_FIELDS.indexOf(key) !== -1;
+    if (!exists && mustExist) {
+      appendObj_(APP.SHEETS.FORM, { 'Form': d[0], 'Field': d[1], 'Label': d[2], 'Tipe': d[3], 'Sumber': d[4],
+        'Wajib': d[5], 'Lainnya isi sendiri': d[6], 'Urutan': d[7], 'Aktif': 'Ya' });
+    }
+  });
+
+  resetMaster_();
+  ensureMaintColumns_(customColumns_(masterData_()));
 
   if (readTable_(APP.SHEETS.USERS).length === 0) {
     var me = currentEmail_();
@@ -135,7 +162,9 @@ function buildDerivedSheets_(ss) {
   var lastCol = colLetter_(mh.length);
   var src = "'" + APP.SHEETS.MAINT + "'!";
 
-  getOptions_()['Baterai'].forEach(function (bat) {
+  var md = masterData_();
+  var batteries = md.allBatteries.length ? md.allBatteries : APP.PROJECT_DEFAULTS.map(function (p) { return p[1]; });
+  batteries.forEach(function (bat) {
     var sh = prepDerived_(ss, APP.SHEETS.MAINT + ' ' + bat);
     var c = col('Baterai');
     sh.getRange('A1').setFormula('=FILTER(' + src + 'A:' + lastCol + ', (ROW(' + src + 'A:A)=1)+(' + src + c + ':' + c + '="' + bat.replace(/"/g, '') + '"))');

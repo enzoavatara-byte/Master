@@ -9,6 +9,7 @@ function currentEmail_() {
 
 /** @return {{email:string, authorized:boolean, name?:string, role?:string}} */
 function getCurrentUser_() {
+  resetMaster_(); // master data (sheet) dibaca ulang setiap request
   var email = currentEmail_();
   if (!email) return { email: '', authorized: false };
   var rows = readTable_(APP.SHEETS.USERS);
