@@ -1,158 +1,148 @@
-# MTTR Maintenance 2.0
+# MTTR Maintenance 2.1
 
-Pencatatan maintenance line via scan QR. Google Apps Script + Google Sheets, mobile-first.
-**MTTR hanya dihitung dari waktu kerja Aktif.** Waktu Pause dan Pending dicatat terpisah. Semua waktu dicatat oleh server (Asia/Jakarta).
+Pencatatan maintenance via scan QR. Google Apps Script + Google Sheets, mobile-first.
+**MTTR = rata-rata waktu *aktif* pekerjaan Corrective** (Pause, Pending, dan Preventive dicatat terpisah). Semua waktu dicatat server (Asia/Jakarta).
+
+**Prinsip utama 2.1: aplikasi diubah lewat Google Sheet, bukan lewat kode.** Factory, project baterai, line & sub-line, mesin, BOM,
+isi dropdown, field form (label, wajib, urutan, field tambahan), dan batas waktu semuanya berupa sheet. Ubah sheet → request berikutnya langsung memakai data baru, tanpa deploy ulang.
 
 ```
-scan QR → Aktif ⇄ Pause
-          Aktif/Pause → Pending → (lanjut, user mana pun, konfirmasi QR) → Aktif
-          Aktif → Completed          (masuk MTTR)
-          Aktif/Pause → Cancelled    (alasan wajib → review Admin)
-          > 3 jam tanpa konfirmasi → peringatan (banner + email) → tidak dijawab s/d 4 jam → Abandoned (review Admin)
+scan QR line/mesin → (pilih mesin) → MULAI → Aktif ⇄ Pause
+                                     Aktif/Pause → Pending → (lanjut, user mana pun, konfirmasi QR) → Aktif
+                                     Aktif → Completed          (Corrective → masuk MTTR)
+                                     Aktif/Pause → Cancelled    (alasan wajib → review Admin)
+                                     > 3 jam tanpa konfirmasi → peringatan → tidak dijawab s/d 4 jam → Abandoned
 ```
 
-Versi 1 (trial `IN_PROGRESS → COMPLETED`) masih ada di branch `claude/google-app-script-web-app-waahwz`.
-2.0 **bukan upgrade in-place**: skema sheet berbeda. Pakai spreadsheet baru.
+Versi sebelumnya: 2.0 ada di riwayat git branch ini, v1 di branch `claude/google-app-script-web-app-waahwz`.
 
 ---
 
-## 1. Apa yang baru dibanding v1
+## 1. Yang baru di 2.1
 
-| v1 | 2.0 |
+| Permintaan | Implementasi |
 |---|---|
-| Durasi = Selesai − Mulai | Tiga timer terpisah: aktif, pause, pending. MTTR = rata-rata **waktu aktif** |
-| Tidak ada Pause / Pending | Pause (alasan 1 tap), Pending (satu form), lanjut Pending oleh teknisi lain dengan ID yang sama |
-| Form teks bebas | Dropdown Masalah / Penyebab / Penanganan / Part + jumlah, dari sheet `Pilihan` |
-| ABANDONED setelah 8 jam, tanpa peringatan | Peringatan 3 jam ke teknisi (banner + email), Abandoned 4 jam jika tidak dijawab |
-| Tanpa log | Tab `Log` append-only: setiap kejadian tercatat, semua durasi bisa diaudit ulang |
-| ID acak `MT-20260930-...` | ID terbaca: `L03-260930-02` (line + tanggal + urut) |
-| 4 tab, tampilan polos | Beranda dengan grafik 7 hari + MTTR + aktivitas terbaru, tab Pending gaya kartu, bottom sheet untuk form |
-| Tab turunan tidak ada | `Maintenance E22H`, `Maintenance E245`, `Pending Work` otomatis via rumus FILTER |
+| Editable tanpa coding | Sheet `Factory`, `Projects`, `Lines`, `Mesin`, `BOM`, `Pilihan`, `Form`, `Config` (§3) |
+| Pilihan cepat + isian bebas | Setiap field pilihan bisa punya **"Lainnya"** → kolom isian (wajib diisi). Disimpan `Lainnya: <teks>` |
+| Factory 1 = VF7 & Limo7, Factory 2 = E22H & E245 | Sheet `Projects`. Line di Factory 2 hanya menampilkan E22H/E245 |
+| Line A & B di sebagian line | Tiap sub-line = baris sendiri di `Lines` + kolom `Grup` (mis. `L03`). Mesin/BOM bisa dipasang di Grup |
+| Tracking per mesin | Sheet `Mesin`, mesin dipilih saat Mulai (atau **QR mesin** = langsung terpilih). **Kunci per mesin**: 2 teknisi bisa kerja di 2 mesin pada line yang sama |
+| Preventive / Corrective | Dipilih saat Mulai (default Corrective). Preventive **tidak masuk MTTR** (`Config` → `MTTR_TIPE`) |
+| BOM sparepart per line | Sheet `BOM`; tampil di halaman line; part BOM line itu muncul paling atas di form Selesai |
+| Cari line jika QR tidak berfungsi | "Cari line" dengan filter factory/baterai + pencarian |
+| Filter factory/baterai/line | Satu filter di Beranda, Pending, Review, Riwayat, Dashboard (tersimpan di HP) |
+| Dashboard MTTR | MTTR Corrective, Corrective vs Preventive, tren 12 minggu, **mesin paling sering bermasalah**, line terbanyak, masalah, teknisi, isian "Lainnya" terbanyak, **status project** |
+| Scan QR tanpa keluar web app | Tombol "SCAN QR" di Beranda (kamera di dalam app). Cadangan: aplikasi kamera HP / cari line |
 
-Tap dari scan QR sampai timer jalan: **1 tap** (baterai sudah terpilih = baterai terakhir di line itu).
+Dari scan sampai timer jalan: **QR mesin = 1 tap** (Mulai), **QR line = 2 tap** (mesin → Mulai). Tipe dan baterai sudah terisi default.
 
 ---
 
-## 2. Struktur
+## 2. Upgrade dari 2.0 (atau install baru)
 
-| File | Isi |
+**File di Apps Script** (nama sama dengan `src/`, tanpa ekstensi):
+
+| Jenis | Nama | Status di 2.1 |
+|---|---|---|
+| Script | `Config` | **berubah** |
+| Script | `Master` | **BARU**: buat file ini |
+| Script | `Db` | tetap |
+| Script | `Auth` | **berubah** |
+| Script | `Maintenance` | **berubah** |
+| Script | `Api` | **berubah** |
+| Script | `Code` | **berubah** |
+| HTML | `Index` | **berubah** |
+| HTML | `App` | **berubah** |
+| HTML | `Styles` | **berubah** |
+| HTML | `Message` | tetap |
+| JSON | `appsscript.json` | tetap |
+
+Langkah:
+1. Copy-paste semua file yang berubah + buat file script `Master`. Ctrl+S.
+2. Jalankan **`setup`** lagi. Aman untuk data 2.0: kolom baru ditambah di kanan, data lama tidak dihapus, dan sheet baru dibuat beserta isi awalnya.
+3. Isi sheet sesuai §3 (minimal: kolom `Factory ID` di `Lines`, dan `Mesin` jika ingin tracking per mesin).
+4. **Deploy → Manage deployments → ✏️ → New version → Deploy.** Bukan "New deployment" (URL berubah, semua QR mati).
+5. Cetak ulang QR **hanya jika** menambah QR mesin (Dashboard → tombol **QR**). QR line lama tetap berfungsi.
+
+Install baru dari nol: sama seperti 2.0 (buat spreadsheet → Extensions → Apps Script → paste 11 file + `appsscript.json` → Run `setup` → Deploy web app *Execute as: User accessing*, *Anyone with Google account* → share spreadsheet sebagai Editor ke semua user).
+
+---
+
+## 3. Panduan edit sheet (apa yang diubah, di mana)
+
+Aturan umum: **kolom `Aktif` boleh kosong = aktif** (kecuali di `Users`, wajib `Ya`). Matikan dengan `Tidak`; **jangan hapus baris**, karena riwayat masih merujuk ke baris itu.
+Nama header kolom jangan diganti. Urutan kolom boleh diubah.
+
+| Sheet | Untuk apa | Kolom & contoh |
+|---|---|---|
+| `Factory` | Daftar factory/gedung | `F1` · Factory 1 · Bogor |
+| `Projects` | **Baterai per factory** + status project di dashboard | `F1` · `VF7` · Fase `Trial` · Target MTTR `45` · Catatan |
+| `Lines` | Satu baris = satu QR | `L03-A` · Formation 1A · `F1` · Baterai (kosong = semua project F1; isi `VF7` untuk membatasi) · Grup `L03` · Area |
+| `Mesin` | Daftar mesin per line | `M-CHG` · Charger · Line ID `L03` (Grup → ada di L03-A & L03-B) atau `L03-A` (hanya di A) |
+| `BOM` | Sparepart per line | Line ID (`L01` / Grup `L03` / `*` = semua line) · Mesin ID (opsional) · Part Number · Nama Part · Qty · Satuan · Lokasi Simpan · Stok Minimum |
+| `Pilihan` | Isi semua dropdown | Jenis · Nilai · Urutan. Jenis: `Tipe Maintenance`, `Masalah`, `Penyebab`, `Penanganan`, `Part`, `Alasan Pause`, `Yang Tertunda`, `Alasan Cancel`, atau jenis baru buatan sendiri |
+| `Form` | Field form | Form · Field · Label · Tipe · Sumber · Wajib · Lainnya isi sendiri · Urutan · Aktif (detail di bawah) |
+| `Config` | Aturan & batas | `WARN_HOURS` 3 · `ABANDON_HOURS` 4 · `EMAIL_PERINGATAN` Ya/Tidak · `SHIFT_MULAI` · `MTTR_TIPE` Corrective |
+| `Users` | Akses | Email · Nama · Peran (`Teknisi`/`Admin`) · Aktif (`Ya`) |
+
+### Sheet `Form`: mengubah form tanpa coding
+- **Form**: `Mulai`, `Pause`, `Pending`, `Selesai`, `Cancel`.
+- **Ganti label / urutan / wajib**: ubah kolom `Label`, `Urutan`, `Wajib`.
+- **Nyalakan/matikan "Lainnya → isi sendiri"**: kolom `Lainnya isi sendiri` (`Ya`/`Tidak`). Tidak perlu menulis "Lainnya" di `Pilihan`; otomatis ditambahkan.
+- **Tambah field baru** (mis. "Kondisi akhir mesin" di Selesai): tambah baris → Form `Selesai`, Field `Kondisi akhir`, Tipe `pilihan`, Sumber `Kondisi`, lalu isi Jenis `Kondisi` di `Pilihan`. Kolom dengan nama yang sama **dibuat otomatis** di `Maintenance`. Tipe: `pilihan` / `teks` / `angka`.
+- **Field sistem** (`Tipe` = `sistem`, plus Yang tertunda, Tenggat, Part, Alasan cancel): label/urutan boleh diubah, tapi **tidak bisa dimatikan atau dihapus**. Kalau terhapus, app memakai default dan `setup` mengembalikan barisnya.
+- Baris yang tidak valid (tipe tidak dikenal, nama field bentrok dengan kolom sistem, baterai tidak ada di `Projects`) **tidak membuat app error**: dilewati dan didaftar di **Dashboard → "Perlu dicek di Google Sheet"** (Admin).
+
+### Field mana yang pilihan saja vs isian bebas (dan kenapa)
+| Field | Bentuk |
 |---|---|
-| `src/Config.js` | Nama sheet, header, status, peran, isi awal dropdown, config default |
-| `src/Db.js` | Helper baca/tulis sheet berdasarkan header, lock, format |
-| `src/Auth.js` | Cocokkan email login ke sheet `Users` |
-| `src/Maintenance.js` | State machine (start, pause, resume, pending, lanjut, complete, cancel) + trigger `checkTimeouts` |
-| `src/Api.js` | Dashboard, halaman line, pending, riwayat, review, QR |
-| `src/Code.js` | `doGet`, `setup()`, rumus tab turunan, menu spreadsheet |
-| `src/Index.html`, `App.html`, `Styles.html` | UI satu halaman, 5 tab |
-| `src/Message.html` | Halaman Access Denied / error |
-| `test/run.js` | 22 test logika server dengan mock Sheets + jam palsu |
-| `test/preview.js` | Preview UI lokal tanpa Google, dengan data contoh |
+| Masalah, Penyebab, Penanganan, Mesin, Part, Alasan Pause, Yang Tertunda, Alasan Cancel | pilihan + "Lainnya" → isian |
+| Pekerjaan dilakukan (pending) | teks wajib |
+| Catatan | teks opsional |
+| Factory, Baterai, Line, Tipe, Tenggat, Qty | **pilihan saja**: ini kunci filter & dashboard; isian bebas = data tercecer |
 
-### Sheet
+Isian bebas murni (tanpa pilihan) membuat dashboard tidak berguna ("sensor eror" ≠ "sensor error"). Rutinitasnya: seminggu sekali buka **Dashboard → "Isian Lainnya terbanyak"**, lalu jadikan yang sering muncul sebagai pilihan tetap di `Pilihan`/`Mesin`.
 
-| Tab | Diisi oleh | Kolom |
+---
+
+## 4. Cara pakai teknisi
+
+- **Mulai**: tap **SCAN QR** (atau kamera HP) → chip mesin (sudah terpilih jika pakai QR mesin) → **MULAI**. Mesin yang sedang dikerjakan tampil abu-abu beserta nama teknisinya.
+- **Pause**: tap alasan → langsung tersimpan. "Lainnya" → ketik alasan → Pause.
+- **Pending**: satu form. **Lanjutkan** dari tab Pending wajib scan QR di dalam app; lewat kamera HP, halaman line sudah menampilkan tombol Lanjutkan.
+- **Selesai**: pilih Masalah/Penyebab/Penanganan; Part: "Tidak ada" atau pilih dari **BOM line** / part umum / "Lainnya".
+- **QR tidak berfungsi**: Beranda → **Cari line**, filter factory/baterai, ketik nama.
+
+---
+
+## 5. Keputusan admin yang masih berjalan (default saat ini)
+
+| Pertanyaan | Default | Diubah di |
 |---|---|---|
-| `Log` | Kode, **tambah baris saja** | Timestamp, Maintenance ID, Kejadian, User, Detail |
-| `Maintenance` | Kode, satu baris per ID (dicari berdasarkan ID, bukan nomor baris) | Kolom spec + tambahan (lihat §7) |
-| `Maintenance E22H` / `E245` | Rumus FILTER (satu tab per baterai di `Pilihan`) | Sama dengan Maintenance |
-| `Pending Work` | Rumus FILTER status = Pending | ID, Line, Baterai, Yang tertunda, Tenggat, Teknisi terakhir, Lama pending (jam) |
-| `Users` | Admin | Email, Nama, Peran (`Teknisi` / `Admin`), Aktif (`Ya` / `Tidak`) |
-| `Lines` | Admin | Line ID, Nama Line, Area, Aktif |
-| `Pilihan` | Admin | Jenis, Nilai, Aktif. Jenis: Baterai, Masalah, Penyebab, Penanganan, Part, Alasan Pause, Yang Tertunda, Alasan Cancel |
-| `Config` | Admin | WARN_HOURS (3), ABANDON_HOURS (4), EMAIL_PERINGATAN (Ya/Tidak), SHIFT_MULAI (07:00,15:00,23:00) |
-
-Kolom dibaca berdasarkan **nama header**. Boleh geser kolom, jangan ganti nama header. Jika kolom `Maintenance` digeser, jalankan `setup()` lagi supaya rumus tab turunan ikut.
-
-### Hak akses
-
-| Aksi | Teknisi | Admin |
-|---|---|---|
-| Mulai, pause, resume, pending, selesai pekerjaan sendiri | ✓ | ✓ |
-| Lanjutkan pending siapa pun (dengan scan QR) | ✓ | ✓ |
-| Cancel pekerjaan sendiri | ✓ | ✓ |
-| Cancel pekerjaan orang lain | – | ✓ |
-| Review | lihat item miliknya, tandai Pending "sudah dicek" | semua; putuskan Cancelled & Abandoned |
-| Riwayat | pekerjaan yang pernah diikuti | + semua teknisi, link ke Sheet |
-| QR Line | – | ✓ |
-
-Aturan keras (dijaga server + LockService): satu teknisi hanya punya satu pekerjaan Aktif/Pause; satu line hanya punya satu pekerjaan Aktif/Pause.
+| Preventive masuk MTTR? | Tidak | `Config` → `MTTR_TIPE` (mis. `Corrective,Preventive`) |
+| Mesin wajib dipilih saat Mulai? | Ya, jika line punya mesin di `Mesin` | `Form` → Mulai · Mesin ID · Wajib |
+| Mesin di Grup dipakai bersama sub-line? | **Tidak**: tiap sub-line punya unit mesin itu sendiri (kunci per sub-line) | Jika fisiknya satu mesin bersama, daftarkan di satu sub-line saja |
+| Bogor & Cikarang | Satu spreadsheet, dipisah `Factory` | (lihat §6 #2) |
+| Abandoned | Admin memilih: hitung (menit dikoreksi) atau keluarkan | Tab Review |
 
 ---
 
-## 3. Setup (±15 menit)
+## 6. Risiko nyata
 
-1. Buat **Google Spreadsheet baru** (mis. `MTTR 2.0 DB`).
-2. **Extensions → Apps Script**. Hapus isi `Code.gs`.
-3. Buat file sesuai `src/` (nama sama, tanpa ekstensi): Script `Config`, `Db`, `Auth`, `Maintenance`, `Api`, `Code`; HTML `Index`, `App`, `Styles`, `Message`. Copy-paste isinya.
-4. **Project Settings → centang "Show appsscript.json"**, ganti isinya dengan `src/appsscript.json`.
-5. Pilih fungsi `setup` → **Run** → izinkan akses. Ini membuat semua tab, rumus FILTER, isi dropdown awal, mendaftarkan Anda sebagai **Admin**, dan memasang trigger `checkTimeouts` (tiap 15 menit). Aman dijalankan ulang.
-6. Isi `Users`, `Lines`, dan **ganti isi `Pilihan` Masalah/Penyebab/Penanganan/Part** (isi awal hanya contoh).
-7. **Deploy → New deployment → Web app**: Execute as **User accessing the web app**, Who has access **Anyone with Google account**. Salin URL `/exec`.
-8. **Share spreadsheet** ke setiap email di `Users` sebagai **Editor** (wajib, lihat §6).
-9. Buka URL `/exec` → tab **QR Line** → **Cetak**, tempel di line.
-
-Alternatif clasp: `cp .clasp.json.example .clasp.json` (isi scriptId), `clasp push && clasp deploy`.
-
-**Update kode:** Deploy → Manage deployments → edit → Version: New version. **Jangan** "New deployment": URL berubah dan semua QR yang tertempel mati.
+1. **Teknisi tetap butuh akses Editor ke spreadsheet** (akun Gmail personal). Karena sekarang admin mengedit banyak sheet master, risiko salah edit naik. Mitigasi: `Maintenance` & `Log` diproteksi *warning-only*, master yang tidak valid menjadi peringatan (bukan error), dan Google Sheets punya version history. Solusi sebenarnya: Google Workspace.
+2. **Akun Google terpisah untuk Bogor & Cikarang = data terpisah**, sehingga dashboard tidak bisa membandingkan factory. Disarankan satu spreadsheet + kolom `Factory`. Jika harus dipisah, kodenya sama, tinggal di-deploy dua kali.
+3. **Kamera di dalam app tidak dijamin** (iframe Apps Script bisa memblokir). Ada cadangan, tapi **uji di HP teknisi asli** sebelum menjanjikan "scan tanpa keluar app".
+4. **Stok Minimum di BOM hanya angka referensi.** Tanpa pencatatan stok masuk/keluar, angka itu tidak akan pernah memberi peringatan. Tracking stok = proyek terpisah.
+5. **Performa**: tiap request membaca seluruh `Maintenance` + sheet master. Nyaman sampai beberapa ribu baris; di atas ~10 ribu, arsipkan per tahun.
 
 ---
 
-## 4. Alur pakai
-
-- **Mulai**: scan QR → halaman line → (baterai sudah terpilih) **MULAI MAINTENANCE**.
-- **Pause**: Pause → tap alasan (langsung tersimpan) → tombol besar **RESUME**.
-- **Pending**: satu form (sudah dikerjakan, yang tertunda, tenggat, catatan). Muncul di tab Pending semua user & di halaman line saat QR di-scan.
-- **Lanjutkan pending**: scan QR line → kartu pending → **Lanjutkan** (tanpa scan ulang). Dari tab Pending: Lanjutkan → scan QR di dalam app. Jika kamera tidak bisa dibuka di dalam app, app meminta scan dengan kamera HP (hasilnya sama).
-- **Selesai**: Masalah, Penyebab, Penanganan, Part (Tidak ada / pilih + jumlah), catatan. Pilih "Lainnya" → catatan wajib.
-- **Cancel**: alasan wajib → masuk review Admin, tidak masuk MTTR.
-- **Peringatan 3 jam**: banner di app + email → **Masih lanjut** (timer tidak direset), Pending, atau Cancel.
-
----
-
-## 5. Keputusan terbuka di spec → default yang dipakai
-
-Semua bisa diubah; ini dipilih supaya aplikasi bisa jalan sekarang, bukan karena pasti benar.
-
-| Pertanyaan di spec | Default di 2.0 | Cara ubah |
-|---|---|---|
-| Review Pending: apa yang direview? | Admin atau teknisi terkait menandai "sudah dicek" (+catatan). Status pending tidak berubah | `apiReview` di `Api.js` |
-| Siapa menetapkan tenggat, apa jika lewat? | Teknisi yang mem-pending. Lewat tenggat = merah & paling atas di tab Pending. Tidak ada eskalasi otomatis | – |
-| Abandoned: dikoreksi atau dikeluarkan? | Admin memilih per kasus: **Hitung** (isi menit aktif sebenarnya) atau **Keluarkan**. Catatan wajib | – |
-| Isi dropdown | Contoh generik di `Pilihan`. **Wajib diganti** bersama teknisi senior sebelum dipakai | Edit sheet `Pilihan` |
-| Email peringatan boleh? | Ya, bisa dimatikan | `Config` → `EMAIL_PERINGATAN` = `Tidak` |
-
----
-
-## 6. Risiko nyata (baca sebelum go-live)
-
-1. **Teknisi harus punya akses Editor ke spreadsheet** (akun Gmail personal memaksa "Execute as: User accessing"). Artinya mereka *bisa* mengedit sheet langsung dan melewati validasi. Mitigasi di 2.0: tab `Maintenance` dan `Log` diproteksi *warning-only*, dan `Log` memungkinkan audit. Solusi sebenarnya: **Google Workspace** (deploy "Execute as: Me", sheet tidak perlu di-share).
-2. **Kamera di dalam Apps Script web app tidak dijamin jalan** (iframe Google bisa memblokir izin kamera). Fallback-nya sudah ada (scan pakai kamera HP), tapi **uji di HP teknisi yang sebenarnya** sebelum memutuskan alur konfirmasi QR.
-3. **Konfirmasi QR mencegah kelalaian, bukan kecurangan.** Isi QR hanya URL `?line=L03`. Orang yang niat bisa mengetik URL itu. Kalau ini masalah, yang dibutuhkan adalah QR bertoken yang dirotasi, bukan fitur UI.
-4. **Pause/resume dihitung sebagai "konfirmasi masih bekerja"** untuk timer 3 jam (lihat §7). Jika teknisi pause lalu pulang, peringatan baru muncul 3 jam setelah pause itu.
-5. **Kuota Gmail personal**: ±100 email/hari dan 90 menit runtime trigger/hari. Trigger 15 menit = 96 run/hari (<1 detik per run). Aman di volume normal.
-6. **Performa**: setiap aksi membaca seluruh `Maintenance`. Nyaman sampai beberapa ribu baris; di atas ~10.000 perlu arsip per tahun. `Log` hanya dibaca penuh saat membuka Detail.
-
----
-
-## 7. Deviasi dari spec (sengaja)
-
-| Spec | Implementasi | Alasan |
-|---|---|---|
-| Satu tab `Master` untuk user, line, dropdown | Tiga tab: `Users`, `Lines`, `Pilihan` (+ `Config`) | Tiga tabel dengan header berbeda di satu tab tidak bisa dibaca berdasarkan header. Rentan rusak saat admin menambah baris |
-| Kolom Maintenance sesuai spec | + `Masuk MTTR`, `Status sejak`, `Konfirmasi terakhir`, `Peringatan pada`, `Teknisi terlibat`, `Pekerjaan dilakukan`, `Catatan`, `Direview oleh/pada`, `Catatan review` | `Status sejak` = dasar akumulasi timer. `Masuk MTTR` membuat rumus MTTR di sheet trivial (`AVERAGEIF`) dan memisahkan Abandoned yang dikoreksi manusia |
-| 3 jam "sejak mulai atau konfirmasi terakhir" | Pause & resume juga dihitung konfirmasi | Teknisi yang baru menekan tombol jelas masih ada. Tanpa ini, orang yang pause 2j50m lalu resume langsung kena peringatan |
-| Abandoned setelah 4 jam | Abandoned setelah 4 jam **dan** minimal 1 jam sejak peringatan | Jika trigger telat / script mati, teknisi tidak boleh langsung Abandoned tanpa sempat diperingatkan |
-| Selesai dari Aktif | Dari Pause harus Resume dulu | Sesuai flowchart. Selesai saat Pause akan membuat waktu terakhir ambigu |
-| Peringatan tampil di Review admin "dengan pilihan" | Admin melihat daftar peringatan (read-only). Jawaban tetap dari teknisi | Admin tidak tahu apakah pekerjaan masih berjalan. Yang tahu teknisi (alasan yang sama dengan spec) |
-
----
-
-## 8. Test & preview
+## 7. Test & preview
 
 ```bash
-npm test          # 22 test logika server (mock Sheets + jam palsu)
-npm run preview   # http://localhost:8787/?as=owner@gmail.com  (tambah &line=L01 untuk simulasi scan QR)
+npm test          # 36 test logika server (mock Sheets + jam palsu)
+npm run preview   # http://localhost:8787/?as=owner@gmail.com
+                  # simulasi QR: &line=L01   QR mesin: &line=L11&mesin=M-E1
 ```
-User contoh di preview: `owner@gmail.com` (Admin), `budi@`, `andi@`, `sari@gmail.com` (Teknisi).
-
-**Tidak** diuji: izin OAuth asli, trigger sungguhan, rumus FILTER di Sheets asli, kamera di HP sungguhan, email. Itu harus diuji manual pada hari pertama trial.
+User preview: `owner@gmail.com` (Admin), `budi@`, `andi@`, `sari@gmail.com` (Teknisi). Data: 2 factory, line L03 dengan sub-line A/B, mesin, BOM.
+**Tidak** diuji: OAuth asli, trigger sungguhan, rumus FILTER di Sheets asli, kamera di HP sungguhan, email.

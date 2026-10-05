@@ -3,11 +3,21 @@
   'use strict';
 
   var QR_FRESH_MS = 15 * 60 * 1000;  // entri via QR dianggap "sedang di mesin" selama 15 menit
+  var FILTER_KEY = 'mttr21.filter';
+  var OTHER = 'Lainnya';
   var EVENT_LABEL = {
     'start': 'Mulai', 'pause': 'Pause', 'resume': 'Lanjut kerja', 'pending': 'Pending', 'lanjut': 'Pending dilanjutkan',
     'complete': 'Selesai', 'cancel': 'Cancel', 'peringatan': 'Peringatan', 'masih lanjut': 'Konfirmasi masih lanjut',
     'abandoned': 'Abandoned', 'review': 'Review'
   };
+
+  function loadFilter() {
+    try { var f = JSON.parse(localStorage.getItem(FILTER_KEY) || '{}'); return { factory: f.factory || '', baterai: f.baterai || '', line: f.line || '' }; }
+    catch (e) { return { factory: '', baterai: '', line: '' }; }
+  }
+  function saveFilter() {
+    try { localStorage.setItem(FILTER_KEY, JSON.stringify(state.filter)); } catch (e) { /* mode privat: abaikan */ }
+  }
 
   var state = {
     boot: null,
@@ -15,8 +25,12 @@
     tab: 'home',
     lineView: null,
     qr: INITIAL_LINE_ID ? { line: INITIAL_LINE_ID.toUpperCase(), at: Date.now() } : null,
+    filter: loadFilter(),   // dipakai bersama Beranda, Pending, Review, Riwayat, Dashboard
+    q: { pending: '', review: '', history: '' },
     pendingFilter: 'ALL',
-    history: { status: '', battery: '', scope: 'mine', data: null },
+    history: { status: '', tipe: '', scope: 'mine', data: null },
+    dash: { periode: 30 },
+    bomCache: {},
     sheetClose: null
   };
 
@@ -61,12 +75,15 @@
     var d = new Date(new Date(iso).getTime() + 7 * 3600000); // WIB, tanpa DST
     return two(d.getUTCDate()) + '/' + two(d.getUTCMonth() + 1) + ' ' + two(d.getUTCHours()) + ':' + two(d.getUTCMinutes());
   }
+  function mnt(v) { return v == null ? '–' : Math.round(v) + ''; }
   function initials(name) {
     return String(name || '?').split(/[\s@.]+/).filter(String).slice(0, 2).map(function (p) { return p[0]; }).join('').toUpperCase() || '?';
   }
   function pill(st) { return '<span class="pill st-' + esc(st) + '">' + esc(st) + '</span>'; }
+  function tipeTag(t) { return t && t !== 'Corrective' ? ' <span class="tag-lite">' + esc(t) + '</span>' : ''; }
   function isAdmin() { return state.boot && state.boot.user.role === 'Admin'; }
   function me() { return state.boot.user; }
+  function M() { return state.boot.master; }
   function busy(btn, on, label) {
     if (!btn) return;
     if (on) { btn.dataset.label = btn.innerHTML; btn.innerHTML = label || 'Memproses…'; btn.disabled = true; }
@@ -81,6 +98,7 @@
   function freshQr(line) {
     return state.qr && state.qr.line === String(line).toUpperCase() && Date.now() - state.qr.at < QR_FRESH_MS;
   }
+  function lineTitle(r) { return esc(r.line) + (r.mesin ? ' · ' + esc(r.mesin) : (r.lineName ? ' · ' + esc(r.lineName) : '')); }
 
   // ---------- live timers (tampilan saja; data dari server) ----------
   function liveMs(el) {
@@ -108,22 +126,29 @@
   });
 
   function setView(id) {
-    ['home', 'line', 'history', 'review', 'pending', 'qr'].forEach(function (v) {
+    ['home', 'line', 'history', 'review', 'pending', 'dashboard', 'qr'].forEach(function (v) {
       $('view-' + v).classList.toggle('hidden', v !== id);
     });
     window.scrollTo(0, 0);
+  }
+  function markTab(tab) {
+    var btns = document.querySelectorAll('nav.tabs button');
+    for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i].getAttribute('data-tab') === tab);
   }
 
   function showTab(tab) {
     closeSheet();
     state.tab = tab;
-    var btns = document.querySelectorAll('nav.tabs button');
-    for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i].getAttribute('data-tab') === tab);
+    markTab(tab);
     if (tab === 'home') { state.lineView = null; setView('home'); renderHome(); refresh(); }
     if (tab === 'history') { setView('history'); loadHistory(); }
     if (tab === 'review') { setView('review'); loadReview(); }
     if (tab === 'pending') { setView('pending'); loadPending(); }
-    if (tab === 'qr') { setView('qr'); loadQr(); }
+    if (tab === 'dashboard') { setView('dashboard'); loadDashboard(); }
+  }
+  function reloadTab() {
+    if (state.tab === 'home') { refresh(true); return; }
+    showTab(state.tab);
   }
 
   function setBadges(c) {
@@ -131,15 +156,111 @@
     $('badge-review').innerHTML = c.review ? '<span class="badge">' + c.review + '</span>' : '';
   }
 
+  // ---------- master: factory → baterai → line ----------
+  function factoryName(id) {
+    var f = M().factories.filter(function (x) { return x.id === id; })[0];
+    return f ? f.name : id;
+  }
+  function batteriesFor(factory) {
+    var out = [];
+    M().projects.forEach(function (p) {
+      if ((!factory || p.factory === factory) && out.indexOf(p.battery) === -1) out.push(p.battery);
+    });
+    return out;
+  }
+  function linesFor(f, q) {
+    q = String(q || '').trim().toLowerCase();
+    return M().lines.filter(function (l) {
+      if (f.factory && l.factory !== f.factory) return false;
+      if (f.baterai && l.batteries.indexOf(f.baterai) === -1) return false;
+      if (f.line && l.id !== f.line && l.grup !== f.line) return false;
+      if (q && (l.id + ' ' + l.name + ' ' + l.area + ' ' + l.grup + ' ' + factoryName(l.factory)).toLowerCase().indexOf(q) === -1) return false;
+      return true;
+    });
+  }
+  /** Pilihan "Line" di filter: Grup (mencakup sub-line) + Line ID. */
+  function lineChoices(f) {
+    var lines = linesFor({ factory: f.factory, baterai: f.baterai }), out = [], seen = {};
+    lines.forEach(function (l) {
+      if (l.grup && !seen[l.grup]) { seen[l.grup] = 1; out.push({ value: l.grup, label: l.grup + ' (semua sub-line)' }); }
+    });
+    lines.forEach(function (l) { if (!seen[l.id]) { seen[l.id] = 1; out.push({ value: l.id, label: l.id + (l.name ? ' · ' + l.name : '') }); } });
+    return out;
+  }
+  function serverFilter(view) {
+    return { factory: state.filter.factory, baterai: state.filter.baterai, line: state.filter.line, q: view ? state.q[view] || '' : '' };
+  }
+
+  // ---------- filter bar (Beranda, Pending, Review, Riwayat, Dashboard) ----------
+  function filterSummary() {
+    var f = state.filter, parts = [];
+    if (f.factory) parts.push(factoryName(f.factory));
+    if (f.baterai) parts.push(f.baterai);
+    if (f.line) parts.push(f.line);
+    return parts;
+  }
+  function filterBar(view, dark) {
+    var parts = filterSummary();
+    return '<div class="filterbar' + (dark ? ' on-dark' : '') + '">' +
+      (view ? '<input type="search" class="search" data-search="' + view + '" placeholder="Cari line, mesin, ID, masalah…" value="' + esc(state.q[view] || '') + '">' : '') +
+      '<button class="fbtn' + (parts.length ? ' on' : '') + '" data-open-filter>' +
+      '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>' +
+      '<span>' + (parts.length ? esc(parts.join(' · ')) : 'Filter') + '</span></button></div>';
+  }
+  var searchTimer;
+  function bindFilterBar(root, onChange) {
+    var b = root.querySelector('[data-open-filter]');
+    if (b) b.onclick = function () { openFilterSheet(onChange); };
+    var s = root.querySelector('[data-search]');
+    if (s) s.oninput = function () {
+      var v = this.value, view = this.getAttribute('data-search');
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () { state.q[view] = v; onChange(true); }, 350);
+    };
+  }
+  function openFilterSheet(onApply) {
+    var draft = { factory: state.filter.factory, baterai: state.filter.baterai, line: state.filter.line };
+    var s = openSheet('<h2>Filter</h2><p class="small muted">Berlaku di Beranda, Pending, Review, Riwayat & Dashboard. Tersimpan di HP ini.</p><div id="f-body" class="stack"></div>' +
+      '<div class="btn-row two" style="margin-top:16px"><button class="btn ghost" id="f-reset">Reset</button><button class="btn" id="f-apply">Terapkan</button></div>');
+    function draw() {
+      var bats = batteriesFor(draft.factory);
+      if (draft.baterai && bats.indexOf(draft.baterai) === -1) draft.baterai = '';
+      var lines = lineChoices(draft);
+      if (draft.line && !lines.some(function (l) { return l.value === draft.line; })) draft.line = '';
+      $('f-body').innerHTML =
+        '<div><label class="lbl">Factory</label>' + chips('factory', [{ value: '', label: 'Semua' }].concat(M().factories.map(function (f) {
+          return { value: f.id, label: f.name + (f.lokasi ? ' · ' + f.lokasi : '') };
+        })), { selected: draft.factory }) + '</div>' +
+        '<div><label class="lbl">Baterai / project</label>' + chips('baterai', [{ value: '', label: 'Semua' }].concat(bats), { selected: draft.baterai }) + '</div>' +
+        '<div><label class="lbl">Line</label><select id="f-line"><option value="">Semua line</option>' + lines.map(function (l) {
+          return '<option value="' + esc(l.value) + '"' + (l.value === draft.line ? ' selected' : '') + '>' + esc(l.label) + '</option>';
+        }).join('') + '</select></div>';
+      bindChips($('f-body'), function (name, val) { draft[name] = val; if (name === 'factory') { draft.line = ''; } draw(); });
+      $('f-line').onchange = function () { draft.line = this.value; };
+    }
+    draw();
+    $('f-reset').onclick = function () { draft = { factory: '', baterai: '', line: '' }; draw(); };
+    $('f-apply').onclick = function () {
+      state.filter = draft; saveFilter(); closeSheet(); onApply();
+    };
+    return s;
+  }
+
   // ---------- boot & refresh ----------
   function boot() {
-    call('apiBootstrap', INITIAL_LINE_ID || '').then(function (b) {
+    call('apiBootstrap', INITIAL_LINE_ID || '', INITIAL_MESIN_ID || '', serverFilter()).then(function (b) {
       state.boot = b;
       syncClock(b.serverNowIso);
-      $('tab-qr').classList.toggle('hidden', b.user.role !== 'Admin');
       setBadges(b.counts);
-      if (b.lineView) { state.lineView = b.lineView; setView('line'); renderLine(); }
-      else renderHome();
+      // filter tersimpan yang sudah tidak valid (factory/line dihapus dari sheet) dibersihkan
+      if (state.filter.factory && !M().factories.some(function (f) { return f.id === state.filter.factory; })) state.filter = { factory: '', baterai: '', line: '' };
+      if (b.lineView) {
+        if (b.lineView.line && !state.qr) state.qr = { line: b.lineView.line.id, at: Date.now() };
+        state.lineView = b.lineView; setView('line'); renderLine();
+      } else {
+        renderHome();
+        if (INITIAL_MESIN_ID) toast('QR mesin ' + INITIAL_MESIN_ID + ' tidak cocok dengan satu line. Pilih line-nya.', 'err');
+      }
     }).catch(function (e) {
       $('view-home').innerHTML = '<div class="card center" style="margin-top:40px"><h2>Gagal memuat</h2><p class="muted">' + esc(cleanErr(e)) +
         '</p><button class="btn" onclick="location.reload()">Coba lagi</button></div>';
@@ -147,13 +268,14 @@
   }
 
   var refreshing = false;
-  function refresh() {
+  function refresh(force) {
     if (!state.boot || refreshing) return Promise.resolve();
     refreshing = true;
-    return call('apiRefresh').then(function (r) {
+    return call('apiRefresh', serverFilter()).then(function (r) {
       syncClock(r.serverNowIso);
       var b = state.boot;
-      var changed = JSON.stringify(b.myOpen) !== JSON.stringify(r.myOpen) || JSON.stringify(b.recent) !== JSON.stringify(r.recent);
+      var changed = force || JSON.stringify(b.myOpen) !== JSON.stringify(r.myOpen) || JSON.stringify(b.recent) !== JSON.stringify(r.recent) ||
+        JSON.stringify(b.stats) !== JSON.stringify(r.stats);
       b.myOpen = r.myOpen; b.counts = r.counts; b.stats = r.stats; b.recent = r.recent;
       setBadges(r.counts);
       if (changed && state.tab === 'home' && !state.lineView && !state.sheetClose) renderHome();
@@ -172,23 +294,22 @@
     if (b.myOpen) {
       html += workCard(b.myOpen);
     } else {
-      html += '<div class="card dark"><div class="caps">Mulai kerja</div><h2 style="margin:6px 0 4px">Scan QR di line</h2>' +
-        '<p class="muted small" style="margin:0 0 16px">Buka kamera HP, arahkan ke QR yang ditempel di line. Halaman line terbuka otomatis.</p>' +
-        '<div class="row"><select id="manual-line" class="grow" style="color:var(--text)"><option value="">Pilih line manual…</option>' +
-        b.lines.map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.id + ' · ' + l.name) + '</option>'; }).join('') +
-        '</select><button class="btn ghost" id="btn-open-line" style="width:auto">Buka</button></div>' +
-        '<p class="tiny muted" style="margin:8px 0 0">Manual hanya jika QR rusak / tidak terbaca.</p></div>';
+      html += '<div class="card dark"><div class="caps">Mulai kerja</div><h2 style="margin:6px 0 14px">Scan QR di line / mesin</h2>' +
+        '<button class="btn xl" id="btn-scan">' +
+        '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="vertical-align:-5px;margin-right:8px"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>SCAN QR</button>' +
+        '<button class="btn ghost" id="btn-find-line" style="margin-top:10px">Cari line (jika QR rusak)</button></div>';
     }
-    html += weekCard(b.stats) + feedCard(b.recent);
+    html += filterBar(null) + weekCard(b.stats) + feedCard(b.recent);
     $('view-home').innerHTML = html;
 
-    if ($('btn-open-line')) $('btn-open-line').onclick = function () {
-      var v = $('manual-line').value;
-      if (v) openLine(v, this);
-    };
+    if ($('btn-scan')) $('btn-scan').onclick = scanAny;
+    if ($('btn-find-line')) $('btn-find-line').onclick = linePicker;
     bindWork(b.myOpen, $('view-home'));
+    bindFilterBar($('view-home'), function () { refresh(true); });
     var lh = $('link-history');
     if (lh) lh.onclick = function () { showTab('history'); };
+    var ld = $('link-dash');
+    if (ld) ld.onclick = function () { showTab('dashboard'); };
     tick();
   }
 
@@ -197,29 +318,55 @@
     var total = st.days.reduce(function (s, d) { return s + d.count; }, 0);
     return '<div class="card"><div class="caps">Maintenance selesai 7 hari (' + total + ')</div>' +
       '<div class="bars">' + st.days.map(function (d) {
-        return '<div class="bar"><span class="n">' + (d.count || '') + '</span><div class="track"><div class="fill" style="height:' +
+        return '<div class="bar" title="' + esc(d.label + ': ' + d.count + ' selesai') + '"><span class="n">' + (d.count || '') + '</span><div class="track"><div class="fill" style="height:' +
           Math.round(d.count / max * 100) + '%"></div></div><span class="lbl">' + esc(d.label) + '</span></div>';
       }).join('') + '</div>' +
-      '<div class="kpis"><div class="kpi"><span class="tiny muted">MTTR 7 hari</span><b>' +
+      '<div class="kpis"><div class="kpi"><span class="tiny muted">MTTR 7 hari (Corrective)</span><b>' +
       (st.mttrMin == null ? '–' : esc(Math.round(st.mttrMin)) + '<span class="small"> mnt</span>') + '</b></div>' +
-      '<div class="kpi"><span class="tiny muted">Dihitung</span><b>' + st.mttrN + '<span class="small"> pekerjaan</span></b></div></div>' +
-      '<p class="small" style="margin:14px 0 0"><button class="link" id="link-history">Lihat riwayat ›</button></p></div>';
+      '<div class="kpi"><span class="tiny muted">Selesai: corrective / preventive</span><b>' + st.mttrN + '<span class="small"> / ' + (st.otherN || 0) + '</span></b></div></div>' +
+      '<p class="small row between" style="margin:14px 0 0"><button class="link" id="link-history">Lihat riwayat ›</button><button class="link" id="link-dash">Dashboard ›</button></p></div>';
   }
 
   function feedCard(list) {
     return '<div class="card"><div class="caps">Aktivitas terbaru</div>' + (list.length ? '<ul class="feed">' + list.map(function (e) {
       return '<li><div class="avatar sm">' + esc(initials(e.userName)) + '</div><div class="grow">' +
         '<div class="row between small"><span class="muted">' + esc(e.userName) + '</span><span class="muted js-ago" data-iso="' + esc(e.whenIso) + '">' + esc(ago(e.whenIso)) + '</span></div>' +
-        '<div class="title">' + esc((e.line ? e.line + ' · ' : '') + (EVENT_LABEL[e.event] || e.event)) + '</div>' +
+        '<div class="title">' + esc((e.line ? e.line + (e.mesin ? ' · ' + e.mesin : '') + ' · ' : '') + (EVENT_LABEL[e.event] || e.event)) + '</div>' +
         '<div class="small muted clamp">' + esc(e.detail || e.id) + '</div></div></li>';
     }).join('') + '</ul>' : '<div class="empty small">Belum ada aktivitas.</div>') + '</div>';
   }
 
-  // ---------- kartu pekerjaan aktif (dipakai di Beranda & halaman line) ----------
+  // ---------- cari line (jika QR tidak berfungsi) ----------
+  function linePicker() {
+    var draft = { factory: state.filter.factory, baterai: state.filter.baterai, q: '' };
+    openSheet('<h2>Cari line</h2><input type="search" id="lp-q" class="search" placeholder="Ketik line, nama, area…" style="margin:10px 0">' +
+      '<div id="lp-f"></div><div id="lp-list" style="margin-top:12px"></div>');
+    function drawFilters() {
+      var bats = batteriesFor(draft.factory);
+      if (draft.baterai && bats.indexOf(draft.baterai) === -1) draft.baterai = '';
+      $('lp-f').innerHTML = chips('factory', [{ value: '', label: 'Semua factory' }].concat(M().factories.map(function (f) { return { value: f.id, label: f.name }; })), { selected: draft.factory }) +
+        '<div style="height:8px"></div>' + chips('baterai', [{ value: '', label: 'Semua baterai' }].concat(bats), { selected: draft.baterai });
+      bindChips($('lp-f'), function (n, v) { draft[n] = v; drawFilters(); drawList(); });
+    }
+    function drawList() {
+      var list = linesFor({ factory: draft.factory, baterai: draft.baterai }, draft.q).slice(0, 150);
+      $('lp-list').innerHTML = list.length ? list.map(function (l) {
+        return '<button class="item" data-pick="' + esc(l.id) + '"><div class="row between"><span class="t">' + esc(l.id) + (l.name ? ' · ' + esc(l.name) : '') + '</span>' +
+          (l.grup ? '<span class="tag-lite">' + esc(l.grup) + '</span>' : '') + '</div><div class="small muted">' + esc(factoryName(l.factory) || '-') +
+          (l.area ? ' · ' + esc(l.area) : '') + ' · ' + esc(l.batteries.join(', ')) + '</div></button>';
+      }).join('') : '<div class="empty">Tidak ada line yang cocok.</div>';
+      var bs = $('lp-list').querySelectorAll('[data-pick]');
+      for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { var id = this.getAttribute('data-pick'); closeSheet(); openLine(id, null); };
+    }
+    $('lp-q').oninput = function () { draft.q = this.value; drawList(); };
+    drawFilters(); drawList();
+  }
+
+  // ---------- kartu pekerjaan aktif ----------
   function workCard(r) {
     var paused = r.status === 'Pause';
-    var html = '<div class="card dark work"><div class="top"><div>' + pill(r.status) +
-      '<h2>' + esc(r.line) + (r.lineName ? ' · ' + esc(r.lineName) : '') + '</h2>' +
+    var html = '<div class="card dark work"><div class="top"><div>' + pill(r.status) + (r.tipe ? ' <span class="pill">' + esc(r.tipe) + '</span>' : '') +
+      '<h2>' + esc(r.line) + (r.mesin ? ' · ' + esc(r.mesin) : (r.lineName ? ' · ' + esc(r.lineName) : '')) + '</h2>' +
       '<div class="small muted">' + esc(r.id) + ' · Baterai ' + esc(r.battery) + '</div></div></div>';
     if (r.warnedIso) {
       html += '<div class="alert warn" style="margin:16px 0 0"><b>Sudah lebih dari ' + esc(state.boot.limits.warnHours) +
@@ -235,7 +382,7 @@
         '<button class="btn ghost" data-act="cancel">Cancel</button></div>';
     } else {
       html += '<div class="timer js-hms"' + timerAttrs(r.activeMin, r.sinceIso, true) + '>' + hms(0) + '</div>' +
-        '<div class="sub-timers muted"><span>Waktu aktif (MTTR)</span>' + (r.pauseMin ? '<span>Pause <b class="js-dur"' + timerAttrs(r.pauseMin, r.sinceIso, false) + '></b></span>' : '') + '</div>' +
+        '<div class="sub-timers muted"><span>Waktu aktif' + (r.tipe === 'Preventive' ? '' : ' (MTTR)') + '</span>' + (r.pauseMin ? '<span>Pause <b class="js-dur"' + timerAttrs(r.pauseMin, r.sinceIso, false) + '></b></span>' : '') + '</div>' +
         '<button class="btn xl ok" data-act="complete">✔ SELESAI</button>' +
         '<div class="btn-row" style="margin-top:10px"><button class="btn ghost" data-act="pause">Pause</button>' +
         '<button class="btn ghost" data-act="pending">Pending</button><button class="btn ghost" data-act="cancel">Cancel</button></div>';
@@ -300,18 +447,24 @@
     opts = opts || {};
     return '<div class="chips' + (opts.big ? ' big' : '') + '" data-chips="' + esc(name) + '">' + values.map(function (v) {
       var val = typeof v === 'string' ? v : v.value, label = typeof v === 'string' ? v : v.label;
-      return '<button type="button" class="chip' + (opts.selected === val ? ' on' : '') + '" data-val="' + esc(val) + '">' + esc(label) + '</button>';
+      var dis = typeof v === 'object' && v.disabled;
+      return '<button type="button" class="chip' + (opts.selected === val ? ' on' : '') + (dis ? ' busy' : '') + '" data-val="' + esc(val) + '"' + (dis ? ' disabled' : '') + '>' +
+        esc(label) + (typeof v === 'object' && v.sub ? '<span class="sub">' + esc(v.sub) + '</span>' : '') + '</button>';
     }).join('') + '</div>';
   }
   function bindChips(root, onChange) {
     var groups = root.querySelectorAll('[data-chips]');
     for (var i = 0; i < groups.length; i++) {
       (function (g) {
+        if (g.dataset.bound) return;
+        g.dataset.bound = '1';
         g.addEventListener('click', function (ev) {
           var c = ev.target.closest('.chip');
-          if (!c) return;
+          if (!c || c.disabled) return;
           var all = g.querySelectorAll('.chip');
           for (var j = 0; j < all.length; j++) all[j].classList.toggle('on', all[j] === c);
+          var wrap = g.closest('[data-field]');
+          if (wrap) toggleOther(wrap, c.getAttribute('data-val'));
           if (onChange) onChange(g.getAttribute('data-chips'), c.getAttribute('data-val'));
         });
       })(groups[i]);
@@ -321,102 +474,175 @@
     var c = root.querySelector('[data-chips="' + name + '"] .chip.on');
     return c ? c.getAttribute('data-val') : '';
   }
-  function selectHtml(id, list, placeholder) {
-    return '<select id="' + id + '"><option value="">' + esc(placeholder) + '</option>' +
-      list.map(function (v) { return '<option>' + esc(v) + '</option>'; }).join('') + '</select>';
+
+  // ---------- form engine (definisi dari sheet "Form") ----------
+  function fieldHtml(d) {
+    var label = '<label class="lbl">' + esc(d.label) + (d.required ? ' *' : ' <span class="muted">(opsional)</span>') + '</label>';
+    var body;
+    if (d.type === 'pilihan') {
+      body = d.options.length <= 8 ? chips('f', d.options) :
+        '<select data-input><option value="">Pilih…</option>' + d.options.map(function (o) { return '<option>' + esc(o) + '</option>'; }).join('') + '</select>';
+      if (d.other) body += '<input type="text" data-other class="hidden" style="margin-top:8px" placeholder="Tulis ' + esc(d.label.toLowerCase()) + '…">';
+    } else if (d.type === 'angka') {
+      body = '<input type="number" data-input inputmode="decimal">';
+    } else {
+      body = '<textarea data-input></textarea>';
+    }
+    return '<div data-field="' + esc(d.field) + '" data-type="' + esc(d.type) + '">' + label + body + '</div>';
+  }
+  function toggleOther(wrap, val) {
+    var o = wrap.querySelector('[data-other]');
+    if (!o) return;
+    o.classList.toggle('hidden', val !== OTHER);
+    if (val === OTHER) o.focus();
+  }
+  /** Render semua field sebuah form; field sistem memakai renderer khusus. */
+  function formHtml(form, sys) {
+    return M().forms[form].map(function (d) {
+      if (d.type === 'sistem') return sys && sys[d.field] ? sys[d.field](d) : '';
+      return fieldHtml(d);
+    }).join('');
+  }
+  function bindForm(root) {
+    bindChips(root);
+    var sels = root.querySelectorAll('[data-field] select[data-input]');
+    for (var i = 0; i < sels.length; i++) sels[i].onchange = function () { toggleOther(this.closest('[data-field]'), this.value); };
+  }
+  function collectForm(root) {
+    var out = { values: {}, other: {} };
+    var wraps = root.querySelectorAll('[data-field]');
+    for (var i = 0; i < wraps.length; i++) {
+      var w = wraps[i], f = w.getAttribute('data-field');
+      var chip = w.querySelector('.chip.on'), inp = w.querySelector('[data-input]'), oth = w.querySelector('[data-other]');
+      out.values[f] = chip ? chip.getAttribute('data-val') : (inp ? inp.value : '');
+      if (oth && out.values[f] === OTHER) out.other[f] = oth.value;
+    }
+    return out;
   }
 
   function pauseSheet(r) {
-    var reasons = state.boot.options['Alasan Pause'];
-    var s = openSheet('<h2>Pause</h2><p class="small muted">Pilih alasan — langsung tersimpan. Timer aktif berhenti, timer pause berjalan.</p>' +
-      chips('reason', reasons.concat([{ value: '', label: 'Tanpa alasan' }]), { big: true }));
-    s.querySelector('[data-chips]').addEventListener('click', function (ev) {
-      var c = ev.target.closest('.chip');
-      if (c) act(c, 'apiPause', [r.id, c.getAttribute('data-val')], 'Pause. Tap RESUME saat kembali.');
-    });
+    var defs = M().forms.Pause;
+    var quick = defs.length === 1 && defs[0].type === 'pilihan' && defs[0].options.length <= 8;
+    if (quick) {
+      var d = defs[0];
+      var vals = d.options.slice();
+      if (!d.required) vals.push({ value: '', label: 'Tanpa alasan' });
+      var s = openSheet('<h2>Pause</h2><p class="small muted">Pilih ' + esc(d.label.toLowerCase()) + ' — langsung tersimpan. Timer aktif berhenti, timer pause berjalan.</p>' +
+        '<div data-field="' + esc(d.field) + '">' + chips('f', vals, { big: true }) +
+        (d.other ? '<input type="text" data-other class="hidden" style="margin-top:10px" placeholder="Tulis alasan…">' +
+          '<button class="btn hidden" id="pz-save" style="margin-top:10px">Pause</button>' : '') + '</div>');
+      bindChips(s, function (n, val) {
+        if (val === OTHER) { $('pz-save').classList.remove('hidden'); return; }
+        var c = s.querySelector('.chip.on');
+        act(c, 'apiPause', [r.id, { values: (function () { var o = {}; o[d.field] = val; return o; })() }], 'Pause. Tap RESUME saat kembali.').catch(function () {});
+      });
+      if ($('pz-save')) $('pz-save').onclick = function () { act(this, 'apiPause', [r.id, collectForm(s)], 'Pause. Tap RESUME saat kembali.').catch(function () {}); };
+      return;
+    }
+    var s2 = openSheet('<h2>Pause</h2><div class="stack">' + formHtml('Pause') + '<button class="btn" id="pz-save">Pause</button></div>');
+    bindForm(s2);
+    $('pz-save').onclick = function () { act(this, 'apiPause', [r.id, collectForm(s2)], 'Pause. Tap RESUME saat kembali.').catch(function () {}); };
+  }
+
+  function tenggatHtml(d) {
+    return '<div data-sys="tenggat"><label class="lbl">' + esc(d.label) + ' *</label>' + chips('tenggat', [
+      { value: 'HARI_INI', label: 'Hari ini' }, { value: 'SHIFT', label: 'Shift berikutnya' },
+      { value: 'BESOK', label: 'Besok' }, { value: 'TANGGAL', label: 'Pilih tanggal' }]) +
+      '<input type="date" id="p-date" class="hidden" style="margin-top:8px"></div>';
   }
 
   function pendingSheet(r) {
-    var o = state.boot.options;
     var s = openSheet('<h2>Pending</h2><p class="small muted">Satu form. Pekerjaan ini akan muncul di tab Pending untuk semua teknisi.</p>' +
-      '<div class="stack">' +
-      '<div><label class="lbl">Pekerjaan yang sudah dilakukan *</label><textarea id="p-done" placeholder="mis. cek wiring, sensor ditemukan rusak"></textarea></div>' +
-      '<div><label class="lbl">Yang tertunda *</label>' + chips('tertunda', o['Yang Tertunda']) + '</div>' +
-      '<div><label class="lbl">Tenggat *</label>' + chips('tenggat', [
-        { value: 'HARI_INI', label: 'Hari ini' }, { value: 'SHIFT', label: 'Shift berikutnya' },
-        { value: 'BESOK', label: 'Besok' }, { value: 'TANGGAL', label: 'Pilih tanggal' }]) +
-      '<input type="date" id="p-date" class="hidden" style="margin-top:8px"></div>' +
-      '<div><label class="lbl">Catatan <span class="muted">(wajib jika "Lainnya")</span></label><textarea id="p-note"></textarea></div>' +
-      '<button class="btn navy" id="p-save">Simpan pending</button></div>');
-    bindChips(s, function (name, val) { if (name === 'tenggat') $('p-date').classList.toggle('hidden', val !== 'TANGGAL'); });
+      '<div class="stack">' + formHtml('Pending', { 'Tenggat': tenggatHtml }) + '<button class="btn navy" id="p-save">Simpan pending</button></div>');
+    bindChips(s.querySelector('[data-sys="tenggat"]'), function (name, val) { $('p-date').classList.toggle('hidden', val !== 'TANGGAL'); });
+    bindForm(s);
     $('p-save').onclick = function () {
-      act(this, 'apiPending', [r.id, {
-        dikerjakan: $('p-done').value, tertunda: chipVal(s, 'tertunda'), tenggat: chipVal(s, 'tenggat'),
-        tanggal: $('p-date').value, catatan: $('p-note').value
-      }], 'Tersimpan sebagai Pending.').then(function () {
-        if (state.lineView) return;
-        showTab('pending');
+      var input = collectForm(s);
+      input.tenggat = chipVal(s, 'tenggat');
+      input.tanggal = $('p-date').value;
+      act(this, 'apiPending', [r.id, input], 'Tersimpan sebagai Pending.').then(function () {
+        if (!state.lineView) showTab('pending');
       }).catch(function () {});
     };
   }
 
+  function bomFor(line) {
+    if (state.lineView && state.lineView.line && state.lineView.line.id === line) return Promise.resolve(state.lineView.bom || []);
+    if (state.bomCache[line]) return Promise.resolve(state.bomCache[line]);
+    return call('apiGetBom', line).then(function (b) { state.bomCache[line] = b; return b; }).catch(function () { return []; });
+  }
+
   function completeSheet(r) {
-    var o = state.boot.options;
-    var s = openSheet('<h2>Selesai</h2><p class="small muted">Waktu selesai dicatat server saat disimpan.</p><div class="stack">' +
-      '<div><label class="lbl">Masalah *</label>' + selectHtml('c-masalah', o['Masalah'], 'Pilih masalah…') + '</div>' +
-      '<div><label class="lbl">Penyebab *</label>' + selectHtml('c-penyebab', o['Penyebab'], 'Pilih penyebab…') + '</div>' +
-      '<div><label class="lbl">Penanganan *</label>' + selectHtml('c-penanganan', o['Penanganan'], 'Pilih penanganan…') + '</div>' +
-      '<div><label class="lbl">Part yang diganti *</label>' + chips('part', [{ value: 'NONE', label: 'Tidak ada' }, { value: 'SOME', label: 'Ada part' }]) +
-      '<div id="c-parts" class="hidden" style="margin-top:10px"><div id="c-part-rows"></div>' +
-      '<button type="button" class="link" id="c-add-part">+ Tambah part</button></div></div>' +
-      '<div><label class="lbl">Catatan <span class="muted">(opsional; wajib jika "Lainnya")</span></label><textarea id="c-note"></textarea></div>' +
+    bomFor(r.line).then(function (bom) { openCompleteSheet(r, bom); });
+  }
+
+  function partSelect(bom, line, allowOther) {
+    var html = '<select><option value="">Pilih part…</option>';
+    if (bom.length) {
+      html += '<optgroup label="BOM ' + esc(line) + '">' + bom.map(function (b) {
+        return '<option value="' + esc(b.value) + '">' + esc((b.pn ? b.pn + ' · ' : '') + b.name + (b.mesin ? ' (' + b.mesin + ')' : '') + (b.common ? ' · umum' : '')) + '</option>';
+      }).join('') + '</optgroup>';
+    }
+    var common = M().partOptions.filter(function (p) { return !bom.some(function (b) { return b.value === p; }); });
+    if (common.length) html += '<optgroup label="Part umum">' + common.map(function (p) { return '<option>' + esc(p) + '</option>'; }).join('') + '</optgroup>';
+    if (allowOther) html += '<option value="' + OTHER + '">Lainnya (tulis sendiri)</option>';
+    return html + '</select>';
+  }
+
+  function openCompleteSheet(r, bom) {
+    var partDef = M().forms.Selesai.filter(function (d) { return d.field === 'Part'; })[0] || { label: 'Part', other: true };
+    var s = openSheet('<h2>Selesai</h2><p class="small muted">' + esc(r.line) + (r.mesin ? ' · ' + esc(r.mesin) : '') + ' · waktu selesai dicatat server saat disimpan.</p><div class="stack">' +
+      formHtml('Selesai', { 'Part': function (d) {
+        return '<div data-sys="part"><label class="lbl">' + esc(d.label) + ' *</label>' + chips('part', [{ value: 'NONE', label: 'Tidak ada' }, { value: 'SOME', label: 'Ada part' }]) +
+          '<div id="c-parts" class="hidden" style="margin-top:10px"><div id="c-part-rows"></div>' +
+          '<button type="button" class="link" id="c-add-part">+ Tambah part</button></div></div>';
+      } }) +
       '<button class="btn ok" id="c-save">Simpan & selesai</button></div>');
 
     function addRow() {
       var d = document.createElement('div');
-      d.className = 'part-row';
-      d.innerHTML = selectHtml('', o['Part'], 'Pilih part…') + '<input type="number" min="1" max="999" value="1" inputmode="numeric">' +
-        '<button type="button" aria-label="Hapus">×</button>';
+      d.className = 'part-row-wrap';
+      d.innerHTML = '<div class="part-row">' + partSelect(bom, r.line, partDef.other) + '<input type="number" min="1" max="999" value="1" inputmode="numeric">' +
+        '<button type="button" aria-label="Hapus">×</button></div><input type="text" class="hidden" data-part-other placeholder="Tulis nama part…" style="margin-bottom:8px">';
       d.querySelector('button').onclick = function () { d.remove(); };
+      d.querySelector('select').onchange = function () { d.querySelector('[data-part-other]').classList.toggle('hidden', this.value !== OTHER); };
       $('c-part-rows').appendChild(d);
     }
-    bindChips(s, function (name, val) {
-      if (name !== 'part') return;
+    bindChips(s.querySelector('[data-sys="part"]'), function (name, val) {
       $('c-parts').classList.toggle('hidden', val !== 'SOME');
       if (val === 'SOME' && !$('c-part-rows').children.length) addRow();
     });
+    bindForm(s);
     $('c-add-part').onclick = addRow;
     $('c-save').onclick = function () {
       var partMode = chipVal(s, 'part');
       if (!partMode) { toast('Pilih part yang diganti, atau "Tidak ada".', 'err'); return; }
-      var rows = $('c-part-rows').querySelectorAll('.part-row');
+      var rows = $('c-part-rows').querySelectorAll('.part-row-wrap');
       var parts = [];
       for (var i = 0; i < rows.length; i++) {
         var n = rows[i].querySelector('select').value;
-        if (n) parts.push({ nama: n, jumlah: Number(rows[i].querySelector('input').value) });
+        if (n) parts.push({ nama: n, jumlah: Number(rows[i].querySelector('input[type=number]').value), lain: rows[i].querySelector('[data-part-other]').value });
       }
-      act(this, 'apiComplete', [r.id, {
-        masalah: $('c-masalah').value, penyebab: $('c-penyebab').value, penanganan: $('c-penanganan').value,
-        tanpaPart: partMode === 'NONE', parts: parts, catatan: $('c-note').value
-      }], 'Maintenance selesai. Terima kasih!').catch(function () {});
+      var input = collectForm(s);
+      input.tanpaPart = partMode === 'NONE';
+      input.parts = parts;
+      act(this, 'apiComplete', [r.id, input], 'Maintenance selesai. Terima kasih!').catch(function () {});
     };
   }
 
   function cancelSheet(r) {
-    var s = openSheet('<h2>Cancel maintenance</h2><p class="small muted">Alasan wajib. Record masuk review Admin dan tidak dihitung ke MTTR.</p><div class="stack">' +
-      chips('reason', state.boot.options['Alasan Cancel'], { big: true }) +
-      '<div><label class="lbl">Catatan <span class="muted">(wajib jika "Lainnya")</span></label><textarea id="x-note"></textarea></div>' +
-      '<button class="btn danger-ghost" id="x-save">Konfirmasi cancel</button></div>');
-    bindChips(s);
+    var s = openSheet('<h2>Cancel maintenance</h2><p class="small muted">Record masuk review Admin dan tidak dihitung ke MTTR.</p><div class="stack">' +
+      formHtml('Cancel') + '<button class="btn danger-ghost" id="x-save">Konfirmasi cancel</button></div>');
+    bindForm(s);
     $('x-save').onclick = function () {
-      act(this, 'apiCancel', [r.id, chipVal(s, 'reason'), $('x-note').value], 'Maintenance dibatalkan.').catch(function () {});
+      act(this, 'apiCancel', [r.id, collectForm(s)], 'Maintenance dibatalkan.').catch(function () {});
     };
   }
 
   // ---------- HALAMAN LINE ----------
-  function openLine(lineId, btn) {
+  function openLine(lineId, btn, mesinId) {
     busy(btn, true, 'Membuka…');
-    call('apiGetLine', lineId).then(function (v) {
+    call('apiGetLine', lineId, mesinId || '').then(function (v) {
       busy(btn, false);
       syncClock(v.serverNowIso);
       state.lineView = v;
@@ -425,113 +651,182 @@
     }).catch(function (e) { busy(btn, false); toast(cleanErr(e), 'err'); });
   }
 
+  function startCardHtml(v) {
+    var l = v.line, defs = M().forms.Mulai, html = '';
+    var freeMachines = v.machines.filter(function (m) { return !m.busyBy; });
+    defs.forEach(function (d) {
+      if (d.field === 'Mesin ID') {
+        if (!v.machines.length && !d.other) return;
+        if (!v.machines.length) return; // line tanpa daftar mesin: pekerjaan untuk seluruh line
+        var sel = v.preselectMesin || (freeMachines.length === 1 ? freeMachines[0].id : '');
+        var vals = v.machines.map(function (m) { return { value: m.id, label: m.name, sub: m.busyBy ? 'dikerjakan ' + m.busyBy : '', disabled: !!m.busyBy }; });
+        if (d.other) vals.push({ value: OTHER, label: 'Lainnya' });
+        html += '<div data-sys="mesin"><label class="lbl">' + esc(d.label) + (d.required ? ' *' : '') + '</label>' + chips('mesin', vals, { big: vals.length <= 4, selected: sel }) +
+          '<input type="text" id="s-mesin-lain" class="hidden" style="margin-top:8px" placeholder="Tulis nama mesin/alat…"></div>';
+      } else if (d.field === 'Tipe') {
+        html += '<div><label class="lbl">' + esc(d.label) + '</label>' + chips('tipe', d.options, { big: true, selected: d.options[0] }) + '</div>';
+      } else if (d.field === 'Baterai') {
+        if (l.batteries.length > 1) html += '<div><label class="lbl">' + esc(d.label) + '</label>' + chips('battery', l.batteries, { big: true, selected: v.lastBattery }) + '</div>';
+        else html += '<p class="small muted" style="margin:0">' + esc(d.label) + ': <b>' + esc(l.batteries[0] || '-') + '</b></p>';
+      } else if (d.type !== 'sistem') {
+        html += fieldHtml(d);
+      }
+    });
+    return html;
+  }
+
   function renderLine() {
     var v = state.lineView;
     var html = '<button class="back no-print" id="btn-back">← Beranda</button>';
     if (!v.found) {
       $('view-line').innerHTML = html + '<div class="card center"><h2>Line tidak ditemukan</h2><p class="muted">Line <b>' + esc(v.lineId) +
-        '</b> tidak terdaftar. QR mungkin salah atau line sudah dihapus. Hubungi Admin.</p></div>';
+        '</b> tidak terdaftar. QR mungkin salah atau line sudah dihapus. Hubungi Admin.</p><button class="btn ghost" id="btn-find2">Cari line</button></div>';
       $('btn-back').onclick = function () { showTab('home'); };
+      $('btn-find2').onclick = linePicker;
       return;
     }
     var l = v.line;
-    html += '<div class="hello" style="margin-top:0"><div><div class="hi">Line · ' + esc(l.area || '-') + '</div><h1>' + esc(l.id) +
-      (l.name ? ' · ' + esc(l.name) : '') + '</h1></div></div>';
+    html += '<div class="hello" style="margin-top:0"><div><div class="hi">' + esc([l.factoryName, l.area].filter(String).join(' · ') || 'Line') + '</div><h1>' + esc(l.id) +
+      (l.name ? ' · ' + esc(l.name) : '') + '</h1>' + (l.grup ? '<span class="tag-lite">Grup ' + esc(l.grup) + '</span>' : '') + '</div></div>';
+    if (v.unknownMesin) html += '<div class="alert warn">Mesin <b>' + esc(v.unknownMesin) + '</b> dari QR tidak terdaftar di line ini. Pilih mesin di bawah.</div>';
 
     if (!l.active) {
       html += '<div class="alert warn">Line ini nonaktif. Maintenance tidak bisa dimulai.</div>';
-    } else if (v.open && v.openIsMine) {
-      html += workCard(v.open);
-    } else if (v.open) {
-      html += '<div class="card"><div class="caps">Sedang dikerjakan</div><div class="row" style="margin:12px 0">' +
-        '<div class="avatar">' + esc(initials(v.open.techLastName)) + '</div><div class="grow"><b>' + esc(v.open.techLastName) + '</b>' +
-        '<div class="small muted">sejak ' + esc(fmtShort(v.open.startIso)) + ' · ' + esc(v.open.id) + '</div></div>' + pill(v.open.status) + '</div>' +
-        '<div class="alert warn" style="margin:0">Satu line hanya boleh punya satu pekerjaan berjalan. Koordinasi dengan PIC di atas.</div>' +
-        (isAdmin() ? '<button class="btn danger-ghost" id="btn-admin-cancel" style="margin-top:12px">Cancel sebagai Admin…</button>' : '') + '</div>';
     } else {
-      if (v.myOpenElsewhere) {
-        html += '<div class="alert warn">Anda masih punya pekerjaan <b>' + esc(v.myOpenElsewhere.status) + '</b> di line ' +
-          esc(v.myOpenElsewhere.line) + '. Selesaikan, pending, atau cancel dulu. <button class="link" id="btn-go-mine">Buka ›</button></div>';
+      if (v.open && v.openIsMine) html += workCard(v.open);
+      if (v.others.length) {
+        html += '<div class="card"><div class="caps">Sedang dikerjakan di line ini</div>' + v.others.map(function (o) {
+          return '<div class="row" style="margin-top:12px"><div class="avatar sm">' + esc(initials(o.techLastName)) + '</div><div class="grow"><b>' + esc(o.mesin || 'Seluruh line') + '</b>' +
+            '<div class="small muted">' + esc(o.techLastName) + ' · sejak ' + esc(fmtShort(o.startIso)) + ' · ' + esc(o.id) + '</div></div>' + pill(o.status) +
+            (isAdmin() ? '<button class="link" data-admin-cancel="' + esc(o.id) + '" style="margin-left:8px">Cancel</button>' : '') + '</div>';
+        }).join('') + '</div>';
       }
-      v.pendings.forEach(function (p, i) {
-        html += '<div class="darkpage" style="margin:0 0 16px">' + pendingCardInner(p) +
-          '<div class="btn-row two" style="margin-top:12px"><button class="btn" data-continue="' + i + '"' + (v.myOpenElsewhere ? ' disabled' : '') + '>▶ Lanjutkan</button>' +
-          '<button class="btn ghost" data-detail="' + esc(p.id) + '">Detail</button></div></div>';
-      });
-      var bats = state.boot.options['Baterai'];
-      var def = bats.indexOf(v.lastBattery) !== -1 ? v.lastBattery : bats[0];
-      html += '<div class="card"><div class="caps">' + (v.pendings.length ? 'Atau mulai maintenance baru' : 'Tidak ada pekerjaan berjalan') + '</div>' +
-        '<label class="lbl" style="margin-top:14px">Baterai</label>' + chips('battery', bats, { big: true, selected: def }) +
-        '<button class="btn xl' + (v.pendings.length ? ' navy' : '') + '" id="btn-start" style="margin-top:16px"' + (v.myOpenElsewhere ? ' disabled' : '') + '>▶ MULAI MAINTENANCE</button>' +
-        '<p class="tiny muted center" style="margin:10px 0 0">Waktu mulai & Maintenance ID dibuat server saat tombol ditekan.</p></div>';
+      if (!(v.open && v.openIsMine)) {
+        if (v.myOpenElsewhere) {
+          html += '<div class="alert warn">Anda masih punya pekerjaan <b>' + esc(v.myOpenElsewhere.status) + '</b> di ' +
+            esc(v.myOpenElsewhere.line) + '. Selesaikan, pending, atau cancel dulu. <button class="link" id="btn-go-mine">Buka ›</button></div>';
+        }
+        v.pendings.forEach(function (p, i) {
+          html += '<div class="darkpage" style="margin:0 0 16px">' + pendingCardInner(p) +
+            '<div class="btn-row two" style="margin-top:12px"><button class="btn" data-continue="' + i + '"' + (v.myOpenElsewhere ? ' disabled' : '') + '>▶ Lanjutkan</button>' +
+            '<button class="btn ghost" data-detail="' + esc(p.id) + '">Detail</button></div></div>';
+        });
+        if (v.lineLocked) {
+          html += '<div class="alert warn">Seluruh line sedang dikerjakan. Tunggu selesai atau koordinasi dengan PIC di atas.</div>';
+        } else {
+          html += '<div class="card stack" id="start-card"><div class="caps">' + (v.pendings.length ? 'Atau mulai maintenance baru' : 'Mulai maintenance') + '</div>' +
+            startCardHtml(v) +
+            '<button class="btn xl' + (v.pendings.length ? ' navy' : '') + '" id="btn-start"' + (v.myOpenElsewhere ? ' disabled' : '') + '>▶ MULAI</button>' +
+            '<p class="tiny muted center" style="margin:6px 0 0">Waktu mulai & Maintenance ID dibuat server saat tombol ditekan.</p></div>';
+        }
+      }
     }
+    html += bomCard(v.bom, l.id);
     $('view-line').innerHTML = html;
     $('btn-back').onclick = function () { showTab('home'); };
     bindWork(v.open && v.openIsMine ? v.open : null, $('view-line'));
-    bindChips($('view-line'));
+    var sc = $('start-card');
+    if (sc) {
+      var ms = sc.querySelector('[data-sys="mesin"]');   // handler khusus dulu, baru bindForm (grup yang sudah di-bind dilewati)
+      if (ms) bindChips(ms, function (n, val) { $('s-mesin-lain').classList.toggle('hidden', val !== OTHER); if (val === OTHER) $('s-mesin-lain').focus(); });
+      bindForm(sc);
+    }
     if ($('btn-start')) $('btn-start').onclick = function () {
-      act(this, 'apiStart', [l.id, chipVal($('view-line'), 'battery')], 'Maintenance dimulai. Timer berjalan.').catch(function () { openLine(l.id); });
+      var p = collectForm(sc);
+      p.mesin = chipVal(sc, 'mesin');
+      p.mesinLain = $('s-mesin-lain') ? $('s-mesin-lain').value : '';
+      p.tipe = chipVal(sc, 'tipe');
+      p.baterai = chipVal(sc, 'battery') || l.batteries[0] || '';
+      act(this, 'apiStart', [l.id, p], 'Maintenance dimulai. Timer berjalan.').catch(function () { openLine(l.id, null, p.mesin); });
     };
     if ($('btn-go-mine')) $('btn-go-mine').onclick = function () { openLine(v.myOpenElsewhere.line, this); };
-    if ($('btn-admin-cancel')) $('btn-admin-cancel').onclick = function () { cancelSheet(v.open); };
+    var ac = document.querySelectorAll('[data-admin-cancel]');
+    for (var j = 0; j < ac.length; j++) {
+      ac[j].onclick = function () { var id = this.getAttribute('data-admin-cancel'); cancelSheet(v.others.filter(function (o) { return o.id === id; })[0]); };
+    }
     var cs = document.querySelectorAll('[data-continue]');
     for (var i = 0; i < cs.length; i++) {
       (function (b) { b.onclick = function () { continuePending(v.pendings[Number(b.getAttribute('data-continue'))], b); }; })(cs[i]);
     }
+    var bs = $('bom-q');
+    if (bs) bs.oninput = function () {
+      var q = this.value.toLowerCase(), rows = document.querySelectorAll('.bom-row');
+      for (var k = 0; k < rows.length; k++) rows[k].classList.toggle('hidden', rows[k].getAttribute('data-q').indexOf(q) === -1);
+    };
     bindDetailLinks($('view-line'));
     tick();
   }
 
+  function bomCard(bom, line) {
+    bom = bom || [];
+    return '<details class="card bom"' + (bom.length && bom.length <= 6 ? ' open' : '') + '><summary><span class="caps">BOM sparepart (' + bom.length + ')</span></summary>' +
+      (bom.length ? (bom.length > 8 ? '<input type="search" id="bom-q" class="search" placeholder="Cari part, PN, lokasi…" style="margin-top:12px">' : '') +
+        bom.map(function (b) {
+          return '<div class="bom-row" data-q="' + esc((b.pn + ' ' + b.name + ' ' + b.location + ' ' + b.mesin).toLowerCase()) + '">' +
+            '<div class="row between"><b>' + esc(b.name) + '</b><span class="small">' + esc(b.qty) + ' ' + esc(b.unit) + '</span></div>' +
+            '<div class="small muted">' + [b.pn ? 'PN ' + b.pn : '', b.mesin, b.location ? '📍 ' + b.location : '', b.minStock ? 'stok min ' + b.minStock : '', b.common ? 'part umum' : '']
+              .filter(String).map(esc).join(' · ') + '</div></div>';
+        }).join('')
+        : '<p class="small muted" style="margin:12px 0 0">BOM line ' + esc(line) + ' belum diisi. Admin: isi di sheet <b>BOM</b>.</p>') + '</details>';
+  }
+
   // ---------- PENDING ----------
   function pendingCardInner(p) {
-    return '<div class="row between"><span class="k small" style="color:var(--navy-muted)">' + esc(p.tertunda) + '</span><span class="tag">' + esc(p.battery) + '</span></div>' +
-      '<div style="font-weight:800;font-size:17px;margin:2px 0 6px">' + esc(p.line) + (p.lineName ? ' · ' + esc(p.lineName) : '') + '</div>' +
+    return '<div class="row between"><span class="k small" style="color:var(--navy-muted)">' + esc(p.tertunda || 'Pending') + '</span><span class="tag">' + esc(p.battery) + '</span></div>' +
+      '<div style="font-weight:800;font-size:17px;margin:2px 0 6px">' + lineTitle(p) + '</div>' +
       '<div class="small" style="color:#dfe7f0">' + esc(p.id) + ' · ' + esc(p.techLastName) + ' · pending <b class="js-dur"' + timerAttrs(p.pendingMin, p.sinceIso, true) + '></b></div>' +
       '<div class="small ' + (p.overdue ? 'over' : '') + '" style="margin-top:4px' + (p.overdue ? '' : ';color:var(--navy-muted)') + '">Tenggat ' + esc(fmtShort(p.tenggatIso)) +
       (p.overdue ? ' · LEWAT' : '') + '</div>';
   }
 
-  function loadPending() {
-    $('view-pending').innerHTML = '<div class="loading">Memuat pending…</div>';
-    call('apiListPending').then(function (res) {
+  function loadPending(keepInput) {
+    if (!keepInput) $('view-pending').innerHTML = '<div class="loading">Memuat pending…</div>';
+    call('apiListPending', serverFilter('pending')).then(function (res) {
       syncClock(res.serverNowIso);
       state.pendingItems = res.items;
-      renderPending();
+      renderPending(keepInput);
     }).catch(function (e) { $('view-pending').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
   }
 
-  function renderPending() {
+  function renderPending(keepInput) {
     var items = state.pendingItems || [];
     var f = state.pendingFilter;
     var groups = [{ key: 'ALL', label: 'Semua', n: items.length }];
-    state.boot.options['Baterai'].forEach(function (b) {
-      groups.push({ key: 'B:' + b, label: b, n: items.filter(function (i) { return i.battery === b; }).length });
-    });
+    var bats = [];
+    items.forEach(function (i) { if (bats.indexOf(i.battery) === -1) bats.push(i.battery); });
+    bats.forEach(function (b) { groups.push({ key: 'B:' + b, label: b, n: items.filter(function (i) { return i.battery === b; }).length }); });
     groups.push({ key: 'OVER', label: 'Lewat', n: items.filter(function (i) { return i.overdue; }).length });
+    if (!groups.some(function (g) { return g.key === f; })) f = state.pendingFilter = 'ALL';
     var shown = items.filter(function (i) {
       if (f === 'OVER') return i.overdue;
       if (f.indexOf('B:') === 0) return i.battery === f.slice(2);
       return true;
     });
-    $('view-pending').innerHTML = '<div class="darkpage"><div class="row between"><div><div class="eyebrow">Pekerjaan tertunda</div><h1>Pending</h1></div>' +
-      '<div class="avatar">' + esc(initials(me().name)) + '</div></div>' +
-      '<div class="circles">' + groups.map(function (g) {
-        return '<button class="circle' + (g.key === f ? ' on' : '') + '" data-filter="' + esc(g.key) + '"><span class="c">' + g.n + '</span><span class="t">' + esc(g.label) + '</span></button>';
-      }).join('') + '</div>' +
+    var listHtml = '<div class="circles">' + groups.map(function (g) {
+      return '<button class="circle' + (g.key === f ? ' on' : '') + '" data-filter="' + esc(g.key) + '"><span class="c">' + g.n + '</span><span class="t">' + esc(g.label) + '</span></button>';
+    }).join('') + '</div>' +
       '<div class="small" style="color:var(--navy-muted)">Urutan: lewat tenggat, lalu paling lama</div>' +
       (shown.length ? shown.map(function (p) {
         return '<button class="wo" data-detail="' + esc(p.id) + '">' + pendingCardInner(p) + '</button>';
-      }).join('') : '<div class="empty" style="color:var(--navy-muted)">Tidak ada pekerjaan pending.</div>') + '</div>';
-    var cs = document.querySelectorAll('[data-filter]');
-    for (var i = 0; i < cs.length; i++) {
-      cs[i].onclick = function () { state.pendingFilter = this.getAttribute('data-filter'); renderPending(); };
+      }).join('') : '<div class="empty" style="color:var(--navy-muted)">Tidak ada pekerjaan pending.</div>');
+    if (keepInput && $('pending-list')) {
+      $('pending-list').innerHTML = listHtml;
+    } else {
+      $('view-pending').innerHTML = '<div class="darkpage"><div class="row between"><div><div class="eyebrow">Pekerjaan tertunda</div><h1>Pending</h1></div>' +
+        '<div class="avatar">' + esc(initials(me().name)) + '</div></div>' + filterBar('pending', true) + '<div id="pending-list">' + listHtml + '</div></div>';
+      bindFilterBar($('view-pending'), function (fromSearch) { loadPending(fromSearch); });
     }
-    bindDetailLinks($('view-pending'));
+    var cs = document.querySelectorAll('#view-pending [data-filter]');
+    for (var i = 0; i < cs.length; i++) {
+      cs[i].onclick = function () { state.pendingFilter = this.getAttribute('data-filter'); renderPending(true); };
+    }
+    bindDetailLinks($('pending-list'));
     tick();
   }
 
   // ---------- DETAIL (sheet) ----------
   function bindDetailLinks(root) {
+    if (!root) return;
     var ds = root.querySelectorAll('[data-detail]');
     for (var i = 0; i < ds.length; i++) {
       ds[i].onclick = function () { openDetail(this.getAttribute('data-detail')); };
@@ -544,23 +839,21 @@
       if (!state.sheetClose || !document.body.contains(s)) return;
       syncClock(d.serverNowIso);
       var r = d.record;
-      var html = '<div class="row between"><h2>' + esc(r.line) + (r.lineName ? ' · ' + esc(r.lineName) : '') + '</h2>' + pill(r.status) + '</div>' +
-        '<p class="small muted" style="margin:0 0 14px">' + esc(r.id) + '</p><dl class="kv">' +
-        '<dt>Baterai</dt><dd>' + esc(r.battery) + '</dd>' +
-        '<dt>Teknisi</dt><dd>' + esc(r.techFirstName) + (r.techLast !== r.techFirst ? ' → ' + esc(r.techLastName) : '') + '</dd>' +
-        '<dt>Mulai</dt><dd>' + esc(r.startText) + '</dd>' +
-        (r.finishText ? '<dt>Selesai</dt><dd>' + esc(r.finishText) + '</dd>' : '') +
+      var kv = function (k, v, style) { return v ? '<dt>' + esc(k) + '</dt><dd' + (style || '') + '>' + esc(v) + '</dd>' : ''; };
+      var html = '<div class="row between"><h2>' + lineTitle(r) + '</h2>' + pill(r.status) + '</div>' +
+        '<p class="small muted" style="margin:0 0 14px">' + esc(r.id) + (r.tipe ? ' · ' + esc(r.tipe) : '') + '</p><dl class="kv">' +
+        kv('Factory', r.factoryName) + kv('Baterai', r.battery) + kv('Mesin', r.mesin) +
+        kv('Teknisi', r.techFirstName + (r.techLast !== r.techFirst ? ' → ' + r.techLastName : '')) +
+        kv('Mulai', r.startText) + kv('Selesai', r.finishText) +
         '<dt>Aktif</dt><dd class="js-dur"' + timerAttrs(r.activeMin, r.sinceIso, r.status === 'Aktif') + '></dd>' +
         '<dt>Pause</dt><dd class="js-dur"' + timerAttrs(r.pauseMin, r.sinceIso, r.status === 'Pause') + '></dd>' +
         '<dt>Pending</dt><dd class="js-dur"' + timerAttrs(r.pendingMin, r.sinceIso, r.status === 'Pending') + '></dd>' +
-        (r.tertunda ? '<dt>Tertunda</dt><dd>' + esc(r.tertunda) + '</dd>' : '') +
+        kv('Tertunda', r.tertunda) +
         (r.tenggatIso ? '<dt>Tenggat</dt><dd' + (r.overdue ? ' style="color:var(--danger)"' : '') + '>' + esc(r.tenggatText) + (r.overdue ? ' · LEWAT' : '') + '</dd>' : '') +
-        (r.masalah ? '<dt>Masalah</dt><dd>' + esc(r.masalah) + '</dd><dt>Penyebab</dt><dd>' + esc(r.penyebab) + '</dd><dt>Penanganan</dt><dd>' + esc(r.penanganan) + '</dd><dt>Part</dt><dd>' + esc(r.part) + '</dd>' : '') +
-        (r.cancelReason ? '<dt>Alasan cancel</dt><dd>' + esc(r.cancelReason) + '</dd>' : '') +
-        (r.dikerjakan ? '<dt>Dikerjakan</dt><dd>' + esc(r.dikerjakan) + '</dd>' : '') +
-        (r.catatan ? '<dt>Catatan</dt><dd>' + esc(r.catatan) + '</dd>' : '') +
-        (r.mttr ? '<dt>Masuk MTTR</dt><dd>' + esc(r.mttr) + '</dd>' : '') +
-        (r.reviewedByName ? '<dt>Review</dt><dd>' + esc(r.reviewedByName) + ' · ' + esc(r.reviewedText) + (r.reviewNote ? '\n' + esc(r.reviewNote) : '') + '</dd>' : '') +
+        kv('Masalah', r.masalah) + kv('Penyebab', r.penyebab) + kv('Penanganan', r.penanganan) + kv('Part', r.part) +
+        r.extra.map(function (e) { return kv(e.label, e.value); }).join('') +
+        kv('Alasan cancel', r.cancelReason) + kv('Dikerjakan', r.dikerjakan) + kv('Catatan', r.catatan) + kv('Masuk MTTR', r.mttr) +
+        (r.reviewedByName ? kv('Review', r.reviewedByName + ' · ' + r.reviewedText + (r.reviewNote ? '\n' + r.reviewNote : '')) : '') +
         '</dl><div class="caps" style="margin:20px 0 10px">Riwayat kejadian</div><ul class="timeline">' +
         d.events.map(function (e) {
           return '<li><b>' + esc(EVENT_LABEL[e.event] || e.event) + '</b> <span class="small muted">· ' + esc(e.userName) + ' · ' + esc(fmtShort(e.whenIso)) + '</span>' +
@@ -595,8 +888,7 @@
         state.boot.myOpen = v.open;
         state.lineView = v;
         state.tab = 'home';
-        var btns = document.querySelectorAll('nav.tabs button');
-        for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i].getAttribute('data-tab') === 'home');
+        markTab('home');
         setView('line');
         renderLine();
         toast('Pending dilanjutkan. Timer aktif berjalan.', 'ok');
@@ -604,41 +896,62 @@
       }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
     }
     if (freshQr(p.line)) return go(state.qr.line, btn);   // masuk lewat scan QR: konfirmasi dilewati
-    openScanner(p.line, function (scanned) { go(scanned, null); });
+    openScanner({ expectLine: p.line, onResult: function (line) { go(line, null); } });
   }
 
-  function lineFromQr(text) {
+  /** Isi QR: URL web app ?line=..&mesin=.., atau teks Line ID saja. */
+  function parseQr(text) {
     text = String(text || '').trim();
-    var m = /[?&]line=([^&#]+)/.exec(text);
-    var v = m ? decodeURIComponent(m[1]) : text;
-    return /^[A-Za-z0-9_.-]{1,50}$/.test(v) ? v.toUpperCase() : '';
+    var ok = function (v) { return /^[A-Za-z0-9_.-]{1,50}$/.test(v || '') ? v.toUpperCase() : ''; };
+    var ml = /[?&]line=([^&#]+)/.exec(text), mm = /[?&]mesin=([^&#]+)/.exec(text);
+    if (ml || mm) return { line: ml ? ok(decodeURIComponent(ml[1])) : '', mesin: mm ? ok(decodeURIComponent(mm[1])) : '' };
+    return { line: ok(text), mesin: '' };
   }
 
-  function openScanner(expectLine, onLine) {
+  /** Tombol "Scan QR" di Beranda: QR line atau QR mesin, tanpa keluar dari web app. */
+  function scanAny() {
+    openScanner({ onResult: function (line, mesin) {
+      closeSheet();
+      state.qr = { line: line, at: Date.now() };
+      openLine(line, null, mesin);
+    } });
+  }
+
+  /**
+   * @param {{expectLine?:string, onResult:function(string, string)}} o
+   *   expectLine: QR harus line ini (konfirmasi lanjut pending).
+   */
+  function openScanner(o) {
     var stream = null, stopped = false, timer = null;
-    var s = openSheet('<h2>Scan QR line ' + esc(expectLine) + '</h2>' +
-      '<p class="small muted">Konfirmasi Anda benar-benar di mesin. Arahkan kamera ke QR yang ditempel di line.</p>' +
+    var title = o.expectLine ? 'Scan QR line ' + o.expectLine : 'Scan QR line / mesin';
+    var s = openSheet('<h2>' + esc(title) + '</h2>' +
+      '<p class="small muted">' + (o.expectLine ? 'Konfirmasi Anda benar-benar di mesin. ' : '') + 'Arahkan kamera ke QR yang ditempel di line/mesin.</p>' +
       '<div class="scan-box" id="scan-box"><video id="scan-video" playsinline muted></video><div class="frame"></div></div>' +
-      '<p class="small center" id="scan-status" style="margin-top:12px">Membuka kamera…</p>', function () {
+      '<p class="small center" id="scan-status" style="margin-top:12px">Membuka kamera…</p>' +
+      (o.expectLine ? '' : '<button class="btn ghost" id="scan-manual">Cari line manual</button>'), function () {
         stopped = true;
         clearTimeout(timer);
         if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
       });
+    if ($('scan-manual')) $('scan-manual').onclick = function () { closeSheet(); linePicker(); };
 
     function fallback(reason) {
       if (stopped) return;
       $('scan-box').classList.add('hidden');
       $('scan-status').innerHTML = '<div class="alert warn" style="text-align:left"><b>Kamera tidak bisa dibuka di dalam aplikasi</b> (' + esc(reason) + ').<br>' +
-        'Tutup layar ini, lalu scan QR line <b>' + esc(expectLine) + '</b> dengan aplikasi kamera HP. Halaman line akan terbuka dengan tombol <b>Lanjutkan</b> tanpa scan ulang.</div>';
+        (o.expectLine
+          ? 'Tutup layar ini, lalu scan QR line <b>' + esc(o.expectLine) + '</b> dengan aplikasi kamera HP. Halaman line akan terbuka dengan tombol <b>Lanjutkan</b> tanpa scan ulang.'
+          : 'Scan QR dengan aplikasi kamera HP (halaman line terbuka otomatis), atau pakai <b>Cari line manual</b>.') + '</div>';
     }
     function found(text) {
-      var line = lineFromQr(text);
-      if (!line) { $('scan-status').textContent = 'QR tidak dikenali, coba lagi…'; return false; }
-      if (line !== String(expectLine).toUpperCase()) { $('scan-status').textContent = 'Ini QR line ' + line + ', bukan ' + expectLine + '.'; return false; }
-      $('scan-status').textContent = 'QR ' + line + ' terbaca ✓';
+      var q = parseQr(text);
+      if (!q.line && !q.mesin) { $('scan-status').textContent = 'QR tidak dikenali, coba lagi…'; return false; }
+      if (o.expectLine && q.line !== String(o.expectLine).toUpperCase()) { $('scan-status').textContent = 'Ini QR ' + (q.line || q.mesin) + ', bukan line ' + o.expectLine + '.'; return false; }
+      if (!q.line) { $('scan-status').textContent = 'QR mesin lama tanpa line. Cetak ulang QR dari Dashboard → QR.'; return false; }
+      $('scan-status').textContent = 'QR ' + q.line + (q.mesin ? ' · ' + q.mesin : '') + ' terbaca ✓';
       stopped = true;
       if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
-      onLine(line);
+      o.onResult(q.line, q.mesin);
       return true;
     }
 
@@ -698,14 +1011,15 @@
   function loadHistory() {
     var h = state.history;
     var statuses = ['', 'Aktif', 'Pause', 'Pending', 'Completed', 'Cancelled', 'Abandoned'];
+    var tipes = (M().forms.Mulai.filter(function (d) { return d.field === 'Tipe'; })[0] || { options: [] }).options;
     $('view-history').innerHTML = '<div class="hello"><div><div class="hi">' + (h.scope === 'all' ? 'Semua teknisi' : 'Pekerjaan saya') + '</div><h1>Riwayat</h1></div>' +
       (isAdmin() ? '<button class="btn ghost" id="h-scope" style="width:auto">' + (h.scope === 'all' ? 'Saya saja' : 'Semua') + '</button>' : '') + '</div>' +
-      '<div class="circles" style="padding-bottom:6px">' + chips('status', statuses.map(function (s) { return { value: s, label: s || 'Semua' }; }), { selected: h.status }).replace('class="chips"', 'class="chips" style="flex-wrap:nowrap"') + '</div>' +
-      '<div class="row" style="margin-bottom:14px"><select id="h-bat" class="grow"><option value="">Semua baterai</option>' +
-      state.boot.options['Baterai'].map(function (b) { return '<option' + (b === h.battery ? ' selected' : '') + '>' + esc(b) + '</option>'; }).join('') +
-      '</select><button class="btn ghost" id="h-csv" style="width:auto">CSV</button></div><div id="h-list"><div class="loading">Memuat…</div></div>';
-    bindChips($('view-history'), function (n, val) { h.status = val; fetchHistory(); });
-    $('h-bat').onchange = function () { h.battery = this.value; fetchHistory(); };
+      filterBar('history') +
+      '<div class="scroll-x">' + chips('status', statuses.map(function (s) { return { value: s, label: s || 'Semua status' }; }), { selected: h.status }) + '</div>' +
+      '<div class="row" style="margin:8px 0 14px"><div class="grow">' + chips('tipe', [{ value: '', label: 'Semua tipe' }].concat(tipes), { selected: h.tipe }) + '</div>' +
+      '<button class="btn ghost" id="h-csv" style="width:auto">CSV</button></div><div id="h-list"><div class="loading">Memuat…</div></div>';
+    bindChips($('view-history'), function (n, val) { h[n] = val; fetchHistory(); });
+    bindFilterBar($('view-history'), function (fromSearch) { if (fromSearch) fetchHistory(); else loadHistory(); });
     $('h-csv').onclick = downloadCsv;
     if ($('h-scope')) $('h-scope').onclick = function () { h.scope = h.scope === 'all' ? 'mine' : 'all'; loadHistory(); };
     fetchHistory();
@@ -714,14 +1028,16 @@
   function fetchHistory() {
     var h = state.history;
     $('h-list').innerHTML = '<div class="loading">Memuat…</div>';
-    call('apiHistory', { scope: h.scope, status: h.status, battery: h.battery }).then(function (res) {
+    var f = serverFilter('history');
+    f.scope = h.scope; f.status = h.status; f.tipe = h.tipe;
+    call('apiHistory', f).then(function (res) {
       syncClock(res.serverNowIso);
       h.data = res.items;
       $('h-list').innerHTML = '<p class="small muted" style="margin:0 4px 10px">' + res.total + ' pekerjaan' + (res.truncated ? ' (ditampilkan ' + res.items.length + ' terbaru)' : '') +
         (res.spreadsheetUrl ? ' · <a href="' + esc(res.spreadsheetUrl) + '" target="_blank" style="color:var(--accent)">Buka Google Sheet</a>' : '') + '</p>' +
         (res.items.length ? res.items.map(function (r) {
-          return '<button class="item" data-detail="' + esc(r.id) + '"><div class="row between"><span class="small muted">' + esc(r.id) + '</span>' + pill(r.status) + '</div>' +
-            '<div class="t">' + esc(r.line) + ' · ' + esc(r.battery) + '</div>' +
+          return '<button class="item" data-detail="' + esc(r.id) + '"><div class="row between"><span class="small muted">' + esc(r.id) + '</span><span>' + pill(r.status) + tipeTag(r.tipe) + '</span></div>' +
+            '<div class="t">' + lineTitle(r) + ' · ' + esc(r.battery) + '</div>' +
             '<div class="small muted">' + esc(fmtShort(r.startIso)) + ' · aktif ' + esc(dur(r.activeMin * 60000)) +
             (h.scope === 'all' ? ' · ' + esc(r.techLastName) : '') + '</div>' +
             (r.masalah ? '<div class="small clamp">' + esc(r.masalah + ' → ' + r.penanganan + (r.part && r.part !== 'Tidak ada' ? ' · ' + r.part : '')) + '</div>' : '') +
@@ -734,11 +1050,11 @@
   function downloadCsv() {
     var data = state.history.data;
     if (!data) return;
-    var cols = [['id', 'Maintenance ID'], ['line', 'Line'], ['battery', 'Baterai'], ['status', 'Status'], ['techFirstName', 'Teknisi awal'],
-      ['techLastName', 'Teknisi terakhir'], ['startText', 'Mulai'], ['finishText', 'Selesai'], ['activeMin', 'Total aktif (menit)'],
-      ['pauseMin', 'Total pause (menit)'], ['pendingMin', 'Total pending (menit)'], ['masalah', 'Masalah'], ['penyebab', 'Penyebab'],
-      ['penanganan', 'Penanganan'], ['part', 'Part'], ['tertunda', 'Yang tertunda'], ['tenggatText', 'Tenggat'], ['cancelReason', 'Alasan cancel'],
-      ['review', 'Status review'], ['mttr', 'Masuk MTTR'], ['catatan', 'Catatan']];
+    var cols = [['id', 'Maintenance ID'], ['factoryName', 'Factory'], ['line', 'Line'], ['mesin', 'Mesin'], ['battery', 'Baterai'], ['tipe', 'Tipe'],
+      ['status', 'Status'], ['techFirstName', 'Teknisi awal'], ['techLastName', 'Teknisi terakhir'], ['startText', 'Mulai'], ['finishText', 'Selesai'],
+      ['activeMin', 'Total aktif (menit)'], ['pauseMin', 'Total pause (menit)'], ['pendingMin', 'Total pending (menit)'], ['masalah', 'Masalah'],
+      ['penyebab', 'Penyebab'], ['penanganan', 'Penanganan'], ['part', 'Part'], ['tertunda', 'Yang tertunda'], ['tenggatText', 'Tenggat'],
+      ['cancelReason', 'Alasan cancel'], ['review', 'Status review'], ['mttr', 'Masuk MTTR'], ['catatan', 'Catatan']];
     function cell(v) {
       v = v == null ? '' : String(v);
       if (/^[=+\-@]/.test(v)) v = "'" + v;   // cegah formula injection saat dibuka di Excel
@@ -755,25 +1071,25 @@
   }
 
   // ---------- REVIEW ----------
-  function loadReview() {
-    $('view-review').innerHTML = '<div class="loading">Memuat review…</div>';
-    call('apiListReview').then(renderReview).catch(function (e) {
+  function loadReview(keepInput) {
+    if (!keepInput) $('view-review').innerHTML = '<div class="loading">Memuat review…</div>';
+    call('apiListReview', serverFilter('review')).then(function (r) { renderReview(r, keepInput); }).catch(function (e) {
       $('view-review').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>';
     });
   }
 
-  function renderReview(res) {
+  function renderReview(res, keepInput) {
     syncClock(res.serverNowIso);
-    var html = '<div class="hello"><div><div class="hi">' + (isAdmin() ? 'Semua item' : 'Item milik saya') + '</div><h1>Review</h1></div></div>';
+    var html = '';
     if (res.warnings.length) {
       html += '<div class="caps" style="margin:0 4px 8px">Peringatan > ' + esc(state.boot.limits.warnHours) + ' jam (menunggu jawaban teknisi)</div>' +
         res.warnings.map(function (r) {
-          return '<div class="item" style="cursor:default;border-left:5px solid var(--warn)"><div class="row between"><span class="t">' + esc(r.line) + ' · ' + esc(r.techLastName) + '</span>' + pill(r.status) + '</div>' +
+          return '<div class="item" style="cursor:default;border-left:5px solid var(--warn)"><div class="row between"><span class="t">' + lineTitle(r) + ' · ' + esc(r.techLastName) + '</span>' + pill(r.status) + '</div>' +
             '<div class="small muted">' + esc(r.id) + ' · diperingatkan ' + esc(fmtShort(r.warnedIso)) + ' · Abandoned otomatis jika tidak dijawab</div></div>';
         }).join('');
     }
     if (!res.items.length && !res.warnings.length) {
-      html += '<div class="card center"><h2>Semua beres</h2><p class="muted">Tidak ada item yang perlu direview.</p></div>';
+      html += '<div class="card center"><h2>Semua beres</h2><p class="muted">Tidak ada item yang perlu direview' + (filterSummary().length || state.q.review ? ' untuk filter ini' : '') + '.</p></div>';
     }
     html += res.items.map(function (r) {
       var info = '';
@@ -794,17 +1110,23 @@
           '<input type="number" data-f="min" min="1" value="' + esc(Math.max(1, Math.round(r.activeMin))) + '">' +
           '<label class="lbl" style="margin-top:10px">Catatan review * (dasar keputusan)</label>' +
           '<textarea data-f="note" placeholder="mis. konfirmasi teknisi via telepon, selesai ±14:30"></textarea>' +
-          '<div class="btn-row two" style="margin-top:10px"><button class="btn ok" data-review="HITUNG">Hitung ke MTTR</button>' +
+          '<div class="btn-row two" style="margin-top:10px"><button class="btn ok" data-review="HITUNG">Hitung</button>' +
           '<button class="btn danger-ghost" data-review="KELUARKAN">Keluarkan</button></div>';
       }
-      return '<div class="card" data-id="' + esc(r.id) + '"><div class="row between">' + pill(r.status) + '<button class="link" data-detail="' + esc(r.id) + '">Detail ›</button></div>' +
-        '<h2 style="margin:8px 0 2px;font-size:18px">' + esc(r.line) + ' · ' + esc(r.battery) + '</h2>' +
-        '<div class="small muted">' + esc(r.id) + ' · ' + esc(r.techFirstName) + (r.techLast !== r.techFirst ? ' → ' + esc(r.techLastName) : '') + '</div>' +
+      return '<div class="card" data-id="' + esc(r.id) + '"><div class="row between"><span>' + pill(r.status) + tipeTag(r.tipe) + '</span><button class="link" data-detail="' + esc(r.id) + '">Detail ›</button></div>' +
+        '<h2 style="margin:8px 0 2px;font-size:18px">' + lineTitle(r) + ' · ' + esc(r.battery) + '</h2>' +
+        '<div class="small muted">' + esc(r.id) + ' · ' + esc(r.factoryName) + ' · ' + esc(r.techFirstName) + (r.techLast !== r.techFirst ? ' → ' + esc(r.techLastName) : '') + '</div>' +
         '<div class="small" style="margin-top:6px">' + info + '</div>' + form + '</div>';
     }).join('');
-    $('view-review').innerHTML = html;
-    bindDetailLinks($('view-review'));
-    var bs = document.querySelectorAll('[data-review]');
+    if (keepInput && $('review-list')) {
+      $('review-list').innerHTML = html;
+    } else {
+      $('view-review').innerHTML = '<div class="hello"><div><div class="hi">' + (isAdmin() ? 'Semua item' : 'Item milik saya') + '</div><h1>Review</h1></div></div>' +
+        filterBar('review') + '<div id="review-list">' + html + '</div>';
+      bindFilterBar($('view-review'), function (fromSearch) { loadReview(fromSearch); });
+    }
+    bindDetailLinks($('review-list'));
+    var bs = document.querySelectorAll('#review-list [data-review]');
     for (var i = 0; i < bs.length; i++) {
       bs[i].onclick = function () {
         var b = this, card = b.closest('[data-id]');
@@ -812,8 +1134,118 @@
         busy(b, true, 'Menyimpan…');
         call('apiReview', card.getAttribute('data-id'), {
           action: b.getAttribute('data-review'), note: note ? note.value : '', activeMin: min ? Number(min.value) : null
-        }).then(function (r) { renderReview(r); toast('Keputusan review tersimpan.', 'ok'); refresh(); })
+        }, serverFilter('review')).then(function (r) { renderReview(r, true); toast('Keputusan review tersimpan.', 'ok'); refresh(); })
           .catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+      };
+    }
+  }
+
+  // ---------- DASHBOARD ----------
+  function loadDashboard() {
+    var head = '<div class="hello"><div><div class="hi">MTTR & kesehatan mesin</div><h1>Dashboard</h1></div>' +
+      (isAdmin() ? '<button class="btn ghost" id="d-qr" style="width:auto">QR</button>' : '') + '</div>' +
+      filterBar(null) +
+      '<div style="margin:-2px 0 14px">' + chips('periode', [{ value: '7', label: '7 hari' }, { value: '30', label: '30 hari' }, { value: '90', label: '90 hari' }, { value: '365', label: '1 tahun' }],
+        { selected: String(state.dash.periode) }) + '</div><div id="d-body"><div class="loading">Menghitung…</div></div>';
+    $('view-dashboard').innerHTML = head;
+    bindFilterBar($('view-dashboard'), loadDashboard);
+    bindChips($('view-dashboard'), function (n, v) { state.dash.periode = Number(v); fetchDashboard(); });
+    if ($('d-qr')) $('d-qr').onclick = function () { setView('qr'); loadQr(); };
+    fetchDashboard();
+  }
+
+  function fetchDashboard() {
+    var f = serverFilter();
+    f.periode = state.dash.periode;
+    $('d-body').innerHTML = '<div class="loading">Menghitung…</div>';
+    call('apiDashboard', f).then(renderDashboard).catch(function (e) { $('d-body').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
+  }
+
+  function tile(label, value, unit, sub) {
+    return '<div class="kpi"><span class="tiny muted">' + esc(label) + '</span><b>' + value + (unit ? '<span class="small"> ' + esc(unit) + '</span>' : '') + '</b>' +
+      (sub ? '<span class="tiny muted">' + sub + '</span>' : '') + '</div>';
+  }
+
+  /** Bar horizontal satu warna (satu seri → tanpa legend), nilai di ujung bar. */
+  function rankList(title, items, opts) {
+    opts = opts || {};
+    if (!items.length) return '<div class="card"><div class="caps">' + esc(title) + '</div><div class="empty small">Belum ada data di periode ini.</div></div>';
+    var max = Math.max.apply(null, items.map(function (i) { return i.count; })) || 1;
+    return '<div class="card"><div class="caps">' + esc(title) + '</div>' + (opts.note ? '<p class="tiny muted" style="margin:4px 0 0">' + opts.note + '</p>' : '') +
+      '<div class="rank">' + items.map(function (i) {
+        var sub = opts.sub ? opts.sub(i) : '';
+        return '<div class="rank-row" title="' + esc(i.key + ': ' + i.count + '×' + (sub ? ' · ' + sub : '')) + '"><div class="row between small"><span class="grow clamp1">' + esc(i.key) + '</span>' +
+          '<b>' + i.count + '×</b></div><div class="htrack"><div class="hfill" style="width:' + Math.max(2, Math.round(i.count / max * 100)) + '%"></div></div>' +
+          (sub ? '<div class="tiny muted">' + esc(sub) + '</div>' : '') + '</div>';
+      }).join('') + '</div></div>';
+  }
+
+  function renderDashboard(d) {
+    syncClock(d.serverNowIso);
+    var k = d.kpi;
+    var html = '<div class="kpis four">' +
+      tile('MTTR (' + d.mttrTypes + ')', mnt(k.mttr), k.mttr == null ? '' : 'mnt', k.mttrN + ' pekerjaan dihitung') +
+      tile('Corrective selesai', k.corrective, '', esc(dur(k.activeMin * 60000)) + ' total aktif') +
+      tile('Preventive selesai', k.preventive, '', 'tidak masuk MTTR') +
+      tile('Sedang berjalan', k.openNow, '', k.pendingNow + ' pending' + (k.overdueNow ? ' · <span style="color:var(--danger);font-weight:800">' + k.overdueNow + ' lewat tenggat</span>' : '')) +
+      '</div>';
+
+    // Project
+    if (d.projects.length) {
+      html += '<div class="caps" style="margin:4px 4px 8px">Status project</div><div class="proj-grid">' + d.projects.map(function (p) {
+        var health = p.health === 'ok' ? '<span class="status ok">✓ Sesuai target</span>' : (p.health === 'over' ? '<span class="status over">▲ Di atas target</span>' : '');
+        return '<div class="card proj"><div class="row between"><b style="font-size:17px">' + esc(p.battery) + '</b><span class="tag-lite">' + esc(p.fase || 'Fase belum diisi') + '</span></div>' +
+          '<div class="tiny muted">' + esc(p.factoryName || '') + (p.catatan ? ' · ' + esc(p.catatan) : '') + '</div>' +
+          '<div class="row between" style="margin-top:10px"><div><span class="tiny muted">MTTR</span><div><b style="font-size:22px">' + mnt(p.mttr) + '</b><span class="small"> mnt</span></div></div>' +
+          '<div style="text-align:right"><span class="tiny muted">Target</span><div><b>' + (p.target ? esc(p.target) + ' mnt' : '–') + '</b></div></div></div>' +
+          (health ? '<div style="margin-top:6px">' + health + '</div>' : '') +
+          '<div class="tiny muted" style="margin-top:6px">' + p.n + ' dihitung · ' + p.openNow + ' berjalan · ' + p.pendingNow + ' pending' + (p.overdueNow ? ' · ' + p.overdueNow + ' lewat' : '') + '</div></div>';
+      }).join('') + '</div>';
+    }
+
+    // Tren 12 minggu (satu seri: jumlah selesai)
+    var wmax = Math.max(1, Math.max.apply(null, d.weeks.map(function (w) { return w.count; })));
+    var last = d.weeks[d.weeks.length - 1];
+    html += '<div class="card"><div class="caps">Maintenance selesai per minggu (12 minggu)</div>' +
+      '<div class="cols" id="d-cols">' + d.weeks.map(function (w, i) {
+        var isMax = w.count === wmax && w.count > 0, isLast = i === d.weeks.length - 1;
+        return '<button type="button" class="col" data-i="' + i + '" title="' + esc('Minggu ' + w.label + ': ' + w.count + ' selesai · MTTR ' + mnt(w.mttr) + ' mnt') + '">' +
+          '<span class="n">' + ((isMax || isLast) && w.count ? w.count : '') + '</span><span class="ctrack"><span class="cfill" style="height:' + Math.round(w.count / wmax * 100) + '%"></span></span>' +
+          '<span class="lbl">' + (i % 3 === 2 || isLast ? esc(w.label) : '') + '</span></button>';
+      }).join('') + '</div><p class="small muted" id="d-cols-cap" style="margin:8px 0 0">Minggu ' + esc(last.label) + ': <b>' + last.count + '</b> selesai · MTTR ' + mnt(last.mttr) + ' mnt. Tap batang untuk detail.</p></div>';
+
+    html += rankList('Mesin paling sering bermasalah', d.machines, {
+      note: 'Semua pekerjaan non-cancel di periode ini, termasuk preventive & yang masih berjalan.',
+      sub: function (i) { return Math.round(i.minutes) + ' mnt aktif' + (i.mttr != null ? ' · MTTR ' + Math.round(i.mttr) + ' mnt' : ''); }
+    });
+    html += rankList('Line paling sering di-maintenance', d.lines, {
+      sub: function (i) { return Math.round(i.minutes) + ' mnt aktif' + (i.mttr != null ? ' · MTTR ' + Math.round(i.mttr) + ' mnt' : ''); }
+    });
+    html += rankList('Masalah terbanyak', d.problems, {
+      sub: function (i) { return i.mttr != null ? 'MTTR ' + Math.round(i.mttr) + ' mnt' : ''; }
+    });
+
+    html += '<div class="card"><div class="caps">Teknisi</div>' + (d.techs.length ? '<div class="table-wrap"><table class="tbl"><thead><tr><th>Teknisi</th><th>Selesai</th><th>MTTR</th><th>Total aktif</th></tr></thead><tbody>' +
+      d.techs.map(function (t) {
+        return '<tr><td>' + esc(t.key) + '</td><td>' + t.count + '</td><td>' + mnt(t.mttr) + (t.mttr != null ? ' mnt' : '') + '</td><td>' + esc(dur(t.minutes * 60000)) + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty small">Belum ada data di periode ini.</div>') + '</div>';
+
+    if (d.others.length) {
+      html += rankList('Isian "Lainnya" terbanyak', d.others, {
+        note: 'Yang sering muncul sebaiknya dijadikan pilihan tetap di sheet <b>Pilihan</b> (atau <b>Mesin</b>) supaya teknisi cukup tap.'
+      });
+    }
+    if (d.warnings.length) {
+      html += '<div class="card"><div class="caps" style="color:var(--warn)">Perlu dicek di Google Sheet (' + d.warnings.length + ')</div><ul class="small" style="margin:10px 0 0;padding-left:18px">' +
+        d.warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul></div>';
+    }
+    $('d-body').innerHTML = html;
+    var cols = document.querySelectorAll('#d-cols .col');
+    for (var i = 0; i < cols.length; i++) {
+      cols[i].onclick = function () {
+        var w = d.weeks[Number(this.getAttribute('data-i'))];
+        for (var j = 0; j < cols.length; j++) cols[j].classList.toggle('sel', cols[j] === this);
+        $('d-cols-cap').innerHTML = 'Minggu ' + esc(w.label) + ': <b>' + w.count + '</b> selesai · MTTR ' + mnt(w.mttr) + ' mnt';
       };
     }
   }
@@ -824,18 +1256,28 @@
     call('apiListLinesForQr').then(function (res) {
       var base = res.baseUrl || '';
       var devWarn = /\/dev$/.test(base) ? '<div class="alert warn">URL saat ini /dev (hanya untuk editor). Buka dari URL deployment /exec sebelum mencetak QR.</div>' : '';
-      $('view-qr').innerHTML = '<div class="hello no-print"><div><div class="hi">Admin</div><h1>QR Line</h1></div>' +
+      var qrs = [];
+      var html = '<button class="back no-print" id="qr-back">← Dashboard</button><div class="hello no-print"><div><div class="hi">Admin</div><h1>QR Line & Mesin</h1></div>' +
         '<button class="btn" style="width:auto" onclick="window.print()">Cetak</button></div>' + devWarn +
-        '<p class="small muted no-print" style="margin:0 4px 14px">Tambah line di sheet <b>Lines</b>, lalu buka tab ini lagi. Isi QR = URL web app + <code>?line=ID</code>.</p>' +
-        '<div class="qr-grid">' + res.lines.map(function (l, i) {
-          return '<div class="qr-card"><b style="font-size:18px">' + esc(l.id) + '</b><div class="small">' + esc(l.name) + '</div>' +
-            '<div class="qr" id="qr-' + i + '"></div><div class="small muted">' + esc(l.area) + '</div>' +
-            (l.active ? '' : '<div class="small" style="color:var(--danger)">NONAKTIF</div>') + '</div>';
-        }).join('') + '</div>';
-      res.lines.forEach(function (l, i) {
-        var url = base + '?line=' + encodeURIComponent(l.id);
-        if (window.QRCode) new QRCode($('qr-' + i), { text: url, width: 150, height: 150, correctLevel: QRCode.CorrectLevel.M });
-        else $('qr-' + i).innerHTML = '<div class="small" style="word-break:break-all">' + esc(url) + '</div>';
+        '<p class="small muted no-print" style="margin:0 4px 14px">Line dari sheet <b>Lines</b>, mesin dari sheet <b>Mesin</b>. QR mesin langsung memilih mesinnya saat di-scan (1 tap lebih cepat).</p>' +
+        '<div class="qr-grid">';
+      res.lines.forEach(function (l) {
+        qrs.push({ url: base + '?line=' + encodeURIComponent(l.id) });
+        html += '<div class="qr-card"><b style="font-size:18px">' + esc(l.id) + '</b><div class="small">' + esc(l.name) + '</div>' +
+          '<div class="qr" id="qr-' + (qrs.length - 1) + '"></div><div class="small muted">' + esc([l.factoryName, l.area].filter(String).join(' · ')) + '</div>' +
+          '<div class="tiny muted">Scan: status, mulai & BOM</div>' + (l.active ? '' : '<div class="small" style="color:var(--danger)">NONAKTIF</div>') + '</div>';
+        l.machines.forEach(function (m) {
+          qrs.push({ url: base + '?line=' + encodeURIComponent(l.id) + '&mesin=' + encodeURIComponent(m.id) });
+          html += '<div class="qr-card mesin"><b>' + esc(m.name) + '</b><div class="small">' + esc(l.id) + ' · ' + esc(m.id) + '</div>' +
+            '<div class="qr" id="qr-' + (qrs.length - 1) + '"></div><div class="tiny muted">QR mesin</div></div>';
+        });
+      });
+      html += '</div>';
+      $('view-qr').innerHTML = html;
+      $('qr-back').onclick = function () { showTab('dashboard'); };
+      qrs.forEach(function (q, i) {
+        if (window.QRCode) new QRCode($('qr-' + i), { text: q.url, width: 150, height: 150, correctLevel: QRCode.CorrectLevel.M });
+        else $('qr-' + i).innerHTML = '<div class="small" style="word-break:break-all">' + esc(q.url) + '</div>';
       });
     }).catch(function (e) { $('view-qr').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
   }
