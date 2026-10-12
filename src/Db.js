@@ -9,10 +9,19 @@ function sheet_(name) {
   return sh;
 }
 
+/** Header per sheet diingat selama satu request (hemat 2 panggilan Sheets per tulis). */
+var HEAD_MEMO_ = {};
+function resetHeaders_() { HEAD_MEMO_ = {}; }
+function forgetHeaders_(name) { delete HEAD_MEMO_[name]; }
+
 function headers_(sh) {
+  var name = sh.getName();
+  if (HEAD_MEMO_[name]) return HEAD_MEMO_[name];
   var lastCol = sh.getLastColumn();
   if (lastCol === 0) return [];
-  return sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+  var h = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (x) { return String(x).trim(); });
+  HEAD_MEMO_[name] = h;
+  return h;
 }
 
 function rowsToObjs_(headers, values, firstRow) {
@@ -32,6 +41,7 @@ function readTable_(name) {
   var values = sheet_(name).getDataRange().getValues();
   if (values.length < 2) return [];
   var headers = values[0].map(function (h) { return String(h).trim(); });
+  HEAD_MEMO_[name] = headers;
   return rowsToObjs_(headers, values.slice(1), 2);
 }
 

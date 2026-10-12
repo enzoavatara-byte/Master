@@ -37,6 +37,7 @@ class Range {
     }
     return this;
   }
+  getSheet() { return this.sh; }
   clearContent() {
     for (let i = 0; i < this.nr; i++) {
       const row = this.sh.data[this.r - 1 + i];
@@ -85,6 +86,15 @@ const ss = new Spreadsheet();
 const user = { email: 'owner@gmail.com' };
 const triggers = [];
 const mails = [];
+// CacheService tiruan. Default MATI (test mengubah sheet langsung tanpa trigger onChange);
+// test cache menyalakannya lewat cache.enabled = true.
+const cache = { enabled: false, store: {}, puts: 0 };
+const scriptCache = {
+  get: (k) => (cache.enabled && k in cache.store ? cache.store[k] : null),
+  getAll: (ks) => { const o = {}; ks.forEach(k => { if (cache.enabled && k in cache.store) o[k] = cache.store[k]; }); return o; },
+  putAll: (o) => { if (!cache.enabled) return; cache.puts++; Object.assign(cache.store, o); },
+  remove: (k) => { delete cache.store[k]; }
+};
 const lock = { held: false };
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -122,12 +132,16 @@ const ctx = {
     })
   },
   MailApp: { sendEmail: (m) => mails.push(m) },
+  CacheService: { getScriptCache: () => scriptCache },
   Utilities,
   ScriptApp: {
     getProjectTriggers: () => triggers,
     newTrigger: (fn) => {
       const done = { create: () => triggers.push({ getHandlerFunction: () => fn }) };
-      return { timeBased: () => ({ everyMinutes: () => done, everyDays: () => ({ atHour: () => done }) }) };
+      return {
+        timeBased: () => ({ everyMinutes: () => done, everyDays: () => ({ atHour: () => done }) }),
+        forSpreadsheet: () => ({ onChange: () => done })
+      };
     },
     getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/XYZ/exec' })
   },
@@ -151,4 +165,4 @@ fs.readdirSync(srcDir).filter(f => f.endsWith('.js')).sort().reverse() // urutan
   .forEach(f => vm.runInContext(fs.readFileSync(path.join(srcDir, f), 'utf8'), ctx, { filename: f }));
 
 
-module.exports = { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails };
+module.exports = { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache };

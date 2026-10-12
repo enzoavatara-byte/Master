@@ -48,7 +48,7 @@ Dari scan sampai timer jalan: **QR mesin = 1 tap** (Mulai), **QR line = 2 tap** 
 | Script | `Config` | **berubah** |
 | Script | `Master` | **BARU**: buat file ini |
 | Script | `Rekap` | **BARU**: buat file ini |
-| Script | `Db` | tetap |
+| Script | `Db` | **berubah** |
 | Script | `Auth` | **berubah** |
 | Script | `Maintenance` | **berubah** |
 | Script | `Api` | **berubah** |
@@ -161,14 +161,36 @@ Isian bebas murni (tanpa pilihan) membuat dashboard tidak berguna ("sensor eror"
 2. **Akun Google terpisah untuk Bogor & Cikarang = data terpisah**, sehingga dashboard tidak bisa membandingkan factory. Disarankan satu spreadsheet + kolom `Factory`. Jika harus dipisah, kodenya sama, tinggal di-deploy dua kali.
 3. **Kamera di dalam app tidak dijamin** (iframe Apps Script bisa memblokir). Ada cadangan, tapi **uji di HP teknisi asli** sebelum menjanjikan "scan tanpa keluar app".
 4. **Stok Minimum di BOM hanya angka referensi.** Tanpa pencatatan stok masuk/keluar, angka itu tidak akan pernah memberi peringatan. Tracking stok = proyek terpisah.
-5. **Performa**: tiap request membaca seluruh `Maintenance` + sheet master. Nyaman sampai beberapa ribu baris; di atas ~10 ribu, arsipkan per tahun.
+5. **Performa** (lihat §6b): Apps Script punya jeda tetap ±1–2 detik per perjalanan ke server yang tidak bisa dihilangkan. Yang bisa dikendalikan sudah dipangkas: sheet master di-cache, data awal ikut halaman, aksi tidak membaca ulang data. Tab `Maintenance` tetap dibaca penuh per request, jadi **arsipkan per tahun** (§4b).
+
+---
+
+## 6b. Kecepatan
+
+Waktu sebuah aksi di Apps Script ditentukan oleh **jumlah panggilan ke Google Sheets**, bukan jumlah data. Hasil `npm run perf` (panggilan per aksi):
+
+| Aksi | 2.1 awal | 2.1.1 |
+|---|---|---|
+| Buka app / scan QR | 72–78 (2 perjalanan) | **10** (1 perjalanan) |
+| Mulai / Selesai | 112 / 124 | **12** |
+| Pause / Resume | 109 / 74 | **11** |
+| Refresh otomatis (60 dtk) | 55 | **10** |
+
+Caranya:
+- **Cache master** (Users, Factory, Projects, Lines, Mesin, BOM, Pilihan, Form, Config) di CacheService, dipakai bersama semua user. Dihapus otomatis saat ada yang **mengedit spreadsheet** (trigger `onEdit` + `onMasterChange`), jadi perubahan sheet tetap langsung terlihat. Pengaman: kedaluwarsa sendiri setelah 10 menit. Menu **MTTR 2.1 → Muat ulang data master** untuk memaksa.
+- **Data awal ditanam di halaman** saat dibuka (tidak menunggu perjalanan kedua).
+- **Aksi tidak membaca ulang** data setelah menulis; tampilan dihitung dari data yang sudah di memori.
+- Font tidak diambil dari Google Fonts; library QR hanya dimuat di halaman QR.
+
+Yang **tidak** bisa dipercepat di Apps Script: jeda tetap per perjalanan ke server (±1–2 detik, lebih lama saat "cold start" setelah lama tidak dipakai). Jika target "instan seperti aplikasi HP", itu butuh backend lain — bukan Apps Script.
 
 ---
 
 ## 7. Test & preview
 
 ```bash
-npm test          # 41 test logika server (mock Sheets + jam palsu)
+npm test          # 45 test logika server (mock Sheets + jam palsu)
+npm run perf      # jumlah panggilan ke Sheets per aksi
 npm run preview   # http://localhost:8787/?as=owner@gmail.com
                   # simulasi QR: &line=L01   QR mesin: &line=L11&mesin=M-E1
 ```

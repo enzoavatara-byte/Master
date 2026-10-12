@@ -143,15 +143,9 @@ var APP = {
 /** Membaca nilai dari sheet Config, fallback ke default. */
 function getConfig_(key) {
   var def = APP.CONFIG_DEFAULTS[key] ? APP.CONFIG_DEFAULTS[key].value : null;
-  if (!SpreadsheetApp.getActive().getSheetByName(APP.SHEETS.CONFIG)) return def;
-  var rows = readTable_(APP.SHEETS.CONFIG);
-  for (var i = 0; i < rows.length; i++) {
-    if (String(rows[i]['Key']).trim() === key) {
-      var v = rows[i]['Value'];
-      return (v === '' || v === null) ? def : v;
-    }
-  }
-  return def;
+  var cfg = masterData_().config || {};
+  var v = cfg[key];
+  return (v === '' || v === null || v === undefined) ? def : v;
 }
 
 function getHours_(key) {

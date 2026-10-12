@@ -1,15 +1,69 @@
 /**
- * Master data yang diedit user di Google Sheet: Factory, Projects, Lines, Mesin, Pilihan, Form.
- * Dibaca sekali per request (memo direset di requireUser_), jadi perubahan di sheet langsung
- * terlihat di request berikutnya tanpa deploy ulang.
+ * Master data yang diedit user di Google Sheet: Users, Factory, Projects, Lines, Mesin, BOM, Pilihan,
+ * Form, Config.
+ *
+ * Kecepatan: membaca 9 sheet di setiap request = puluhan panggilan ke Sheets (lambat). Karena itu master
+ * disimpan di CacheService (dipakai bersama semua user) dan HANYA dibaca ulang jika:
+ *  - ada yang mengedit spreadsheet secara manual (onEdit / onChange → cache dihapus), atau
+ *  - cache kedaluwarsa (MD_CACHE_TTL_, pengaman jika trigger tidak jalan), atau
+ *  - admin memilih menu "Muat ulang data master".
+ * Perubahan di sheet tetap langsung terlihat di request berikutnya.
  *
  * Nilai sheet yang tidak valid TIDAK membuat app error: dilewati, diganti default, dan dicatat
  * di md.warnings (tampil di Dashboard Admin).
  */
 
 var MD_MEMO_ = null;
+var MD_CACHE_KEY_ = 'mttr-md-21b';   // naikkan jika struktur md berubah (cache lama otomatis diabaikan)
+var MD_CACHE_TTL_ = 600;             // detik
+var MD_CHUNK_ = 24000;               // karakter per potongan (batas CacheService 100 KB per nilai)
 
-function resetMaster_() { MD_MEMO_ = null; }
+/** Lupakan data per-request (memo master & header). Cache bersama TIDAK dihapus. */
+function resetMaster_() { MD_MEMO_ = null; resetHeaders_(); }
+
+function scriptCache_() {
+  try { return CacheService.getScriptCache(); } catch (e) { return null; }
+}
+
+function readMasterCache_() {
+  var c = scriptCache_();
+  if (!c) return null;
+  try {
+    var n = Number(c.get(MD_CACHE_KEY_ + ':n'));
+    if (!n) return null;
+    var keys = [];
+    for (var i = 0; i < n; i++) keys.push(MD_CACHE_KEY_ + ':' + i);
+    var parts = c.getAll(keys), s = '';
+    for (var j = 0; j < keys.length; j++) {
+      if (parts[keys[j]] == null) return null;
+      s += parts[keys[j]];
+    }
+    return JSON.parse(s);
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeMasterCache_(md) {
+  var c = scriptCache_();
+  if (!c) return;
+  try {
+    var s = JSON.stringify(md), obj = {};
+    var n = Math.max(1, Math.ceil(s.length / MD_CHUNK_));
+    for (var i = 0; i < n; i++) obj[MD_CACHE_KEY_ + ':' + i] = s.substr(i * MD_CHUNK_, MD_CHUNK_);
+    obj[MD_CACHE_KEY_ + ':n'] = String(n);
+    c.putAll(obj, MD_CACHE_TTL_);
+  } catch (e) {
+    console.warn('Cache master gagal disimpan: ' + e);
+  }
+}
+
+/** Hapus cache bersama: dipanggil saat sheet diedit manual, setup, dan menu admin. */
+function invalidateMaster_() {
+  var c = scriptCache_();
+  if (c) { try { c.remove(MD_CACHE_KEY_ + ':n'); } catch (e) { /* abaikan */ } }
+  resetMaster_();
+}
 
 function readOptional_(name) {
   return SpreadsheetApp.getActive().getSheetByName(name) ? readTable_(name) : [];
@@ -17,6 +71,16 @@ function readOptional_(name) {
 
 function masterData_() {
   if (MD_MEMO_) return MD_MEMO_;
+  var md = readMasterCache_();
+  if (!md) {
+    md = buildMaster_();
+    writeMasterCache_(md);
+  }
+  MD_MEMO_ = md;
+  return md;
+}
+
+function buildMaster_() {
   var warnings = [];
   var md = { warnings: warnings };
 
@@ -89,7 +153,25 @@ function masterData_() {
   // ---- Form ----
   md.forms = readForms_(warnings, opts);
 
-  MD_MEMO_ = md;
+  // ---- Users (auth & nama), Config, BOM: ikut cache supaya tidak dibaca ulang tiap request ----
+  md.users = readTable_(APP.SHEETS.USERS).map(function (u) {
+    return { email: String(u['Email']).trim().toLowerCase(), name: String(u['Nama'] || u['Email']), peran: String(u['Peran'] || ''), aktif: u['Aktif'] };
+  });
+  md.config = {};
+  readOptional_(APP.SHEETS.CONFIG).forEach(function (r) {
+    var k = String(r['Key'] || '').trim();
+    if (k) md.config[k] = r['Value'];
+  });
+  md.bom = readOptional_(APP.SHEETS.BOM).filter(function (b) {
+    return isActiveRow_(b['Aktif']) && String(b['Nama Part'] || '').trim();
+  }).map(function (b) {
+    return {
+      line: normLine_(b['Line ID']), mesinId: normLine_(b['Mesin ID']), pn: String(b['Part Number'] || '').trim(),
+      name: String(b['Nama Part']).trim(), qty: b['Qty Terpasang'] === '' ? '' : String(b['Qty Terpasang']),
+      unit: String(b['Satuan'] || ''), location: String(b['Lokasi Simpan'] || ''),
+      minStock: b['Stok Minimum'] === '' ? '' : String(b['Stok Minimum'])
+    };
+  });
   return md;
 }
 
@@ -227,7 +309,10 @@ function ensureMaintColumns_(fields) {
   var sh = sheet_(APP.SHEETS.MAINT);
   var have = headers_(sh);
   var missing = fields.filter(function (f) { return f && have.indexOf(f) === -1; });
-  if (missing.length) sh.getRange(1, have.length + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
+  if (missing.length) {
+    sh.getRange(1, have.length + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
+    forgetHeaders_(APP.SHEETS.MAINT);
+  }
 }
 
 /** Field tambahan (non-sistem) dari semua form yang disimpan sebagai kolom Maintenance. Pause hanya di Log. */

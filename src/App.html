@@ -248,23 +248,34 @@
 
   // ---------- boot & refresh ----------
   function boot() {
-    call('apiBootstrap', INITIAL_LINE_ID || '', INITIAL_MESIN_ID || '', serverFilter()).then(function (b) {
-      state.boot = b;
-      syncClock(b.serverNowIso);
-      setBadges(b.counts);
-      // filter tersimpan yang sudah tidak valid (factory/line dihapus dari sheet) dibersihkan
-      if (state.filter.factory && !M().factories.some(function (f) { return f.id === state.filter.factory; })) state.filter = { factory: '', baterai: '', line: '' };
-      if (b.lineView) {
-        if (b.lineView.line && !state.qr) state.qr = { line: b.lineView.line.id, at: Date.now() };
-        state.lineView = b.lineView; setView('line'); renderLine();
-      } else {
-        renderHome();
-        if (INITIAL_MESIN_ID) toast('QR mesin ' + INITIAL_MESIN_ID + ' tidak cocok dengan satu line. Pilih line-nya.', 'err');
-      }
-    }).catch(function (e) {
-      $('view-home').innerHTML = '<div class="card center" style="margin-top:40px"><h2>Gagal memuat</h2><p class="muted">' + esc(cleanErr(e)) +
-        '</p><button class="btn" onclick="location.reload()">Coba lagi</button></div>';
-    });
+    var hasFilter = !!(state.filter.factory || state.filter.baterai || state.filter.line);
+    // Data awal sudah ditanam di halaman oleh server (doGet) → langsung tampil tanpa menunggu server lagi.
+    if (window.BOOT) {
+      try { applyBoot(window.BOOT); } catch (e) { bootError(e); return; }
+      if (hasFilter) refresh(true); // statistik Beranda dihitung ulang sesuai filter tersimpan
+      return;
+    }
+    call('apiBootstrap', INITIAL_LINE_ID || '', INITIAL_MESIN_ID || '', serverFilter()).then(applyBoot).catch(bootError);
+  }
+
+  function bootError(e) {
+    $('view-home').innerHTML = '<div class="card center" style="margin-top:40px"><h2>Gagal memuat</h2><p class="muted">' + esc(cleanErr(e)) +
+      '</p><button class="btn" onclick="location.reload()">Coba lagi</button></div>';
+  }
+
+  function applyBoot(b) {
+    state.boot = b;
+    syncClock(b.serverNowIso);
+    setBadges(b.counts);
+    // filter tersimpan yang sudah tidak valid (factory/line dihapus dari sheet) dibersihkan
+    if (state.filter.factory && !M().factories.some(function (f) { return f.id === state.filter.factory; })) state.filter = { factory: '', baterai: '', line: '' };
+    if (b.lineView) {
+      if (b.lineView.line && !state.qr) state.qr = { line: b.lineView.line.id, at: Date.now() };
+      state.lineView = b.lineView; setView('line'); renderLine();
+    } else {
+      renderHome();
+      if (INITIAL_MESIN_ID) toast('QR mesin ' + INITIAL_MESIN_ID + ' tidak cocok dengan satu line. Pilih line-nya.', 'err');
+    }
   }
 
   var refreshing = false;
@@ -1251,9 +1262,25 @@
   }
 
   // ---------- QR (Admin) ----------
+  /** Library QR hanya dimuat saat halaman QR dibuka (tidak memperlambat teknisi). */
+  var qrLibPromise = null;
+  function loadQrLib() {
+    if (window.QRCode) return Promise.resolve();
+    if (qrLibPromise) return qrLibPromise;
+    qrLibPromise = new Promise(function (resolve) {
+      var sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+      sc.onload = resolve;
+      sc.onerror = function () { qrLibPromise = null; resolve(); }; // tanpa library: URL ditampilkan sebagai teks
+      document.head.appendChild(sc);
+    });
+    return qrLibPromise;
+  }
+
   function loadQr() {
     $('view-qr').innerHTML = '<div class="loading">Memuat line…</div>';
-    call('apiListLinesForQr').then(function (res) {
+    Promise.all([call('apiListLinesForQr'), loadQrLib()]).then(function (all) {
+      var res = all[0];
       var base = res.baseUrl || '';
       var devWarn = /\/dev$/.test(base) ? '<div class="alert warn">URL saat ini /dev (hanya untuk editor). Buka dari URL deployment /exec sebelum mencetak QR.</div>' : '';
       var qrs = [];

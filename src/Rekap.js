@@ -121,6 +121,7 @@ function buildRekap_(year) {
 
 /** Trigger harian: perbarui rekap tahun ini; di bulan Januari juga tahun lalu (review akhir tahun bisa menyusul). */
 function refreshRekap() {
+  resetMaster_();
   var now = new Date();
   var y = yearOf_(now);
   buildRekap_(y);
@@ -141,6 +142,7 @@ function appendArchive_(name, srcHeaders, srcRows, keyOf) {
   }
   var missing = srcHeaders.filter(function (x) { return h.indexOf(x) === -1; });
   if (missing.length) { sh.getRange(1, h.length + 1, 1, missing.length).setValues([missing]); h = h.concat(missing); }
+  forgetHeaders_(name);
   var existing = {};
   readTable_(name).forEach(function (o) { existing[keyOf(o)] = true; });
   var out = [];

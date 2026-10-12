@@ -19,10 +19,19 @@ function doGet(e) {
   // Whitelist karakter: nilai ini ditanam ke <script> di Index.html.
   t.lineId = String(params.line || '').trim().replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 50);
   t.mesinId = String(params.mesin || '').trim().replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 50);
+  // Data awal ditanam langsung di halaman: HP tidak perlu perjalanan kedua ke server sebelum tampil.
+  var boot = null;
+  try { boot = bootstrap_(user, t.lineId, t.mesinId, null); } catch (err) { console.warn('bootstrap di doGet gagal: ' + err); }
+  t.boot = safeJson_(boot);
   return t.evaluate()
     .setTitle(APP.NAME)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+}
+
+/** JSON yang aman ditanam di dalam <script> (tidak bisa menutup tag script). */
+function safeJson_(v) {
+  return JSON.stringify(v === undefined ? null : v).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 }
 
 function include(name) {
@@ -50,7 +59,28 @@ function onOpen() {
     .addSeparator()
     .addItem('Rekap tahunan (buat / perbarui)…', 'menuRekapTahunan')
     .addItem('Arsipkan data tahun lalu…', 'menuArsipkanTahun')
+    .addSeparator()
+    .addItem('Muat ulang data master (jika perubahan sheet belum muncul)', 'menuMuatUlangMaster')
     .addToUi();
+}
+
+/** Simple trigger: setiap edit manual di spreadsheet → cache master dihapus (perubahan langsung terlihat). */
+function onEdit(e) {
+  var name = '';
+  try { name = e && e.range ? e.range.getSheet().getName() : ''; } catch (err) { /* abaikan */ }
+  if (name === APP.SHEETS.MAINT || name === APP.SHEETS.LOG) return; // bukan master
+  invalidateMaster_();
+}
+
+/** Trigger terpasang (setup): perubahan struktur (hapus/sisip baris, tab baru) juga menghapus cache. */
+function onMasterChange() {
+  invalidateMaster_();
+}
+
+function menuMuatUlangMaster() {
+  requireUser_([APP.ROLES.ADMIN]);
+  invalidateMaster_();
+  SpreadsheetApp.getUi().alert('Data master akan dibaca ulang dari sheet pada request berikutnya.');
 }
 
 /**
@@ -62,6 +92,7 @@ function onOpen() {
  * - Memasang trigger checkTimeouts (tanpa duplikat).
  */
 function setup() {
+  invalidateMaster_();
   var ss = SpreadsheetApp.getActive();
   ss.setSpreadsheetTimeZone(APP.TZ);
 
@@ -75,6 +106,7 @@ function setup() {
       var missing = want.filter(function (h) { return have.indexOf(h) === -1; });
       if (missing.length) sh.getRange(1, have.length + 1, 1, missing.length).setValues([missing]);
     }
+    forgetHeaders_(name);
     sh.setFrozenRows(1);
     sh.getRange(1, 1, 1, sh.getLastColumn()).setFontWeight('bold');
   });
@@ -135,7 +167,7 @@ function setup() {
     }
   });
 
-  resetMaster_();
+  invalidateMaster_();
   ensureMaintColumns_(customColumns_(masterData_()));
 
   if (readTable_(APP.SHEETS.USERS).length === 0) {
@@ -150,11 +182,14 @@ function setup() {
   if (!hasTrigger) ScriptApp.newTrigger('checkTimeouts').timeBased().everyMinutes(APP.TRIGGER_MINUTES).create();
   var hasRekap = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'refreshRekap'; });
   if (!hasRekap) ScriptApp.newTrigger('refreshRekap').timeBased().everyDays(1).atHour(1).create(); // rekap tahun ini tiap malam
+  var hasChange = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'onMasterChange'; });
+  if (!hasChange) ScriptApp.newTrigger('onMasterChange').forSpreadsheet(ss).onChange().create(); // hapus/sisip baris → cache dihapus
   buildRekap_(yearOf_(new Date()));
 
   var blank = ss.getSheetByName('Sheet1');
   if (blank && ss.getSheets().length > 1 && blank.getLastRow() === 0) ss.deleteSheet(blank);
 
+  invalidateMaster_();
   return 'Setup selesai.';
 }
 
@@ -195,6 +230,7 @@ function buildDerivedSheets_(ss) {
 function prepDerived_(ss, name) {
   var sh = ss.getSheetByName(name) || ss.insertSheet(name);
   sh.clear();
+  forgetHeaders_(name);
   sh.setFrozenRows(1);
   return sh;
 }

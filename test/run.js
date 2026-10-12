@@ -5,7 +5,7 @@
  */
 'use strict';
 const assert = require('assert');
-const { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails } = require('./mock');
+const { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache } = require('./mock');
 
 // ---------- helpers ----------
 let passed = 0;
@@ -31,7 +31,7 @@ test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempot
   ctx.setup(); ctx.setup();
   for (const n of ['Users', 'Factory', 'Projects', 'Lines', 'Mesin', 'BOM', 'Pilihan', 'Form', 'Config', 'Maintenance', 'Log', 'Maintenance VF7', 'Maintenance Limo7', 'Maintenance E22H', 'Maintenance E245', 'Pending Work']) assert.ok(ss.getSheetByName(n), n);
   assert.ok(!ss.getSheetByName('Sheet1'));
-  jeq(triggers.map(t => t.getHandlerFunction()), ['checkTimeouts', 'refreshRekap'], 'trigger tidak dobel');
+  jeq(triggers.map(t => t.getHandlerFunction()), ['checkTimeouts', 'refreshRekap', 'onMasterChange'], 'trigger tidak dobel');
   assert.strictEqual(ctx.readTable_('Config').length, 5);
   assert.strictEqual(ctx.readTable_('Users')[0].Peran, 'Admin');
   jeq(ctx.readTable_('Projects').map(p => p['Factory ID'] + ':' + p.Baterai), ['F1:VF7', 'F1:Limo7', 'F2:E22H', 'F2:E245']);
@@ -598,7 +598,7 @@ test('2.1 migrasi: setup() ulang menambah kolom & mengembalikan field sistem yan
   assert.ok(ctx.readTable_('Form').some(r => r.Form === 'Pending' && r.Field === 'Tenggat'));
   assert.strictEqual(ctx.readTable_('Maintenance').length, before);
   assert.ok(ss.getSheetByName('Maintenance').data[0].includes('Kondisi akhir'));
-  assert.strictEqual(triggers.length, 2);
+  assert.strictEqual(triggers.length, 3);
 });
 
 // ---------- Rekap tahunan & arsip ----------
@@ -693,6 +693,75 @@ test('arsip: aplikasi tetap jalan; arsip tidak tampil di Riwayat; peringatan hil
   assert.ok(ss.getSheetByName('Rekap 2027'));
   assert.strictEqual(rekapRows(2027)[13][1], 2, 'rekap 2027: 2 pekerjaan selesai (bulan Februari)');
   assert.strictEqual(rekapRows(2027)[2][1], 2);
+});
+
+// ---------- Kecepatan: cache master & data awal di halaman ----------
+test('cache master: request kedua tidak membaca sheet master; edit manual (onEdit/onChange) langsung menghapus cache', () => {
+  cache.enabled = true; cache.store = {}; cache.puts = 0;
+  const Lsh = ss.getSheetByName('Lines');
+  let linesReads = 0;
+  const orig = Lsh.getDataRange.bind(Lsh);
+  Lsh.getDataRange = () => { linesReads++; return orig(); };
+  try {
+    as('budi@gmail.com', () => ctx.apiBootstrap('', '', {}));
+    assert.strictEqual(cache.puts, 1, 'request pertama mengisi cache');
+    const r1 = linesReads;
+    as('budi@gmail.com', () => ctx.apiBootstrap('', '', {}));
+    as('andi@gmail.com', () => ctx.apiListPending({}));
+    assert.strictEqual(linesReads, r1, 'request berikutnya (user lain juga) tidak membaca sheet Lines');
+    // edit manual tanpa trigger → masih data lama (bukti cache dipakai)
+    Lsh.appendRow(['L77', 'Line baru', 'F1', '', '', '', 'Ya']);
+    as('budi@gmail.com', () => assert.ok(!ctx.apiBootstrap('', '', {}).master.lines.some(l => l.id === 'L77')));
+    // edit di sheet Maintenance tidak menghapus cache master
+    ctx.onEdit({ range: ss.getSheetByName('Maintenance').getRange(2, 1) });
+    as('budi@gmail.com', () => assert.ok(!ctx.apiBootstrap('', '', {}).master.lines.some(l => l.id === 'L77')));
+    // onEdit di sheet master → langsung terlihat
+    ctx.onEdit({ range: Lsh.getRange(Lsh.getLastRow(), 1) });
+    as('budi@gmail.com', () => assert.ok(ctx.apiBootstrap('', '', {}).master.lines.some(l => l.id === 'L77')));
+    // hapus baris (onChange) → juga langsung terlihat
+    Lsh.data = Lsh.data.filter(r => r[0] !== 'L77');
+    ctx.onMasterChange();
+    as('budi@gmail.com', () => assert.ok(!ctx.apiBootstrap('', '', {}).master.lines.some(l => l.id === 'L77')));
+  } finally {
+    Lsh.getDataRange = orig;
+  }
+});
+
+test('cache master: user dinonaktifkan → langsung ditolak setelah edit', () => {
+  as('andi@gmail.com', () => ctx.apiBootstrap('', '', {}));
+  setRow('Users', (r, h) => String(r[h.indexOf('Email')]).trim().toLowerCase() === 'andi@gmail.com', 'Aktif', 'Tidak');
+  ctx.onEdit({ range: ss.getSheetByName('Users').getRange(2, 1) });
+  as('andi@gmail.com', () => throwsMsg(() => ctx.apiBootstrap('', '', {}), /ACCESS_DENIED/));
+  setRow('Users', (r, h) => String(r[h.indexOf('Email')]).trim().toLowerCase() === 'andi@gmail.com', 'Aktif', 'ya');
+  ctx.onEdit({ range: ss.getSheetByName('Users').getRange(2, 1) });
+  as('andi@gmail.com', () => assert.strictEqual(ctx.apiBootstrap('', '', {}).user.role, 'Teknisi'));
+});
+
+test('cache master: BOM besar dipecah ke beberapa potongan cache dan tetap utuh', () => {
+  const B = ss.getSheetByName('BOM');
+  for (let i = 0; i < 400; i++) B.appendRow(['L02', '', 'PN-' + i, 'Part panjang nomor ' + i + ' '.repeat(40), 1, 'pcs', 'Rak ' + i, 1, 'Ya']);
+  ctx.onMasterChange();
+  as('budi@gmail.com', () => ctx.apiBootstrap('', '', {}));
+  const n = Number(Object.keys(cache.store).filter(k => /:n$/.test(k)).map(k => cache.store[k])[0]);
+  assert.ok(n >= 2, 'potongan cache: ' + n);
+  as('budi@gmail.com', () => assert.ok(ctx.apiGetBom('L02').length >= 400));
+  B.data = B.data.filter(r => !/^PN-\d+$/.test(r[2]));
+  ctx.onMasterChange();
+  cache.enabled = false;
+});
+
+test('doGet menanam data awal di halaman (aman dari </script>), tanpa panggilan kedua', () => {
+  setRow('Lines', (r) => r[0] === 'L02', 'Nama Line', 'Assy </script><b>2');
+  as('budi@gmail.com', () => {
+    const page = ctx.doGet({ parameter: { line: 'L02' } });
+    assert.ok(!/<\/script/i.test(page.vars.boot), 'tidak bisa menutup tag script');
+    const boot = JSON.parse(page.vars.boot);
+    assert.strictEqual(boot.user.email, 'budi@gmail.com');
+    assert.strictEqual(boot.lineView.line.id, 'L02');
+    assert.strictEqual(boot.lineView.line.name, 'Assy </script><b>2');
+  });
+  as('asing@gmail.com', () => assert.strictEqual(ctx.doGet({ parameter: {} }).template, 'Message'));
+  setRow('Lines', (r) => r[0] === 'L02', 'Nama Line', 'Assy 2');
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

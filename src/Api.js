@@ -105,7 +105,11 @@ function canDecide_(r, user) {
  * @param {Object} filter  filter Beranda yang tersimpan di HP
  */
 function apiBootstrap(lineId, mesinId, filter) {
-  var user = requireUser_();
+  return bootstrap_(requireUser_(), lineId, mesinId, filter);
+}
+
+/** Data awal. Dipanggil doGet (ditanam di halaman → hemat satu perjalanan) atau apiBootstrap. */
+function bootstrap_(user, lineId, mesinId, filter) {
   var rows = readTable_(APP.SHEETS.MAINT);
   var c = ctx_();
   var mine = openForUser_(rows, user.email);
@@ -264,30 +268,18 @@ function lineView_(lineId, rows, c, user, mesinId) {
 
 /** BOM aktif untuk satu line: baris Line ID = line, Grup-nya, atau '*'. Sheet BOM belum ada -> []. */
 function bomForLine_(lineId) {
-  if (!SpreadsheetApp.getActive().getSheetByName(APP.SHEETS.BOM)) return [];
   var md = masterData_();
   var line = lineOf_(md, lineId);
   var key = normLine_(lineId), grup = line ? line.grup : '';
   var machineName = {};
   md.machines.forEach(function (m) { machineName[m.id] = m.name; });
-  return readTable_(APP.SHEETS.BOM).filter(function (b) {
-    var l = normLine_(b['Line ID']);
-    return isActiveRow_(b['Aktif']) && String(b['Nama Part'] || '').trim() && (l === key || (grup && l === grup) || l === '*');
+  return (md.bom || []).filter(function (b) {
+    return b.line === key || (grup && b.line === grup) || b.line === '*';
   }).map(function (b) {
-    var pn = String(b['Part Number'] || '').trim();
-    var name = String(b['Nama Part']).trim();
-    var mid = normLine_(b['Mesin ID']);
     return {
-      pn: pn,
-      name: name,
-      mesinId: mid,
-      mesin: mid ? (machineName[mid] || mid) : '',
-      qty: b['Qty Terpasang'] === '' ? '' : String(b['Qty Terpasang']),
-      unit: String(b['Satuan'] || ''),
-      location: String(b['Lokasi Simpan'] || ''),
-      minStock: b['Stok Minimum'] === '' ? '' : String(b['Stok Minimum']),
-      common: normLine_(b['Line ID']) === '*',
-      value: pn ? pn + ' ' + name : name
+      pn: b.pn, name: b.name, mesinId: b.mesinId, mesin: b.mesinId ? (machineName[b.mesinId] || b.mesinId) : '',
+      qty: b.qty, unit: b.unit, location: b.location, minStock: b.minStock,
+      common: b.line === '*', value: b.pn ? b.pn + ' ' + b.name : b.name
     };
   }).sort(function (a, b) { return (a.common - b.common) || a.mesin.localeCompare(b.mesin) || a.name.localeCompare(b.name); });
 }

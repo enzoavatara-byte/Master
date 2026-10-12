@@ -9,16 +9,16 @@ function currentEmail_() {
 
 /** @return {{email:string, authorized:boolean, name?:string, role?:string}} */
 function getCurrentUser_() {
-  resetMaster_(); // master data (sheet) dibaca ulang setiap request
+  resetMaster_(); // memo per request (di Apps Script tiap panggilan = eksekusi baru; ini untuk test & trigger)
   var email = currentEmail_();
   if (!email) return { email: '', authorized: false };
-  var rows = readTable_(APP.SHEETS.USERS);
-  for (var i = 0; i < rows.length; i++) {
-    var r = rows[i];
-    if (String(r['Email']).trim().toLowerCase() !== email) continue;
-    var role = APP.ROLE_ALIASES[String(r['Peran'] || '').trim().toLowerCase()];
-    if (!isYes_(r['Aktif']) || !role) return { email: email, authorized: false };
-    return { email: email, authorized: true, name: String(r['Nama'] || email), role: role };
+  var users = masterData_().users;
+  for (var i = 0; i < users.length; i++) {
+    var u = users[i];
+    if (u.email !== email) continue;
+    var role = APP.ROLE_ALIASES[u.peran.trim().toLowerCase()];
+    if (!isYes_(u.aktif) || !role) return { email: email, authorized: false };
+    return { email: email, authorized: true, name: u.name || email, role: role };
   }
   return { email: email, authorized: false };
 }
@@ -39,14 +39,12 @@ function isAdmin_(user) {
 
 function userNameMap_() {
   var map = {};
-  readTable_(APP.SHEETS.USERS).forEach(function (u) {
-    map[String(u['Email']).trim().toLowerCase()] = String(u['Nama'] || u['Email']);
-  });
+  masterData_().users.forEach(function (u) { map[u.email] = u.name; });
   return map;
 }
 
 function adminEmails_() {
-  return readTable_(APP.SHEETS.USERS).filter(function (u) {
-    return isYes_(u['Aktif']) && APP.ROLE_ALIASES[String(u['Peran'] || '').trim().toLowerCase()] === APP.ROLES.ADMIN;
-  }).map(function (u) { return String(u['Email']).trim().toLowerCase(); });
+  return masterData_().users.filter(function (u) {
+    return isYes_(u.aktif) && APP.ROLE_ALIASES[u.peran.trim().toLowerCase()] === APP.ROLES.ADMIN;
+  }).map(function (u) { return u.email; });
 }

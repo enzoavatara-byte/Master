@@ -236,7 +236,7 @@ function apiStart(lineId, p) {
 
   var custom = validateForm_(md, 'Mulai', p);
 
-  withLock_(function () {
+  var rows = withLock_(function () {
     var rows = readTable_(APP.SHEETS.MAINT);
     var mine = openForUser_(rows, user.email);
     if (mine) throw new Error('Anda masih punya maintenance ' + mine['Status'] + ' (' + mine['Maintenance ID'] + '). Selesaikan, pending, atau cancel dulu.');
@@ -267,8 +267,10 @@ function apiStart(lineId, p) {
     appendObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], APP.EVENTS.START, user.email,
       [tipe, 'Line ' + r['Line'], mesinName ? 'mesin ' + mesinName : '', 'baterai ' + bat].concat(custom.summary).filter(String).join(', '));
+    rows.push(r);
+    return rows;
   });
-  return apiGetLine(line.id);
+  return lineView_(line.id, rows, ctx_(), user);
 }
 
 /** Pause: field form Pause hanya dicatat di Log (pause bisa terjadi berkali-kali). */
@@ -331,7 +333,7 @@ function apiPending(id, input) {
  */
 function apiContinue(id, scannedLineId) {
   var user = requireUser_();
-  var lineId = withLock_(function () {
+  var res = withLock_(function () {
     var rows = readTable_(APP.SHEETS.MAINT);
     var r = findById_(rows, id);
     if (!r) throw new Error('Maintenance tidak ditemukan.');
@@ -353,9 +355,9 @@ function apiContinue(id, scannedLineId) {
     r['Status review'] = '';
     writeObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], APP.EVENTS.CONTINUE, user.email, 'Konfirmasi QR ' + r['Line']);
-    return r['Line'];
+    return { line: r['Line'], rows: rows };
   });
-  return apiGetLine(lineId);
+  return lineView_(res.line, res.rows, ctx_(), user);
 }
 
 /** Corrective (atau tipe lain di Config MTTR_TIPE) masuk MTTR; data 2.0 tanpa Tipe dianggap Corrective. */
@@ -425,7 +427,7 @@ function apiCancel(id, input, catatan) {
   if (catatan && input.values['Alasan cancel'] === APP.OTHER && !input.other['Alasan cancel']) input.other['Alasan cancel'] = catatan;
   var f = validateForm_(md, 'Cancel', input);
 
-  var lineId = withLock_(function () {
+  var res = withLock_(function () {
     var rows = readTable_(APP.SHEETS.MAINT);
     var r = findById_(rows, id);
     if (!r) throw new Error('Maintenance tidak ditemukan.');
@@ -441,23 +443,25 @@ function apiCancel(id, input, catatan) {
     r['Peringatan pada'] = '';
     writeObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], APP.EVENTS.CANCEL, user.email, f.summary.join(' · ') + (owner ? '' : ' (oleh Admin)'));
-    return r['Line'];
+    return { line: r['Line'], rows: rows };
   });
-  return apiGetLine(lineId);
+  return lineView_(res.line, res.rows, ctx_(), user);
 }
 
 /** Pola umum: lock -> baca -> cek pemilik & status -> ubah -> tulis -> log. */
 function mutate_(id, user, allowed, fn) {
-  var lineId = withLock_(function () {
-    var r = findById_(readTable_(APP.SHEETS.MAINT), id);
+  var res = withLock_(function () {
+    var rows = readTable_(APP.SHEETS.MAINT);
+    var r = findById_(rows, id);
     assertOwner_(r, user, allowed);
     var now = new Date();
     var ev = fn(r, now);
     writeObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], ev[0], user.email, ev[1]);
-    return r['Line'];
+    return { line: r['Line'], rows: rows };
   });
-  return apiGetLine(lineId);
+  // Tampilan dihitung dari data yang sudah ada di memori (r ikut berubah di dalam rows) → tanpa baca ulang.
+  return lineView_(res.line, res.rows, ctx_(), user);
 }
 
 // ---------- Trigger: peringatan & Abandoned ----------
@@ -470,6 +474,7 @@ function mutate_(id, user, allowed, fn) {
  *    peringatan -> Abandoned. Syarat kedua mencegah Abandoned tanpa sempat diperingatkan bila trigger telat.
  */
 function checkTimeouts() {
+  resetMaster_();
   var lim = getLimits_();
   var graceMs = (lim.abandonHours - lim.warnHours) * 3600000;
   var emails = [];
