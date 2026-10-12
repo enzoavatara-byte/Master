@@ -33,6 +33,7 @@ Versi sebelumnya: 2.0 ada di riwayat git branch ini, v1 di branch `claude/google
 | Filter factory/baterai/line | Satu filter di Beranda, Pending, Review, Riwayat, Dashboard (tersimpan di HP) |
 | Dashboard MTTR | MTTR Corrective, Corrective vs Preventive, tren 12 minggu, **mesin paling sering bermasalah**, line terbanyak, masalah, teknisi, isian "Lainnya" terbanyak, **status project** |
 | Scan QR tanpa keluar web app | Tombol "SCAN QR" di Beranda (kamera di dalam app). Cadangan: aplikasi kamera HP / cari line |
+| Rekap per tahun | Tab **`Rekap <tahun>`** (Jan–Des, per bulan + total), diperbarui tiap malam; arsip data per tahun lewat menu (§4b) |
 
 Dari scan sampai timer jalan: **QR mesin = 1 tap** (Mulai), **QR line = 2 tap** (mesin → Mulai). Tipe dan baterai sudah terisi default.
 
@@ -46,6 +47,7 @@ Dari scan sampai timer jalan: **QR mesin = 1 tap** (Mulai), **QR line = 2 tap** 
 |---|---|---|
 | Script | `Config` | **berubah** |
 | Script | `Master` | **BARU**: buat file ini |
+| Script | `Rekap` | **BARU**: buat file ini |
 | Script | `Db` | tetap |
 | Script | `Auth` | **berubah** |
 | Script | `Maintenance` | **berubah** |
@@ -58,7 +60,7 @@ Dari scan sampai timer jalan: **QR mesin = 1 tap** (Mulai), **QR line = 2 tap** 
 | JSON | `appsscript.json` | tetap |
 
 Langkah:
-1. Copy-paste semua file yang berubah + buat file script `Master`. Ctrl+S.
+1. Copy-paste semua file yang berubah + buat file script `Master` dan `Rekap`. Ctrl+S.
 2. Jalankan **`setup`** lagi. Aman untuk data 2.0: kolom baru ditambah di kanan, data lama tidak dihapus, dan sheet baru dibuat beserta isi awalnya.
 3. Isi sheet sesuai §3 (minimal: kolom `Factory ID` di `Lines`, dan `Mesin` jika ingin tracking per mesin).
 4. **Deploy → Manage deployments → ✏️ → New version → Deploy.** Bukan "New deployment" (URL berubah, semua QR mati).
@@ -115,6 +117,32 @@ Isian bebas murni (tanpa pilihan) membuat dashboard tidak berguna ("sensor eror"
 
 ---
 
+## 4b. Rekap tahunan & arsip (Admin)
+
+**Rekap** — tab `Rekap <tahun>` di spreadsheet, tahun kalender Jan–Des (WIB):
+
+| Kolom | Arti |
+|---|---|
+| Pekerjaan selesai / Corrective / Preventive | Jumlah pekerjaan Completed, menurut **bulan selesai** |
+| MTTR Corrective (menit) | Rata-rata waktu aktif pekerjaan *Masuk MTTR = Ya*. Baris Total = rata-rata setahun (tertimbang), **bukan** rata-rata 12 angka bulanan |
+| Total waktu aktif / pause / pending (jam) | Dari pekerjaan Completed + Abandoned yang dihitung |
+| Cancelled / Abandoned / Abandoned dihitung | Menurut bulan cancel/abandoned |
+
+- Diperbarui **otomatis tiap malam ±01:00** (trigger `refreshRekap`; di bulan Januari tahun lalu juga ikut diperbarui).
+- Manual: spreadsheet → menu **MTTR 2.1 → Rekap tahunan (buat / perbarui)…** → isi tahun.
+- Untuk mentor: klik kanan tab `Rekap 2026` → **Copy to → New spreadsheet** → buka → **File → Download → Microsoft Excel (.xlsx)**. (File → Download langsung dari spreadsheet utama ikut membawa semua tab.)
+- Nilainya statis (bukan rumus), jadi tetap benar setelah data diarsipkan.
+- Dashboard → periode **"Tahun ini"** menampilkan angka yang sama secara langsung.
+
+**Arsip** — awal tahun (Februari), Dashboard Admin mengingatkan jika data tahun lalu belum diarsipkan:
+1. Spreadsheet → menu **MTTR 2.1 → Arsipkan data tahun lalu…** → tahun (default tahun lalu) → konfirmasi.
+2. Urutannya aman: rekap tahun itu dibuat ulang → pekerjaan final + Log-nya **disalin** ke tab `Arsip <tahun>` & `Arsip Log <tahun>` → diverifikasi → baru dihapus dari `Maintenance`/`Log`. Jika verifikasi gagal, tidak ada yang dihapus. Aman dijalankan ulang (tidak dobel).
+3. **Tidak dipindah**: pekerjaan Aktif/Pause/Pending dan yang masih *Perlu review* — tetap di tab aktif dan bisa dilanjutkan di tahun baru.
+4. Setelah diarsipkan, pekerjaan itu tidak tampil lagi di Riwayat/Detail aplikasi (data tetap ada di tab arsip).
+5. Arsip sengaja di tab spreadsheet yang sama, bukan file terpisah: membuat file baru butuh izin akses ke *semua* spreadsheet setiap teknisi. Kalau ingin file terpisah, admin bisa klik kanan tab arsip → Copy to → New spreadsheet.
+
+---
+
 ## 5. Keputusan admin yang masih berjalan (default saat ini)
 
 | Pertanyaan | Default | Diubah di |
@@ -140,7 +168,7 @@ Isian bebas murni (tanpa pilihan) membuat dashboard tidak berguna ("sensor eror"
 ## 7. Test & preview
 
 ```bash
-npm test          # 36 test logika server (mock Sheets + jam palsu)
+npm test          # 41 test logika server (mock Sheets + jam palsu)
 npm run preview   # http://localhost:8787/?as=owner@gmail.com
                   # simulasi QR: &line=L01   QR mesin: &line=L11&mesin=M-E1
 ```

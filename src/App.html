@@ -1145,11 +1145,11 @@
     var head = '<div class="hello"><div><div class="hi">MTTR & kesehatan mesin</div><h1>Dashboard</h1></div>' +
       (isAdmin() ? '<button class="btn ghost" id="d-qr" style="width:auto">QR</button>' : '') + '</div>' +
       filterBar(null) +
-      '<div style="margin:-2px 0 14px">' + chips('periode', [{ value: '7', label: '7 hari' }, { value: '30', label: '30 hari' }, { value: '90', label: '90 hari' }, { value: '365', label: '1 tahun' }],
+      '<div style="margin:-2px 0 14px">' + chips('periode', [{ value: '7', label: '7 hari' }, { value: '30', label: '30 hari' }, { value: '90', label: '90 hari' }, { value: 'ytd', label: 'Tahun ini' }],
         { selected: String(state.dash.periode) }) + '</div><div id="d-body"><div class="loading">Menghitung…</div></div>';
     $('view-dashboard').innerHTML = head;
     bindFilterBar($('view-dashboard'), loadDashboard);
-    bindChips($('view-dashboard'), function (n, v) { state.dash.periode = Number(v); fetchDashboard(); });
+    bindChips($('view-dashboard'), function (n, v) { state.dash.periode = v === 'ytd' ? v : Number(v); fetchDashboard(); });
     if ($('d-qr')) $('d-qr').onclick = function () { setView('qr'); loadQr(); };
     fetchDashboard();
   }

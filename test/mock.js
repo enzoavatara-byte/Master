@@ -37,6 +37,13 @@ class Range {
     }
     return this;
   }
+  clearContent() {
+    for (let i = 0; i < this.nr; i++) {
+      const row = this.sh.data[this.r - 1 + i];
+      if (row) for (let j = 0; j < this.nc; j++) row[this.c - 1 + j] = '';
+    }
+    return this;
+  }
   setFormula(f) { this.sh.formulas[this.a1 || (this.r + ',' + this.c)] = f; return this; }
   setNumberFormat() { return this; }
   setFontWeight() { return this; }
@@ -44,7 +51,11 @@ class Range {
 class Sheet {
   constructor(name) { this.name = name; this.data = []; this.formulas = {}; this.protections = []; }
   getName() { return this.name; }
-  getLastRow() { return this.data.length; }
+  getLastRow() {
+    let n = this.data.length;
+    while (n > 0 && this.data[n - 1].every(v => v === '' || v === undefined || v === null)) n--;
+    return n;
+  }
   getLastColumn() { return this.data.reduce((m, r) => Math.max(m, r.length), 0); }
   getMaxRows() { return 1000; }
   getRange(r, c, nr, nc) {
@@ -101,7 +112,7 @@ const ctx = {
     getActive: () => ss, flush() {},
     ProtectionType: { SHEET: 'SHEET' },
     RecalculationInterval: { HOUR: 'HOUR' },
-    getUi: () => ({ createMenu: () => ({ addItem() { return this; }, addToUi() {} }) })
+    getUi: () => ({ createMenu: () => ({ addItem() { return this; }, addSeparator() { return this; }, addToUi() {} }) })
   },
   Session: { getActiveUser: () => ({ getEmail: () => user.email }) },
   LockService: {
@@ -114,7 +125,10 @@ const ctx = {
   Utilities,
   ScriptApp: {
     getProjectTriggers: () => triggers,
-    newTrigger: (fn) => ({ timeBased: () => ({ everyMinutes: () => ({ create: () => triggers.push({ getHandlerFunction: () => fn }) }) }) }),
+    newTrigger: (fn) => {
+      const done = { create: () => triggers.push({ getHandlerFunction: () => fn }) };
+      return { timeBased: () => ({ everyMinutes: () => done, everyDays: () => ({ atHour: () => done }) }) };
+    },
     getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/XYZ/exec' })
   },
   HtmlService: {

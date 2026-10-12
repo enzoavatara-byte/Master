@@ -18,7 +18,7 @@ function as(email, fn) { const prev = user.email; user.email = email; try { retu
 function throwsMsg(fn, re) { assert.throws(fn, e => re.test(e.message), 'expected error matching ' + re); }
 const rec = (id) => ctx.readTable_('Maintenance').find(r => r['Maintenance ID'] === id);
 const logOf = (id) => ctx.readTable_('Log').filter(r => r['Maintenance ID'] === id).map(r => r['Kejadian']);
-const jeq = (a, b, m) => assert.deepStrictEqual(JSON.parse(JSON.stringify(a)), b, m);
+const jeq = (a, b, m) => assert.deepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), m);
 const near = (a, b) => assert.ok(Math.abs(a - b) < 0.02, a + ' ≈ ' + b);
 const sel = (masalah, extra) => ({ values: { Masalah: masalah, Penyebab: 'Komponen aus', Penanganan: 'Ganti part' }, other: {}, ...extra });
 const done = sel('Sensor error', { parts: [{ nama: 'Fuse', jumlah: 2 }] });
@@ -31,8 +31,7 @@ test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempot
   ctx.setup(); ctx.setup();
   for (const n of ['Users', 'Factory', 'Projects', 'Lines', 'Mesin', 'BOM', 'Pilihan', 'Form', 'Config', 'Maintenance', 'Log', 'Maintenance VF7', 'Maintenance Limo7', 'Maintenance E22H', 'Maintenance E245', 'Pending Work']) assert.ok(ss.getSheetByName(n), n);
   assert.ok(!ss.getSheetByName('Sheet1'));
-  assert.strictEqual(triggers.length, 1);
-  assert.strictEqual(triggers[0].getHandlerFunction(), 'checkTimeouts');
+  jeq(triggers.map(t => t.getHandlerFunction()), ['checkTimeouts', 'refreshRekap'], 'trigger tidak dobel');
   assert.strictEqual(ctx.readTable_('Config').length, 5);
   assert.strictEqual(ctx.readTable_('Users')[0].Peran, 'Admin');
   jeq(ctx.readTable_('Projects').map(p => p['Factory ID'] + ':' + p.Baterai), ['F1:VF7', 'F1:Limo7', 'F2:E22H', 'F2:E245']);
@@ -599,7 +598,101 @@ test('2.1 migrasi: setup() ulang menambah kolom & mengembalikan field sistem yan
   assert.ok(ctx.readTable_('Form').some(r => r.Form === 'Pending' && r.Field === 'Tenggat'));
   assert.strictEqual(ctx.readTable_('Maintenance').length, before);
   assert.ok(ss.getSheetByName('Maintenance').data[0].includes('Kondisi akhir'));
-  assert.strictEqual(triggers.length, 1);
+  assert.strictEqual(triggers.length, 2);
+});
+
+// ---------- Rekap tahunan & arsip ----------
+const rekapRows = (y) => ss.getSheetByName('Rekap ' + y).data.slice(3, 17).map(r => r.slice());
+const finalOf = (r) => r.Status === 'Completed' ? r.Selesai : (['Cancelled', 'Abandoned'].includes(r.Status) ? r['Status sejak'] : null);
+const wibMonth = (d) => new Date(d.getTime() + 7 * 3600e3).getUTCMonth();
+
+test('rekap: tab "Rekap 2026" 12 bulan + total, MTTR tertimbang, bulan = bulan selesai', () => {
+  ctx.buildRekap_(2026);
+  const rows = rekapRows(2026);
+  assert.strictEqual(rows[0][0], 'Bulan');
+  jeq(rows.slice(1, 13).map(r => r[0]), ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']);
+  const all = ctx.readTable_('Maintenance').filter(r => finalOf(r) instanceof Date);
+  const done = all.filter(r => r.Status === 'Completed');
+  const counted = all.filter(r => r['Masuk MTTR'] === 'Ya');
+  const tot = rows[13];
+  assert.strictEqual(tot[0], 'Total 2026');
+  assert.strictEqual(tot[1], done.length, 'pekerjaan selesai');
+  assert.strictEqual(tot[2] + tot[3], done.length, 'corrective + preventive = selesai');
+  assert.strictEqual(tot[3], done.filter(r => r.Tipe === 'Preventive').length);
+  near(tot[4], counted.reduce((a, r) => a + Number(r['Total aktif (menit)']), 0) / counted.length);
+  assert.strictEqual(tot[8], all.filter(r => r.Status === 'Cancelled').length);
+  assert.strictEqual(tot[9], all.filter(r => r.Status === 'Abandoned').length);
+  assert.strictEqual(tot[10], all.filter(r => r.Status === 'Abandoned' && r['Masuk MTTR'] === 'Ya').length);
+  for (let m = 0; m < 12; m++) {
+    assert.strictEqual(rows[1 + m][1], done.filter(r => wibMonth(r.Selesai) === m).length, 'bulan ' + (m + 1));
+  }
+  assert.strictEqual(rows[1][4], '', 'bulan tanpa data: MTTR kosong, bukan 0');
+  // jalankan ulang = hasil sama (tidak menumpuk)
+  ctx.buildRekap_(2026);
+  jeq(rekapRows(2026), rows);
+});
+
+test('dashboard "Tahun ini" = 1 Januari s/d sekarang, sama dengan rekap', () => {
+  as('sari@gmail.com', () => {
+    const d = ctx.apiDashboard({ periode: 'ytd' });
+    assert.strictEqual(d.periode, 'ytd');
+    near(d.kpi.mttr, rekapRows(2026)[13][4]);
+  });
+});
+
+let archived, keepPending;
+test('arsip: tahun berjalan ditolak; Februari tahun berikutnya Dashboard mengingatkan', () => {
+  throwsMsg(() => ctx.arsipkanTahun_(2026), /tahun yang sudah lewat/);
+  clock.now = Date.UTC(2027, 1, 2, 2, 0, 0); // 2 Feb 2027 09:00 WIB
+  as('sari@gmail.com', () => {
+    const w = ctx.apiDashboard({}).warnings.join('\n');
+    assert.match(w, /pekerjaan tahun 2026 belum diarsipkan/);
+  });
+  as('budi@gmail.com', () => { const id = ctx.apiStart('L01', 'E22H').open.id; advance(15); ctx.apiComplete(id, sel('Kebocoran', { tanpaPart: true })); });
+  archived = ctx.readTable_('Maintenance').filter(r => ctx.isArchivable_(r, 2026)).map(r => r['Maintenance ID']);
+  keepPending = ctx.readTable_('Maintenance').filter(r => r.Status === 'Pending').map(r => r['Maintenance ID']);
+  assert.ok(archived.length >= 5 && keepPending.length >= 1, archived.length + ' / ' + keepPending.length);
+});
+
+test('arsip: pindah pekerjaan final 2026 + Log-nya; yang Pending/menunggu review tetap; rekap tidak berubah', () => {
+  const before = rekapRows(2026);
+  const mBefore = ctx.readTable_('Maintenance').length, lBefore = ctx.readTable_('Log').length;
+  const out = ctx.arsipkanTahun_(2026);
+  assert.strictEqual(out.maintenance, archived.length);
+  const m = ctx.readTable_('Maintenance');
+  assert.strictEqual(m.length, mBefore - archived.length);
+  assert.ok(m.every(r => !archived.includes(r['Maintenance ID'])));
+  assert.ok(keepPending.every(id => m.some(r => r['Maintenance ID'] === id)), 'pending tetap di tab aktif');
+  assert.ok(m.some(r => r['Status review'] === 'Perlu review'), 'yang menunggu review tetap');
+  assert.ok(m.some(r => r.Mulai.getTime() >= Date.UTC(2027, 0, 1)), 'data 2027 tidak tersentuh');
+  jeq(ctx.readTable_('Arsip 2026').map(r => r['Maintenance ID']).sort(), archived.slice().sort());
+  const logA = ctx.readTable_('Arsip Log 2026');
+  assert.strictEqual(logA.length, out.log);
+  assert.strictEqual(ctx.readTable_('Log').length, lBefore - out.log);
+  assert.ok(ctx.readTable_('Log').every(e => !archived.includes(e['Maintenance ID'])));
+  assert.ok(logA.every(e => e.Timestamp instanceof FakeDate), 'tanggal tetap tanggal');
+  jeq(rekapRows(2026), before, 'rekap 2026 sama sebelum & sesudah arsip');
+  assert.strictEqual(ctx.arsipkanTahun_(2026).maintenance, 0, 'jalankan ulang: tidak ada yang dobel');
+  assert.strictEqual(ctx.readTable_('Arsip 2026').length, archived.length);
+});
+
+test('arsip: aplikasi tetap jalan; arsip tidak tampil di Riwayat; peringatan hilang', () => {
+  as('sari@gmail.com', () => {
+    assert.ok(!ctx.apiDashboard({}).warnings.some(w => /belum diarsipkan/.test(w)));
+    assert.strictEqual(ctx.apiHistory({ scope: 'all' }).total, ctx.readTable_('Maintenance').length);
+    throwsMsg(() => ctx.apiGetDetail(archived[0]), /tidak ditemukan/);
+  });
+  as('andi@gmail.com', () => {
+    const p = ctx.readTable_('Maintenance').find(r => r.Status === 'Pending');
+    const v = ctx.apiContinue(p['Maintenance ID'], p.Line);
+    assert.strictEqual(v.open.status, 'Aktif', 'pending dari 2026 bisa dilanjutkan di 2027');
+    advance(10);
+    ctx.apiComplete(p['Maintenance ID'], sel('Kebocoran', { tanpaPart: true }));
+  });
+  ctx.refreshRekap();
+  assert.ok(ss.getSheetByName('Rekap 2027'));
+  assert.strictEqual(rekapRows(2027)[13][1], 2, 'rekap 2027: 2 pekerjaan selesai (bulan Februari)');
+  assert.strictEqual(rekapRows(2027)[2][1], 2);
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

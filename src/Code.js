@@ -47,6 +47,9 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu(APP.NAME)
     .addItem('Setup / perbaiki sheet & trigger', 'setup')
     .addItem('Jalankan cek 3/4 jam sekarang', 'checkTimeouts')
+    .addSeparator()
+    .addItem('Rekap tahunan (buat / perbarui)…', 'menuRekapTahunan')
+    .addItem('Arsipkan data tahun lalu…', 'menuArsipkanTahun')
     .addToUi();
 }
 
@@ -145,6 +148,9 @@ function setup() {
 
   var hasTrigger = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'checkTimeouts'; });
   if (!hasTrigger) ScriptApp.newTrigger('checkTimeouts').timeBased().everyMinutes(APP.TRIGGER_MINUTES).create();
+  var hasRekap = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'refreshRekap'; });
+  if (!hasRekap) ScriptApp.newTrigger('refreshRekap').timeBased().everyDays(1).atHour(1).create(); // rekap tahun ini tiap malam
+  buildRekap_(yearOf_(new Date()));
 
   var blank = ss.getSheetByName('Sheet1');
   if (blank && ss.getSheets().length > 1 && blank.getLastRow() === 0) ss.deleteSheet(blank);

@@ -448,10 +448,13 @@ function apiDashboard(f) {
   f = f || {};
   var c = ctx_();
   var md = c.md;
-  var days = [7, 30, 90, 365].indexOf(Number(f.periode)) !== -1 ? Number(f.periode) : 30;
-  var from = new Date(c.now.getTime() - days * 86400000);
+  var ytd = f.periode === 'ytd';
+  var days = ytd ? 0 : ([7, 30, 90, 365].indexOf(Number(f.periode)) !== -1 ? Number(f.periode) : 30);
+  // "Tahun ini" = 1 Januari (WIB) s/d sekarang, sama dengan tab Rekap <tahun>.
+  var from = ytd ? Utilities.parseDate(yearOf_(c.now) + '-01-01 00:00:00', APP.TZ, 'yyyy-MM-dd HH:mm:ss') : new Date(c.now.getTime() - days * 86400000);
   var filt = { factory: f.factory, baterai: f.baterai, line: f.line };
-  var all = readTable_(APP.SHEETS.MAINT).filter(function (r) { return matchFilter_(md, r, filt, c.names); });
+  var allRows = readTable_(APP.SHEETS.MAINT);
+  var all = allRows.filter(function (r) { return matchFilter_(md, r, filt, c.names); });
   var inPeriod = all.filter(function (r) { return r['Mulai'] instanceof Date && r['Mulai'] >= from; });
 
   var kpi = { mttr: null, mttrN: 0, corrective: 0, preventive: 0, activeMin: 0, cancelled: 0, abandoned: 0,
@@ -533,9 +536,17 @@ function apiDashboard(f) {
     };
   });
 
+  var warnings = isAdmin_(user) ? md.warnings.slice(0, 30) : [];
+  if (isAdmin_(user) && monthOf_(c.now) >= 2) {
+    var un = unarchivedByYear_(allRows, c.now);
+    Object.keys(un).sort().forEach(function (y) {
+      warnings.unshift(un[y] + ' pekerjaan tahun ' + y + ' belum diarsipkan. Spreadsheet → menu ' + APP.NAME + ' → "Arsipkan data tahun lalu" supaya aplikasi tetap cepat.');
+    });
+  }
+
   return {
     serverNowIso: c.now.toISOString(),
-    periode: days,
+    periode: ytd ? 'ytd' : days,
     kpi: kpi,
     weeks: weeks.map(function (x) { return { label: x.label, count: x.count, mttr: x.n ? round2_(x.sum / x.n) : null }; }),
     machines: topList_(byMachine, 10, function (out, o) { out.line = o.line; }),
@@ -544,7 +555,7 @@ function apiDashboard(f) {
     problems: topList_(byProblem, 8),
     others: topList_(byOther, 10),
     projects: projects,
-    warnings: isAdmin_(user) ? md.warnings.slice(0, 30) : [],
+    warnings: warnings,
     mttrTypes: String(getConfig_('MTTR_TIPE'))
   };
 }
