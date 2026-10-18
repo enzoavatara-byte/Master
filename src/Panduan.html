@@ -1,0 +1,98 @@
+<!--
+  Teks halaman Panduan (tombol ? di Beranda / Dashboard).
+  Ubah teks di sini jika fitur berubah. Catatan khusus per factory → sheet "Catatan Panduan" (tanpa ubah kode).
+-->
+<template id="guide-teknisi">
+  <h3>Ingat 4 langkah</h3>
+  <ol>
+    <li><b>Scan</b> QR di line / mesin. QR rusak → <b>Cari line</b> (bisa ketik alias).</li>
+    <li><b>MULAI</b>: pilih mesin, tipe, dan <b>stop line</b> (Ya = line berhenti).</li>
+    <li>Kerjakan. Tinggal sebentar → <b>Pause</b>. Belum bisa selesai → <b>Pending</b>.</li>
+    <li><b>SELESAI</b>: jenis kerusakan → masalah → penyebab → penanganan → <b>sparepart</b>.</li>
+  </ol>
+  <p class="small muted">MTTR hanya menghitung waktu <b>aktif</b>. Waktu pause & pending tidak dihitung.</p>
+
+  <details class="g"><summary>Tombol & artinya</summary><div><ul>
+    <li><b>Pause</b>: istirahat / menunggu sebentar. Timer aktif berhenti.</li>
+    <li><b>Pending</b>: belum selesai (menunggu part, dll). Muncul di tab Pending; teknisi lain bisa melanjutkan dengan scan QR line yang sama.</li>
+    <li><b>Cancel</b>: salah input / masalah hilang sendiri. Masuk review admin.</li>
+    <li><b>Masih lanjut</b>: muncul setelah 3 jam. Tidak dijawab sampai 4 jam → Abandoned.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Sparepart (cara cepat)</summary><div><ol>
+    <li>Tidak ganti apa-apa → <b>Tidak ada pergantian</b>.</li>
+    <li>Ganti part → <b>Ada part</b>, lalu <b>ketik di kolom cari</b> (mis. "6205") <i>atau</i> pilih Jenis → Nama → Model.</li>
+    <li>Atur jumlah dengan <b>− / +</b>. Salah pilih → <b>×</b>.</li>
+    <li>Tidak ada di daftar → <b>Tambah manual</b>, lalu kabari admin supaya dimasukkan ke katalog.</li>
+  </ol><p class="small muted">Jenis sparepart otomatis mengikuti jenis kerusakan yang dipilih.</p></div></details>
+
+  <details class="g"><summary>Stop line</summary><div><ul>
+    <li><b>Ya</b> = line berhenti produksi selama perbaikan. Otomatis <b>Ya</b> untuk Corrective, <b>Tidak</b> untuk Preventive; boleh diganti.</li>
+    <li>Durasi stop line di laporan = jam selesai − jam mulai.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Kekurangan yang perlu diketahui</summary><div><ul>
+    <li>Butuh internet. Sinyal hilang saat menekan tombol → tunggu, lalu coba lagi.</li>
+    <li>Satu teknisi hanya bisa punya <b>satu</b> pekerjaan terbuka.</li>
+    <li>Data yang sudah disimpan tidak bisa diedit dari aplikasi. Salah isi → lapor admin.</li>
+    <li>Belum bisa melampirkan foto.</li>
+  </ul></div></details>
+</template>
+
+<template id="guide-admin">
+  <h3>Semua diatur dari Google Sheet</h3>
+  <p class="small">Edit sheet → muat ulang aplikasi → perubahan terlihat. Tidak perlu mengubah kode.</p>
+
+  <details class="g" open><summary>Mau ubah apa? → sheet mana</summary><div><ul>
+    <li><b>Users</b>: tambah teknisi (Email, Nama, Peran Teknisi/Admin, Aktif). Nama ini yang tampil di laporan.</li>
+    <li><b>Lines</b>: line baru, <b>Alias</b> (nama panggilan, pisah koma) & <b>Proses</b> (grup di atas line). Jangan ganti Line ID yang sudah dipakai.</li>
+    <li><b>Mesin</b>: mesin per line (= Station di laporan).</li>
+    <li><b>Projects</b>: baterai per factory & target MTTR.</li>
+    <li><b>Sparepart</b>: katalog Jenis → Nama → Model. Aktif = Tidak untuk menyembunyikan.</li>
+    <li><b>Pilihan</b>: isi pilihan (Jenis Kerusakan, Masalah, Penyebab, Penanganan, …).</li>
+    <li><b>Form</b>: label, wajib/opsional, urutan, field tambahan. Matikan pertanyaan dengan Aktif = Tidak (jangan hapus barisnya).</li>
+    <li><b>Format Laporan</b>: judul & urutan kolom tab Laporan.</li>
+    <li><b>Catatan Panduan</b>: catatan lokal yang tampil di halaman ini (Untuk: Teknisi / Admin / Semua).</li>
+    <li><b>Config</b>: NAMA_APLIKASI, jam peringatan, shift, STOP_LINE_DEFAULT, judul laporan.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Laporan (format Excel)</summary><div><ul>
+    <li>Tab <b>Laporan &lt;tahun&gt;</b> = format Form Stop Line. Diperbarui otomatis tiap malam.</li>
+    <li>Butuh sekarang → Dashboard → <b>Perbarui Laporan & Rekap</b>.</li>
+    <li>Jangan edit tab Laporan / Rekap (selalu ditulis ulang). Perbaiki datanya di sheet Maintenance.</li>
+    <li>Data mentah sparepart: sheet <b>Pemakaian Sparepart</b> (1 baris per part, bisa di-pivot).</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Dua factory (data terpisah)</summary><div><ol>
+    <li>File → <b>Make a copy</b> spreadsheet ini.</li>
+    <li>Di salinan: hapus baris data (bukan judul kolom) di Maintenance, Log, Pemakaian Sparepart; hapus tab Arsip / Rekap / Laporan.</li>
+    <li>Isi Users, Lines, Mesin untuk factory tsb. Config → <b>NAMA_APLIKASI</b> (mis. "MTTR Factory 2").</li>
+    <li>Extensions → Apps Script → Run <b>setup</b> → Deploy → New deployment → cetak QR dari URL baru.</li>
+  </ol><p class="small muted">Update kode = paste ke <b>kedua</b> file. Cek versi lewat menu → Tentang.</p></div></details>
+
+  <details class="g"><summary>Update ke versi baru</summary><div><ol>
+    <li>Ganti isi file kode sesuai CHANGELOG.</li>
+    <li>Run <b>setup</b> (menambah sheet/kolom baru; data lama aman).</li>
+    <li>Deploy → Manage deployments → Edit → Version: <b>New version</b>. URL & QR tetap sama.</li>
+  </ol></div></details>
+
+  <details class="g"><summary>Kekurangan & risiko</summary><div><ul>
+    <li>Siapa pun yang punya akses <b>edit</b> spreadsheet bisa mengubah data. Batasi akses edit.</li>
+    <li>Sparepart hanya catatan pemakaian, <b>bukan stok</b>.</li>
+    <li>Batas Google Sheets 10 juta sel per file. Arsipkan tiap Januari (menu → Arsipkan) supaya tetap cepat.</li>
+    <li>Tidak bisa offline, belum ada foto.</li>
+    <li>Mengganti nama/model di katalog tidak mengubah data lama (riwayat tetap seperti saat dicatat).</li>
+  </ul></div></details>
+</template>
+
+<template id="guide-baru">
+  <h3>Apa yang baru di versi <span data-v></span></h3>
+  <ul>
+    <li><b>Sparepart</b>: cari, atau pilih Jenis → Nama → Model; banyak part sekaligus; jumlah −/+; tambah manual. Tercatat di sheet Pemakaian Sparepart.</li>
+    <li><b>Jenis kerusakan</b> (Elektrikal / Mekanikal / Pneumatik / Program) + detail opsional untuk masalah, penyebab, penanganan.</li>
+    <li><b>Stop line</b> ditanya saat Mulai.</li>
+    <li><b>Proses</b> & <b>alias</b> line untuk filter dan pencarian.</li>
+    <li><b>Laporan</b> otomatis format Excel (tab Laporan &lt;tahun&gt;), nama teknisi bukan email.</li>
+    <li>Halaman panduan ini. BOM dihapus supaya lebih ringan.</li>
+  </ul>
+</template>

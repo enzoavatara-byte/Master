@@ -14,6 +14,7 @@
     <section id="view-pending" class="view hidden"></section>
     <section id="view-dashboard" class="view hidden"></section>
     <section id="view-qr" class="view hidden"></section>
+    <section id="view-guide" class="view hidden"></section>
   </main>
 
   <nav class="tabs" id="tabs">
@@ -49,6 +50,7 @@
     var INITIAL_MESIN_ID = <?!= JSON.stringify(mesinId) ?>;
     var BOOT = <?!= boot ?>; // data awal dari server (null → diambil lewat apiBootstrap)
   </script>
+  <?!= include('Panduan'); ?>
   <?!= include('App'); ?>
 </body>
 </html>

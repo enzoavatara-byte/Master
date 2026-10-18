@@ -42,7 +42,8 @@ const v = measure('Mulai', () => as(T, () => ctx.apiStart('L02', { mesin: 'M-HPR
 const id = v.open.id;
 measure('Pause', () => as(T, () => ctx.apiPause(id, { values: { 'Alasan pause': 'Istirahat' } })));
 measure('Resume', () => as(T, () => ctx.apiResume(id)));
-measure('Selesai', () => as(T, () => ctx.apiComplete(id, { values: { Masalah: 'Sensor error', Penyebab: 'Komponen aus', Penanganan: 'Ganti part' }, tanpaPart: true })));
+measure('Selesai (3 sparepart)', () => as(T, () => ctx.apiComplete(id, { values: { 'Jenis kerusakan': 'Mekanikal', Masalah: 'Sensor error', Penyebab: 'Komponen aus', Penanganan: 'Ganti part' },
+  parts: [{ id: ctx.partId_('Mekanikal', 'Bearing', '6205-2RS'), qty: 2 }, { id: ctx.partId_('Elektrikal', 'Fuse', '10A'), qty: 1 }, { manual: true, jenis: 'Pneumatik', nama: 'Fitting L', qty: 4 }] })));
 measure('Tab Pending', () => as(T, () => ctx.apiListPending({})));
 measure('Dashboard', () => as('owner@gmail.com', () => ctx.apiDashboard({ periode: 30 })));
 measure('Refresh otomatis (tiap 60 dtk)', () => as(T, () => ctx.apiRefresh({})));
