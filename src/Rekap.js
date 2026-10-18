@@ -2,7 +2,7 @@
  * Rekap tahunan (tahun kalender, WIB) + arsip data per tahun.
  *
  * - Tab "Rekap <tahun>": 12 bulan + total, nilai statis (bukan rumus) supaya tetap benar setelah
- *   data diarsipkan. Diperbarui otomatis tiap jam (trigger refreshRekap), lewat Dashboard, dan lewat menu.
+ *   data diarsipkan. Diperbarui langsung setiap aksi (syncReports_); dibangun ulang penuh tiap malam (trigger refreshRekap), lewat Dashboard, dan lewat menu.
  * - Arsip: pekerjaan tahun lalu yang sudah final dipindah ke tab "Arsip <tahun>" & "Arsip Log <tahun>"
  *   di spreadsheet yang sama. Aplikasi hanya membaca tab Maintenance & Log, jadi tetap cepat.
  *   Arsip di file terpisah sengaja tidak dipakai: butuh izin akses ke SEMUA spreadsheet setiap teknisi.
@@ -43,8 +43,11 @@ function checkYear_(year) {
   return y;
 }
 
-/** Data satu tahun = tab Maintenance + tab Arsip <tahun> (jika sudah diarsipkan), tanpa duplikat. */
-function rekapRows_(year) {
+/**
+ * Data satu tahun = tab Maintenance + tab Arsip <tahun> (jika sudah diarsipkan), tanpa duplikat.
+ * @param {Object[]=} rows baris Maintenance yang sudah di memori (sinkron langsung: tanpa baca ulang, tanpa arsip)
+ */
+function rekapRows_(year, rows) {
   var seen = {}, out = [];
   var add = function (r) {
     var id = String(r['Maintenance ID']);
@@ -54,20 +57,21 @@ function rekapRows_(year) {
     seen[id] = true;
     out.push(r);
   };
+  if (rows) { rows.forEach(add); return out; }
   readTable_(APP.SHEETS.MAINT).forEach(add);
   if (SpreadsheetApp.getActive().getSheetByName(archiveName_(year))) readTable_(archiveName_(year)).forEach(add);
   return out;
 }
 
 /** Hitung rekap per bulan. @return {{months:Object[], total:Object}} */
-function computeRekap_(year) {
+function computeRekap_(year, rows) {
   var types = mttrTypes_();
   var blank = function (label) {
     return { label: label, done: 0, corrective: 0, preventive: 0, mttrSum: 0, mttrN: 0, active: 0, pause: 0, pending: 0, cancelled: 0, abandoned: 0, abandonedCounted: 0 };
   };
   var months = BULAN_.map(blank);
   var total = blank('Total ' + year);
-  rekapRows_(year).forEach(function (r) {
+  rekapRows_(year, rows).forEach(function (r) {
     var m = months[monthOf_(finalDate_(r)) - 1];
     var st = r['Status'];
     var act = Number(r['Total aktif (menit)'] || 0), pau = Number(r['Total pause (menit)'] || 0), pen = Number(r['Total pending (menit)'] || 0);
@@ -105,14 +109,7 @@ function buildRekap_(year) {
   var sh = ss.getSheetByName(rekapName_(year)) || ss.insertSheet(rekapName_(year));
   sh.clear();
   var w = REKAP_HEADERS_.length;
-  var pad = function (row) { while (row.length < w) row.push(''); return row; };
-  var rows = [
-    pad(['Rekap ' + appName_() + ' ' + year]),
-    pad(['Diperbarui ' + fmtDate_(new Date()) + ' WIB (otomatis tiap ' + APP.REKAP_HOURS + ' jam). MTTR = rata-rata waktu aktif pekerjaan "Masuk MTTR = Ya" (' +
-      getConfig_('MTTR_TIPE') + '). Bulan = bulan selesai / cancel / abandoned.']),
-    pad([]),
-    REKAP_HEADERS_.slice()
-  ].concat(data.months.map(rekapRow_)).concat([rekapRow_(data.total)]);
+  var rows = rekapLayout_(year, data);
   sh.getRange(1, 1, rows.length, w).setValues(rows);
   sh.getRange(1, 1, 1, 1).setFontWeight('bold');
   sh.getRange(4, 1, 1, w).setFontWeight('bold');
@@ -121,14 +118,114 @@ function buildRekap_(year) {
   return { year: year, total: data.total, sheet: rekapName_(year) };
 }
 
-/** Trigger tiap jam: perbarui rekap & laporan tahun ini; di bulan Januari juga tahun lalu (review akhir tahun bisa menyusul). */
+/** Isi tab Rekap (judul, keterangan, header, 12 bulan, total). Ukurannya selalu sama → bisa ditulis ulang di tempat. */
+function rekapLayout_(year, data) {
+  var w = REKAP_HEADERS_.length;
+  var pad = function (row) { while (row.length < w) row.push(''); return row; };
+  return [
+    pad(['Rekap ' + appName_() + ' ' + year]),
+    pad(['Diperbarui ' + fmtDate_(new Date()) + ' WIB (otomatis setiap ada perubahan). MTTR = rata-rata waktu aktif pekerjaan "Masuk MTTR = Ya" (' +
+      getConfig_('MTTR_TIPE') + '). Bulan = bulan selesai / cancel / abandoned.']),
+    pad([]),
+    REKAP_HEADERS_.slice()
+  ].concat(data.months.map(rekapRow_)).concat([rekapRow_(data.total)]);
+}
+
+/**
+ * Trigger malam: bangun ulang penuh Laporan & Rekap tahun ini (memperbaiki edit manual di sheet Maintenance,
+ * mengurutkan ulang); di bulan Januari juga tahun lalu. Memakai lock supaya tidak bentrok dengan sinkron langsung.
+ */
 function refreshRekap() {
   resetMaster_();
-  var now = new Date();
-  var y = yearOf_(now);
-  buildRekap_(y);
-  buildLaporan_(y);
-  if (monthOf_(now) === 1) { buildRekap_(y - 1); buildLaporan_(y - 1); }
+  withLock_(function () {
+    var now = new Date();
+    var y = yearOf_(now);
+    buildRekap_(y);
+    buildLaporan_(y);
+    if (monthOf_(now) === 1) { buildRekap_(y - 1); buildLaporan_(y - 1); }
+  });
+}
+
+// ---------- Sinkron langsung: setiap aksi memperbarui Laporan & Rekap ----------
+
+var LAP_KEY_ = 'ID sistem';   // kolom tersembunyi di kanan tabel Laporan: Maintenance ID per baris
+var LAP_SPARE_ = 300;         // baris kosong di bawah tabel yang sudah diformat (wrap, tanggal) untuk baris baru
+
+/** Header kolom kunci = penanda + sidik format. Format Laporan diubah admin → sidik beda → tab dibangun ulang. */
+function lapKeyHeader_(cols) {
+  var s = JSON.stringify(cols.map(function (c) { return [c.kolom, c.sumber]; })), h = 0;
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return LAP_KEY_ + ' ' + (h >>> 0).toString(36);
+}
+
+/**
+ * Dipanggil di dalam lock setelah satu pekerjaan ditulis: barisnya di tab Laporan ditulis / dihapus, dan Rekap
+ * tahun selesainya dihitung ulang dari data di memori. Gagal di sini tidak membatalkan aksi teknisi (data utama
+ * sudah tersimpan); trigger malam & tombol "Perbarui Laporan & Rekap" membangun ulang penuh.
+ * @param {Object} r          pekerjaan yang baru ditulis
+ * @param {Object[]=} rows    semua baris Maintenance di memori (sudah berisi r terbaru); tanpa ini Rekap tidak disentuh
+ * @param {Object[]=} parts   sparepart dari apiComplete (supaya tidak membaca sheet Pemakaian lagi)
+ */
+function syncReports_(r, rows, parts) {
+  if (!isYes_(getConfig_('LAPORAN_LANGSUNG'))) return;
+  try {
+    syncLaporan_(r, parts);
+    var fin = finalDate_(r);
+    if (fin && rows) syncRekap_(yearOf_(fin), rows);
+  } catch (e) {
+    console.warn('Sinkron Laporan/Rekap gagal (diperbaiki saat pembaruan penuh berikutnya): ' + e);
+  }
+}
+
+function syncLaporan_(r, parts) {
+  if (!(r['Mulai'] instanceof Date)) return;
+  var year = yearOf_(r['Mulai']);
+  var sh = SpreadsheetApp.getActive().getSheetByName(laporanName_(year));
+  var md = masterData_(), cols = md.report, w = Math.max(1, cols.length);
+  if (!sh) { buildLaporan_(year); return; }
+  var last = sh.getLastRow();
+  var keyCol = last >= 2 ? sh.getRange(2, w + 1, last - 1, 1).getValues() : [];
+  if (!keyCol.length || keyCol[0][0] !== lapKeyHeader_(cols)) { buildLaporan_(year); return; }   // tab lama / format diubah
+  var id = String(r['Maintenance ID']), n = keyCol.length - 1, at = -1;
+  for (var i = 1; i <= n; i++) if (String(keyCol[i][0]) === id) { at = i - 1; break; }
+
+  if (r['Status'] === APP.STATUS.CANCELLED) {       // Cancelled tidak masuk laporan → barisnya dihapus, NO diurutkan ulang
+    if (at < 0) return;
+    sh.deleteRow(3 + at);
+    var noCol = cols.map(function (c) { return c.sumber; }).indexOf('NO');
+    if (noCol >= 0 && at < n - 1) {
+      var nums = [];
+      for (var k = at; k < n - 1; k++) nums.push([k + 1]);
+      sh.getRange(3 + at, noCol + 1, nums.length, 1).setValues(nums);
+    }
+    return;
+  }
+  var idx = at >= 0 ? at : n;                        // pekerjaan baru → baris paling bawah (mulai paling akhir)
+  var used = parts ? parts.map(function (p) {
+    return { 'Jenis Sparepart': p.jenis, 'Nama Sparepart': p.nama, 'Model': p.model, 'Jumlah': p.qty };
+  }) : (r['Status'] === APP.STATUS.COMPLETED ? usageOf_(id, year) : []);
+  var names = userNameMap_();
+  var row = cols.map(function (c) { var v = laporanValue_(c.sumber, r, idx, used, md, names); return v == null ? '' : v; });
+  row.push(id);
+  sh.getRange(3 + idx, 1, 1, w + 1).setValues([row]);
+}
+
+/** Pemakaian sparepart satu pekerjaan (jalur jarang: sinkron pekerjaan Completed tanpa data part di memori). */
+function usageOf_(id, year) {
+  var ss = SpreadsheetApp.getActive(), out = [];
+  [APP.SHEETS.PEMAKAIAN, archiveUsageName_(year)].forEach(function (name) {
+    if (ss.getSheetByName(name)) readTable_(name).forEach(function (u) { if (String(u['Maintenance ID']) === id) out.push(u); });
+  });
+  return out;
+}
+
+function syncRekap_(year, rows) {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(rekapName_(year));
+  // Tahun lalu (review Abandoned di Januari): sebagian datanya mungkin sudah di tab Arsip → hitung penuh.
+  if (!sh || year !== yearOf_(new Date())) { buildRekap_(year); return; }
+  var body = rekapLayout_(year, computeRekap_(year, rows));
+  sh.getRange(1, 1, body.length, REKAP_HEADERS_.length).setValues(body);
 }
 
 // ---------- Laporan (format Excel "Form Stop Line Peralatan") ----------
@@ -223,21 +320,25 @@ function buildLaporan_(year) {
   var w = Math.max(1, cols.length);
   var title = [String(getConfig_('LAPORAN_JUDUL') || '')];
   while (title.length < w) title.push('');
-  var out = [title, cols.map(function (c) { return c.kolom; })];
+  title.push('');
+  // Kolom terakhir (tersembunyi) = Maintenance ID per baris: kunci untuk sinkron langsung setiap aksi.
+  var out = [title, cols.map(function (c) { return c.kolom; }).concat([lapKeyHeader_(cols)])];
   data.rows.forEach(function (r, i) {
     var used = data.usage[String(r['Maintenance ID'])] || [];
-    out.push(cols.map(function (c) { var v = laporanValue_(c.sumber, r, i, used, md, names); return v == null ? '' : v; }));
+    out.push(cols.map(function (c) { var v = laporanValue_(c.sumber, r, i, used, md, names); return v == null ? '' : v; })
+      .concat([String(r['Maintenance ID'])]));
   });
-  sh.getRange(1, 1, out.length, w).setValues(out);
+  sh.showColumns(1, sh.getMaxColumns());      // kolom kunci format lama mungkin tersembunyi di posisi lain
+  sh.getRange(1, 1, out.length, w + 1).setValues(out);
+  sh.hideColumns(w + 1);
   sh.getRange(1, 1, 1, w).merge().setFontWeight('bold');
-  // Keterangan di luar tabel (kanan judul) supaya format Excel tetap sama.
-  sh.getRange(1, w + 1, 1, 1).setValues([['Diperbarui ' + fmtDate_(new Date()) + ' WIB · otomatis tiap ' + APP.REKAP_HOURS +
-    ' jam · perlu sekarang: Dashboard → Perbarui Laporan & Rekap']]).setFontColor('#888888');
   sh.getRange(2, 1, 1, w).setFontWeight('bold');
-  sh.getRange(2, 1, out.length - 1, w).setWrap(true);
+  // Baris cadangan di bawah tabel ikut diformat, supaya baris yang ditambah sinkron langsung tampil sama.
+  var fmtRows = Math.max(1, Math.min(out.length - 1 + LAP_SPARE_, sh.getMaxRows() - 1));
+  sh.getRange(2, 1, fmtRows, w).setWrap(true);
   sh.setFrozenRows(2);
   cols.forEach(function (c, j) {
-    if (c.sumber === 'Tanggal' && out.length > 2) sh.getRange(3, j + 1, out.length - 2, 1).setNumberFormat('dd/mm/yyyy');
+    if (c.sumber === 'Tanggal' && fmtRows > 1) sh.getRange(3, j + 1, fmtRows - 1, 1).setNumberFormat('dd/mm/yyyy');
   });
   return { year: year, sheet: laporanName_(year), rows: data.rows.length };
 }
@@ -361,9 +462,8 @@ function menuRekapTahunan() {
   var res = ui.prompt('Rekap tahunan', 'Tahun (kosongkan = tahun ini):', ui.ButtonSet.OK_CANCEL);
   if (res.getSelectedButton() !== ui.Button.OK) return;
   var year = String(res.getResponseText() || '').trim() || yearOf_(new Date());
-  var out = buildRekap_(year);
+  var out = withLock_(function () { buildLaporan_(year); return buildRekap_(year); });
   SpreadsheetApp.getActive().getSheetByName(out.sheet).activate();
-  buildLaporan_(year);
   ui.alert('Tab "' + out.sheet + '" dan "' + laporanName_(out.year) + '" diperbarui: ' + out.total.done + ' pekerjaan selesai, MTTR ' +
     (out.total.mttrN ? round2_(out.total.mttrSum / out.total.mttrN) + ' menit' : '-') + '.');
 }

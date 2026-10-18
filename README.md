@@ -96,7 +96,7 @@ Nama header kolom jangan diganti. Urutan kolom boleh diubah.
 | `Form` | Field form | Form · Field · Label · Tipe · Sumber · Wajib · Lainnya isi sendiri · Urutan · Aktif |
 | `Format Laporan` | Kolom tab Laporan | Kolom (judul bebas) · Sumber (lihat di bawah) · Urutan · Aktif |
 | `Catatan Panduan` | Catatan lokal di halaman Panduan | Untuk (`Teknisi`/`Admin`/`Semua`) · Judul · Isi · Urutan · Aktif |
-| `Config` | Aturan | `WARN_HOURS` 3 · `ABANDON_HOURS` 4 · `EMAIL_PERINGATAN` · `SHIFT_MULAI` · `MTTR_TIPE` · `NAMA_APLIKASI` · `LAPORAN_JUDUL` · `STOP_LINE_DEFAULT` Corrective |
+| `Config` | Aturan | `WARN_HOURS` 3 · `ABANDON_HOURS` 4 · `EMAIL_PERINGATAN` · `SHIFT_MULAI` · `MTTR_TIPE` · `NAMA_APLIKASI` · `LAPORAN_JUDUL` · `STOP_LINE_DEFAULT` Corrective · `LAPORAN_LANGSUNG` Ya |
 
 **Jenis sparepart = nilai Jenis Kerusakan** (Elektrikal/Mekanikal/Pneumatik/Program). Kalau berbeda, Dashboard memberi peringatan karena filter otomatis tidak akan cocok.
 
@@ -143,9 +143,11 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
 - **`Laporan <tahun>`** = format Excel. Satu baris per pekerjaan yang *dimulai* di tahun itu (Cancelled tidak ikut; Pending/Abandoned ikut dengan Kondisi masing-masing).
   Kolom sparepart: satu part per baris dalam sel, urutannya sejajar antar-kolom (Jenis / Nama / Model / Jumlah).
 - **`Rekap <tahun>`** = ringkasan per bulan (seperti 2.1).
-- Keduanya **salinan statis** yang diperbarui **otomatis tiap jam** (`APP.REKAP_HOURS`), bukan seketika. Pekerjaan yang baru selesai langsung ada di `Maintenance`, Dashboard, dan Riwayat, tapi baru muncul di Laporan/Rekap paling lambat 1 jam kemudian.
-  Perlu sekarang: Dashboard → **Perbarui Laporan & Rekap**, atau menu spreadsheet → **Laporan & Rekap tahunan**. Waktu pembaruan terakhir tertulis di kanan judul tab Laporan.
-- Jangan edit tab Laporan/Rekap (selalu ditulis ulang). Perbaiki datanya di `Maintenance`.
+- Keduanya **diperbarui langsung setiap aksi** (Mulai, Pause, Resume, Pending, Lanjut, Selesai, Cancel, review, Abandoned): hanya baris pekerjaan itu yang ditulis di Laporan, dan angka Rekap dihitung ulang dari data yang sudah di memori.
+  Cancel → barisnya dihapus dan NO diurutkan ulang. Matikan dengan `Config` → `LAPORAN_LANGSUNG` = `Tidak` jika tombol terasa terlalu lambat.
+- **Bangun ulang penuh** tiap malam ±01:00, lewat Dashboard → **Perbarui Laporan & Rekap**, atau menu spreadsheet → **Laporan & Rekap tahunan**. Perlu setelah admin **mengedit sheet `Maintenance` secara manual** (edit manual tidak memicu sinkron). Mengubah `Format Laporan` otomatis memicu bangun ulang di aksi berikutnya.
+- Kolom terakhir tab Laporan (tersembunyi, "ID sistem …") adalah kunci baris untuk sinkron. Jangan dihapus; kalau terhapus, aksi berikutnya membangun ulang tab.
+- Jangan edit tab Laporan/Rekap (ditulis ulang). Perbaiki datanya di `Maintenance`.
 - Untuk dikirim: klik kanan tab → **Copy to → New spreadsheet** → File → Download → Microsoft Excel.
 - **Arsip** (awal tahun, menu → Arsipkan data tahun lalu): pekerjaan final + Log + **pemakaian sparepart** pindah ke `Arsip <tahun>`, `Arsip Log <tahun>`, `Arsip Sparepart <tahun>`.
   Laporan tahun itu tetap utuh karena ikut membaca tab arsip.
@@ -167,13 +169,16 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
 
 Waktu aksi di Apps Script ditentukan oleh **jumlah panggilan ke Google Sheets**. Hasil `npm run perf`:
 
-| Aksi | 2.1 awal | 2.1.1 | 2.2 |
-|---|---|---|---|
-| Buka app / scan QR | 72–78 | 10 | **10** |
-| Mulai | 112 | 12 | **12** |
-| Selesai | 124 | 12 | **12** tanpa part · **17** dengan part (1 tulis ke Pemakaian Sparepart, berapa pun jumlah part) |
-| Pause / Resume | 109 / 74 | 11 | **11** |
-| Refresh otomatis (60 dtk) | 55 | 10 | **10** |
+| Aksi | 2.1 awal | 2.1.1 | 2.2.1 | 2.2.2 (laporan langsung) |
+|---|---|---|---|---|
+| Buka app / scan QR | 72–78 | 10 | 10 | **10** |
+| Mulai | 112 | 12 | 12 | **16** |
+| Selesai | 124 | 12 | 12 / 17 | **18** tanpa part · **23** dengan part |
+| Pause / Resume | 109 / 74 | 11 | 11 | **15** |
+| Refresh otomatis (60 dtk) | 55 | 10 | 10 | **10** |
+
+Laporan langsung menambah 4 panggilan per aksi (Selesai/Cancel: 6, karena Rekap ikut dihitung) ≈ 0,3–0,6 detik lebih lama per tombol.
+Itu harga "data langsung masuk laporan". Kalau di HP teknisi terasa terlalu lambat: `LAPORAN_LANGSUNG` = `Tidak` (kembali ke 12/17).
 
 Master (termasuk katalog sparepart, format laporan, catatan panduan) di-cache di CacheService dan dihapus otomatis saat spreadsheet diedit.
 BOM dihapus, jadi halaman line tidak lagi membawa daftar BOM.
@@ -183,7 +188,7 @@ BOM dihapus, jadi halaman line tidak lagi membawa daftar BOM.
 ## 9. Test & preview
 
 ```bash
-npm test          # 55 test logika server (mock Sheets + jam palsu)
+npm test          # 57 test logika server (mock Sheets + jam palsu)
 npm run perf      # jumlah panggilan ke Sheets per aksi
 npm run preview   # http://localhost:8787/?as=owner@gmail.com
                   # simulasi QR: &line=L01   QR mesin: &line=L11&mesin=M-E1

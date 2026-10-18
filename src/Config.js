@@ -5,7 +5,7 @@
  */
 var APP = {
   NAME: 'MTTR',          // nama default; per lokasi diubah lewat Config → NAMA_APLIKASI
-  VERSION: '2.2.1',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
+  VERSION: '2.2.2',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
   TZ: 'Asia/Jakarta',
   DATE_FMT: 'yyyy-MM-dd HH:mm:ss',
 
@@ -204,13 +204,14 @@ var APP = {
     MTTR_TIPE: { value: 'Corrective', description: 'Tipe maintenance yang dihitung ke MTTR (pisahkan dengan koma)' },
     NAMA_APLIKASI: { value: 'MTTR', description: 'Nama aplikasi per lokasi, mis. "MTTR Cikarang" (judul halaman & menu spreadsheet)' },
     LAPORAN_JUDUL: { value: '印尼基地设备停机记录表 Form Stop Line Peralatan Base Indonesia', description: 'Judul baris pertama tab Laporan <tahun>' },
-    STOP_LINE_DEFAULT: { value: 'Corrective', description: 'Tipe maintenance yang otomatis "Ya" untuk stop line saat Mulai (pisahkan dengan koma)' }
+    STOP_LINE_DEFAULT: { value: 'Corrective', description: 'Tipe maintenance yang otomatis "Ya" untuk stop line saat Mulai (pisahkan dengan koma)' },
+    LAPORAN_LANGSUNG: { value: 'Ya', description: 'Ya = tab Laporan & Rekap diperbarui setiap aksi (tombol ±0,5 dtk lebih lama). Tidak = hanya tiap malam & lewat tombol' }
   },
 
   LOCK_TIMEOUT_MS: 10000,
   TRIGGER_MINUTES: 15,
-  /** Laporan & Rekap tahun ini dibuat ulang tiap N jam (nilai Apps Script: 1, 2, 4, 6, 8, 12). */
-  REKAP_HOURS: 1,
+  /** Jam (WIB) pembangunan ulang penuh Laporan & Rekap tiap malam. Sehari-hari keduanya diperbarui langsung tiap aksi. */
+  REKAP_HOUR: 1,
   HISTORY_LIMIT: 500
 };
 

@@ -62,6 +62,10 @@ class Sheet {
   }
   getLastColumn() { return this.data.reduce((m, r) => Math.max(m, r.length), 0); }
   getMaxRows() { return 1000; }
+  getMaxColumns() { return Math.max(26, this.getLastColumn()); }
+  hideColumns(c) { (this.hidden = this.hidden || new Set()).add(c); }
+  showColumns() { this.hidden = new Set(); }
+  deleteRow(r) { this.data.splice(r - 1, 1); }
   getRange(r, c, nr, nc) {
     if (typeof r === 'string') { const rg = new Range(this, 1, 1, 1, 1); rg.a1 = r; return rg; }
     return new Range(this, r, c, nr || 1, nc || 1);

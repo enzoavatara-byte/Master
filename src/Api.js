@@ -358,7 +358,8 @@ function apiReview(id, p, filter) {
   p = p || {};
   var note = cleanText_(p.note, 500);
   withLock_(function () {
-    var r = findById_(readTable_(APP.SHEETS.MAINT), id);
+    var rows = readTable_(APP.SHEETS.MAINT);
+    var r = findById_(rows, id);
     if (!r) throw new Error('Maintenance tidak ditemukan.');
     if (r['Status review'] !== APP.REVIEW.NEEDED) throw new Error('Record ini tidak ada di antrian review.');
     if (!canDecide_(r, user)) throw new Error('Anda tidak berwenang mereview record ini.');
@@ -391,6 +392,7 @@ function apiReview(id, p, filter) {
     r['Catatan review'] = note;
     writeObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], APP.EVENTS.REVIEW, user.email, detail + (note ? ' · ' + note : ''));
+    syncReports_(r, rows);
   });
   return apiListReview(filter);
 }
@@ -556,12 +558,12 @@ function apiDashboard(f) {
 
 // ---------- Laporan (Admin) ----------
 
-/** Perbarui tab "Laporan <tahun>" dan "Rekap <tahun>" sekarang (selain otomatis tiap jam). */
+/** Bangun ulang penuh tab "Laporan <tahun>" dan "Rekap <tahun>" sekarang (sehari-hari diperbarui langsung tiap aksi). */
 function apiBuildReports(year) {
   requireUser_([APP.ROLES.ADMIN]);
   var y = year ? checkYear_(year) : yearOf_(new Date());
-  var lap = buildLaporan_(y);
-  var rek = buildRekap_(y);
+  var built = withLock_(function () { return { lap: buildLaporan_(y), rek: buildRekap_(y) }; });   // tidak bentrok dengan sinkron langsung
+  var lap = built.lap, rek = built.rek;
   return { year: y, laporan: lap.sheet, rows: lap.rows, rekap: rek.sheet, spreadsheetUrl: SpreadsheetApp.getActive().getUrl() };
 }
 

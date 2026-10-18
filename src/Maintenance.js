@@ -292,6 +292,7 @@ function apiStart(lineId, p) {
     log_(now, r['Maintenance ID'], APP.EVENTS.START, user.email,
       [tipe, 'Line ' + r['Line'], mesinName ? 'mesin ' + mesinName : '', 'baterai ' + bat, stop ? 'stop line ' + stop : ''].concat(custom.summary).filter(String).join(', '));
     rows.push(r);
+    syncReports_(r, rows);
     return rows;
   });
   return lineView_(line.id, rows, ctx_(), user);
@@ -380,6 +381,7 @@ function apiContinue(id, scannedLineId) {
     r['Status review'] = '';
     writeObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], APP.EVENTS.CONTINUE, user.email, 'Konfirmasi QR ' + r['Line']);
+    syncReports_(r, rows);
     return { line: r['Line'], rows: rows };
   });
   return lineView_(res.line, res.rows, ctx_(), user);
@@ -478,7 +480,7 @@ function apiComplete(id, input) {
     r['Peringatan pada'] = '';
     setNames_(r);
     appendUsage_(r, parts, now);
-    return [APP.EVENTS.COMPLETE, f.summary.concat(['Sparepart: ' + part.replace(/\n/g, '; ')]).join(' · ')];
+    return [APP.EVENTS.COMPLETE, f.summary.concat(['Sparepart: ' + part.replace(/\n/g, '; ')]).join(' · '), parts];
   });
 }
 
@@ -510,6 +512,7 @@ function apiCancel(id, input, catatan) {
     r['Peringatan pada'] = '';
     writeObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], APP.EVENTS.CANCEL, user.email, f.summary.join(' · ') + (owner ? '' : ' (oleh Admin)'));
+    syncReports_(r, rows);
     return { line: r['Line'], rows: rows };
   });
   return lineView_(res.line, res.rows, ctx_(), user);
@@ -522,10 +525,11 @@ function mutate_(id, user, allowed, fn) {
     var r = findById_(rows, id);
     assertOwner_(r, user, allowed);
     var now = new Date();
-    var ev = fn(r, now);
+    var ev = fn(r, now);    // [kejadian, detail log, sparepart (khusus Selesai)]
     setNames_(r);
     writeObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], ev[0], user.email, ev[1]);
+    syncReports_(r, rows, ev[2]);
     return { line: r['Line'], rows: rows };
   });
   // Tampilan dihitung dari data yang sudah ada di memori (r ikut berubah di dalam rows) → tanpa baca ulang.
@@ -550,7 +554,8 @@ function checkTimeouts() {
 
   withLock_(function () {
     var now = new Date();
-    readTable_(APP.SHEETS.MAINT).forEach(function (r) {
+    var rows = readTable_(APP.SHEETS.MAINT);
+    rows.forEach(function (r) {
       if (!isOpen_(r)) return;
       var ref = r['Konfirmasi terakhir'] instanceof Date ? r['Konfirmasi terakhir'] : r['Mulai'];
       if (!(ref instanceof Date)) return;
@@ -561,6 +566,7 @@ function checkTimeouts() {
         r['Peringatan pada'] = now;
         writeObj_(APP.SHEETS.MAINT, r);
         log_(now, r['Maintenance ID'], APP.EVENTS.WARN, APP.SYSTEM_USER, '> ' + lim.warnHours + ' jam tanpa konfirmasi (' + r['Status'] + ')');
+        syncReports_(r, rows);
         emails.push(r);
         result.warned++;
       } else if (warned && age >= lim.abandonHours * 3600000 && now.getTime() - warned.getTime() >= graceMs) {
@@ -569,6 +575,7 @@ function checkTimeouts() {
         r['Status review'] = APP.REVIEW.NEEDED;
         writeObj_(APP.SHEETS.MAINT, r);
         log_(now, r['Maintenance ID'], APP.EVENTS.ABANDON, APP.SYSTEM_USER, 'Peringatan tidak dijawab');
+        syncReports_(r, rows);
         result.abandoned++;
       }
     });

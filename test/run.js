@@ -38,8 +38,8 @@ test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempot
   assert.ok(!ss.getSheetByName('Sheet1'));
   assert.ok(!ss.getSheetByName('BOM'), 'BOM tidak dibuat lagi');
   jeq(triggers.map(t => t.getHandlerFunction()).sort(), ['checkTimeouts', 'onMasterChange', 'refreshRekap'], 'trigger tidak dobel');
-  assert.strictEqual(triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every, 'jam:1', 'laporan & rekap tiap jam');
-  assert.strictEqual(ctx.readTable_('Config').length, 8);
+  assert.strictEqual(triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every, 'hari:1@1', 'bangun ulang penuh tiap malam');
+  assert.strictEqual(ctx.readTable_('Config').length, 9);
   assert.strictEqual(ctx.readTable_('Users')[0].Peran, 'Admin');
   jeq(ctx.readTable_('Projects').map(p => p['Factory ID'] + ':' + p.Baterai), ['F1:VF7', 'F1:Limo7', 'F2:E22H', 'F2:E245']);
   assert.strictEqual(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Masalah').length, 5, 'pilihan tidak terduplikasi');
@@ -629,8 +629,14 @@ test('2.1 migrasi: setup() ulang menambah kolom & mengembalikan field sistem yan
 U.appendRow(rowOf('Users', { Email: 'dewi@gmail.com', Nama: 'Dewi', Peran: 'Teknisi', Aktif: 'Ya' }));
 L.appendRow(lineRow(['L10', 'Cell Retreatment 1', 'F2', '', '', 'Hall E', 'Ya'], { Alias: 'CR1, Retreat satu', Proses: 'Modul Line' }));
 L.appendRow(lineRow(['L11', 'Cell Retreatment 2', 'F2', '', '', 'Hall E', 'Ya'], { Proses: 'Modul Line' }));
-const lap = (y) => { const d = ss.getSheetByName('Laporan ' + y).data; return { title: d[0], head: d[1], rows: d.slice(2) }; };
-const lapRow = (y, pred) => { const t = lap(y); return t.rows.map(r => Object.fromEntries(t.head.map((h, i) => [String(h).split('\n').pop(), r[i]]))).filter(pred); };
+/** Tab Laporan tanpa kolom kunci tersembunyi (keys = Maintenance ID per baris). */
+const lap = (y) => {
+  const d = ss.getSheetByName('Laporan ' + y).data.filter((r, i) => i < 2 || r.some(v => v !== '' && v != null));
+  const k = d[1].findIndex(h => /^ID sistem /.test(h));
+  const cut = (r) => r.filter((_, i) => i !== k);
+  return { title: cut(d[0]), head: cut(d[1]), rows: d.slice(2).map(cut), keys: d.slice(2).map(r => r[k]), keyCol: k };
+};
+const lapRow = (y, pred) => { const t = lap(y); return t.rows.map((r, j) => Object.assign({ _id: t.keys[j] }, Object.fromEntries(t.head.map((h, i) => [String(h).split('\n').pop(), r[i]])))).filter(pred); };
 let J1, J2;
 
 test('2.2 stop line: ditanya saat Mulai, default dari tipe (Corrective = Ya, Preventive = Tidak), nilai salah ditolak', () => {
@@ -676,7 +682,8 @@ test('2.2 laporan: kolom & isi sama dengan Excel (stop line 1/0, durasi, part ke
   const t = lap(2026);
   assert.strictEqual(t.title[0], ctx.getConfig_('LAPORAN_JUDUL'));
   assert.match(t.title[0], /Form Stop Line Peralatan/);
-  assert.match(t.title[21], /^Diperbarui \d{4}-\d\d-\d\d \d\d:\d\d:\d\d WIB · otomatis tiap 1 jam/, 'kapan terakhir diperbarui, di luar tabel');
+  assert.strictEqual(t.keyCol, 21, 'kolom kunci di kanan tabel');
+  assert.ok(ss.getSheetByName('Laporan 2026').hidden.has(22), 'kolom kunci disembunyikan');
   assert.strictEqual(t.head.length, 21, '21 kolom seperti Excel (Maintenance ID nonaktif)');
   assert.strictEqual(t.head[0], '序号\nNO');
   assert.strictEqual(t.head[20], '维修人员\nKaryawan Perbaikan');
@@ -809,13 +816,76 @@ test('2.2 migrasi dari 2.1: setup() menambah baris Form baru (stop line, jenis k
   setRow('Form', (r) => key(r) === 'Mulai.Stop line', 'Aktif', 'Ya');
 });
 
-test('2.2.1 upgrade: setup mengganti trigger rekap harian (2.2.0) menjadi tiap jam, tidak dobel', () => {
-  triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every = 'hari:1@1';   // seperti dipasang 2.2.0
+test('2.2.2 upgrade: setup mengganti trigger tiap jam (2.2.1) dengan bangun ulang penuh tiap malam, tidak dobel', () => {
+  triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every = 'jam:1';   // seperti dipasang 2.2.1
   ctx.setup();
   const r = triggers.filter(t => t.getHandlerFunction() === 'refreshRekap');
   assert.strictEqual(r.length, 1);
-  assert.strictEqual(r[0].every, 'jam:1');
+  assert.strictEqual(r[0].every, 'hari:1@1');
   assert.strictEqual(triggers.length, 3);
+});
+
+U.appendRow(rowOf('Users', { Email: 'eko@gmail.com', Nama: 'Eko', Peran: 'Teknisi', Aktif: 'Ya' }));
+const rekapDone = () => ss.getSheetByName('Rekap 2026').data[16][1];   // baris Total, kolom "Pekerjaan selesai"
+const rowById = (id) => lapRow(2026, r => r._id === id)[0];
+
+test('2.2.2 langsung: Mulai/Pause/Selesai/Cancel memperbarui Laporan & Rekap tanpa bangun ulang penuh, hasil = bangun ulang penuh', () => {
+  as('sari@gmail.com', () => ctx.apiBuildReports());
+  const origL = ctx.buildLaporan_, origR = ctx.buildRekap_;
+  let full = 0, live;
+  ctx.buildLaporan_ = function () { full++; return origL.apply(this, arguments); };
+  ctx.buildRekap_ = function () { full++; return origR.apply(this, arguments); };
+  try {
+    const before = lap(2026).rows.length, doneBefore = rekapDone();
+    let id, c1, c2;
+    as('dewi@gmail.com', () => { id = ctx.apiStart('L10', { baterai: 'E22H' }).open.id; });
+    assert.strictEqual(lap(2026).rows.length, before + 1, 'Mulai → baris baru langsung ada');
+    assert.strictEqual(rowById(id)['Kondisi Perbaikan'], 'Dikerjakan');
+    assert.strictEqual(rowById(id).NO, before + 1);
+    advance(5);
+    as('dewi@gmail.com', () => ctx.apiPause(id, { values: { 'Alasan pause': 'Istirahat' } }));
+    assert.strictEqual(rowById(id)['Kondisi Perbaikan'], 'Pause');
+    as('dewi@gmail.com', () => ctx.apiResume(id));
+    advance(20);
+    as('dewi@gmail.com', () => ctx.apiComplete(id, sel('Sensor error', { parts: [{ id: FUSE, qty: 3 }, { manual: true, jenis: 'Pneumatik', nama: 'Fitting L', qty: 1 }] })));
+    const a = rowById(id);
+    assert.strictEqual(a['Kondisi Perbaikan'], 'Selesai');
+    assert.strictEqual(a['Nama Sparepart'], 'Fuse\nFitting L');
+    assert.strictEqual(a['Jumlah Sparepart'], '3\n1');
+    assert.strictEqual(rekapDone(), doneBefore + 1, 'Rekap langsung bertambah');
+    // Cancel di tengah → barisnya hilang, NO diurutkan ulang
+    as('eko@gmail.com', () => { c1 = ctx.apiStart('L10', { baterai: 'E22H' }).open.id; });
+    as('dewi@gmail.com', () => { c2 = ctx.apiStart('L11', { baterai: 'E245' }).open.id; });
+    assert.ok(rowById(c1) && rowById(c2));
+    as('eko@gmail.com', () => ctx.apiCancel(c1, 'Input ganda'));
+    assert.ok(!rowById(c1), 'Cancelled tidak di laporan');
+    const t = lap(2026);
+    jeq(t.rows.map(r => r[0]), t.rows.map((_, i) => i + 1), 'NO tetap urut');
+    as('dewi@gmail.com', () => ctx.apiCancel(c2, 'Input ganda'));
+    assert.strictEqual(full, 0, 'tidak ada bangun ulang penuh selama aksi biasa');
+    live = lap(2026).rows;
+  } finally {
+    ctx.buildLaporan_ = origL; ctx.buildRekap_ = origR;
+  }
+  ctx.resetMaster_(); ctx.buildLaporan_(2026);
+  jeq(lap(2026).rows, live, 'hasil sinkron langsung sama dengan bangun ulang penuh');
+});
+
+test('2.2.2 langsung: Format Laporan diubah → aksi berikutnya membangun ulang dengan format baru; LAPORAN_LANGSUNG = Tidak → tab tidak disentuh', () => {
+  setRow('Format Laporan', (r, h) => r[h.indexOf('Sumber')] === 'Project', 'Kolom', '项目\nProject');
+  let id;
+  as('eko@gmail.com', () => { id = ctx.apiStart('L10', { baterai: 'E22H' }).open.id; });
+  assert.strictEqual(lap(2026).head[2], '项目\nProject');
+  assert.ok(rowById(id));
+  as('eko@gmail.com', () => ctx.apiCancel(id, 'Input ganda'));
+  setRow('Format Laporan', (r, h) => r[h.indexOf('Sumber')] === 'Project', 'Kolom', 'Project');
+  setRow('Config', (r, h) => r[h.indexOf('Key')] === 'LAPORAN_LANGSUNG', 'Value', 'Tidak');
+  as('sari@gmail.com', () => ctx.apiBuildReports());
+  const n = lap(2026).rows.length;
+  as('eko@gmail.com', () => { id = ctx.apiStart('L10', { baterai: 'E22H' }).open.id; });
+  assert.strictEqual(lap(2026).rows.length, n, 'dimatikan → hanya lewat tombol / malam');
+  as('eko@gmail.com', () => ctx.apiCancel(id, 'Input ganda'));
+  setRow('Config', (r, h) => r[h.indexOf('Key')] === 'LAPORAN_LANGSUNG', 'Value', 'Ya');
 });
 
 // ---------- Rekap tahunan & arsip ----------
