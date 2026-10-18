@@ -6,7 +6,7 @@ Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spr
 ## 2.2.3
 - Pemilih sparepart: Jenis jadi satu baris yang bisa digeser; **Nama dan Model jadi dua kolom berdampingan dengan tinggi tetap**, masing-masing di-scroll.
   Tidak lagi memunculkan deretan tombol baru yang memanjang ke bawah saat katalog besar. Posisi scroll tidak melompat saat menambah part.
-- **File**: `App`, `Styles`. Tidak perlu Run `setup`; cukup New version.
+- **File**: `App`, `Styles`, `Config` (nomor versi). Tidak perlu Run `setup`; cukup New version.
 
 ## 2.2.2
 - Laporan & Rekap diperbarui **langsung setiap aksi** (Mulai, Pause, Selesai, Cancel, review, …), menggantikan "tiap jam" di 2.2.1.
