@@ -1107,4 +1107,43 @@ test('deploy versi baru saat HP masih membuka versi lama: refresh memberi tahu (
   });
 });
 
+// ---------- Paling akhir: menghapus data ----------
+test('hapus data testing: sebelum tanggal → pekerjaan + Log + sparepart (juga arsip) terhapus, laporan & rekap dibuat ulang, master utuh', () => {
+  throwsMsg(() => ctx.parseTanggalWib_('2027-02-01'), /dd\/mm\/yyyy/);
+  throwsMsg(() => ctx.parseTanggalWib_('31/02/2027'), /tidak valid/);
+  assert.strictEqual(ctx.parseTanggalWib_(''), null);
+  const cut = ctx.parseTanggalWib_('01/02/2027');
+  assert.strictEqual(cut.getTime(), Date.UTC(2027, 0, 31, 17, 0, 0), '00:00 WIB');
+  const master = ['Users', 'Lines', 'Mesin', 'Sparepart', 'Pilihan', 'Form', 'Config'].map(n => [n, ctx.readTable_(n).length]);
+  const old = ctx.readTable_('Maintenance').concat(ctx.readTable_('Arsip 2026')).filter(r => r.Mulai < cut).map(r => r['Maintenance ID']);
+  const plan = ctx.testDataPlan_(cut).counts;
+  assert.strictEqual(plan.maintenance, old.length);
+  assert.ok(plan.log > 0 && plan.sparepart > 0);
+  const out = ctx.hapusDataTesting_(cut);
+  jeq(out, plan);
+  const m = ctx.readTable_('Maintenance');
+  assert.ok(m.length >= 1 && m.every(r => r.Mulai >= cut), 'yang dimulai sejak tanggal itu tetap ada');
+  const live = new Set(m.map(r => r['Maintenance ID']));
+  assert.ok(ctx.readTable_('Log').every(e => live.has(e['Maintenance ID'])), 'Log tanpa pekerjaan yang dihapus');
+  assert.ok(ctx.readTable_('Pemakaian Sparepart').every(u => live.has(u['Maintenance ID'])));
+  for (const n of ['Arsip 2026', 'Arsip Log 2026', 'Arsip Sparepart 2026', 'Laporan 2026', 'Rekap 2026']) assert.strictEqual(ss.getSheetByName(n), null, n + ' dihapus (kosong)');
+  assert.strictEqual(lap(2027).rows.length, m.filter(r => r.Status !== 'Cancelled').length);
+  jeq(['Users', 'Lines', 'Mesin', 'Sparepart', 'Pilihan', 'Form', 'Config'].map(n => [n, ctx.readTable_(n).length]), master, 'sheet master tidak disentuh');
+  // semua
+  ctx.hapusDataTesting_(null);
+  assert.strictEqual(ctx.readTable_('Maintenance').length, 0);
+  assert.strictEqual(ctx.readTable_('Log').length, 0);
+  assert.strictEqual(ctx.readTable_('Pemakaian Sparepart').length, 0);
+  assert.strictEqual(lap(2027).rows.length, 0);
+  assert.strictEqual(ss.getSheetByName('Rekap 2027').data[16][1], 0);
+  assert.strictEqual(ctx.hapusDataTesting_(null).maintenance, 0, 'jalankan ulang: tidak ada apa-apa');
+  // aplikasi tetap jalan setelah dibersihkan
+  as('budi@gmail.com', () => {
+    const id = ctx.apiStart('L01', 'E22H').open.id;
+    assert.ok(id.endsWith('-01'));
+    assert.strictEqual(lap(2027).rows.length, 1);
+    ctx.apiCancel(id, 'Input ganda');
+  });
+});
+
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

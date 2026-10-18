@@ -70,6 +70,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Laporan & Rekap tahunan (buat / perbarui)…', 'menuRekapTahunan')
     .addItem('Arsipkan data tahun lalu…', 'menuArsipkanTahun')
+    .addItem('Hapus data testing…', 'menuHapusDataTesting')
     .addSeparator()
     .addItem('Muat ulang data master (jika perubahan sheet belum muncul)', 'menuMuatUlangMaster')
     .addItem('Tentang (versi ' + APP.VERSION + ')', 'menuTentang')

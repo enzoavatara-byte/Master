@@ -157,6 +157,9 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
 - Kolom terakhir tab Laporan (tersembunyi, "ID sistem …") adalah kunci baris untuk sinkron. Jangan dihapus; kalau terhapus, aksi berikutnya membangun ulang tab.
 - Jangan edit tab Laporan/Rekap (ditulis ulang). Perbaiki datanya di `Maintenance`.
 - Untuk dikirim: klik kanan tab → **Copy to → New spreadsheet** → File → Download → Microsoft Excel.
+- **Hapus data testing** (sebelum mulai pakai sungguhan): menu → **Hapus data testing…** → tanggal mulai pakai (dd/mm/yyyy; kosong = semua) → cek jumlah → ketik `HAPUS`.
+  Menghapus permanen pekerjaan yang dimulai sebelum tanggal itu dari `Maintenance`, `Log`, `Pemakaian Sparepart` dan tab Arsip (termasuk sheet yang diproteksi), lalu membangun ulang Laporan & Rekap. Tab per baterai & `Pending Work` ikut bersih (rumus). Sheet master tidak disentuh.
+  Menghapus baris langsung di tab Laporan/Rekap **tidak bisa**: tab itu selalu dibuat ulang dari `Maintenance`. Backup dulu (File → Make a copy); bisa dikembalikan lewat File → Version history.
 - **Arsip** (awal tahun, menu → Arsipkan data tahun lalu): pekerjaan final + Log + **pemakaian sparepart** pindah ke `Arsip <tahun>`, `Arsip Log <tahun>`, `Arsip Sparepart <tahun>`.
   Laporan tahun itu tetap utuh karena ikut membaca tab arsip.
 
@@ -196,7 +199,7 @@ BOM dihapus, jadi halaman line tidak lagi membawa daftar BOM.
 ## 9. Test & preview
 
 ```bash
-npm test          # 58 test logika server (mock Sheets + jam palsu)
+npm test          # 59 test logika server (mock Sheets + jam palsu)
 npm run perf      # jumlah panggilan ke Sheets per aksi
 npm run preview   # http://localhost:8787/?as=owner@gmail.com
                   # simulasi QR: &line=L01   QR mesin: &line=L11&mesin=M-E1

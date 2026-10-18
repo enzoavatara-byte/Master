@@ -468,6 +468,122 @@ function menuRekapTahunan() {
     (out.total.mttrN ? round2_(out.total.mttrSum / out.total.mttrN) + ' menit' : '-') + '.');
 }
 
+// ---------- Hapus data testing (Admin, sebelum go-live) ----------
+
+/** "dd/mm/yyyy" → Date jam 00:00 WIB. Kosong → null (= semua data). */
+function parseTanggalWib_(s) {
+  s = String(s || '').trim();
+  if (!s) return null;
+  var m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s);
+  if (!m) throw new Error('Format tanggal harus dd/mm/yyyy, mis. 20/10/2026.');
+  var d = Number(m[1]), mo = Number(m[2]), y = Number(m[3]);
+  var t = new Date(Date.UTC(y, mo - 1, d) - 7 * 3600000);   // WIB = UTC+7, tanpa DST
+  var two = function (n) { return (n < 10 ? '0' : '') + n; };
+  if (Utilities.formatDate(t, APP.TZ, 'dd/MM/yyyy') !== two(d) + '/' + two(mo) + '/' + y) throw new Error('Tanggal tidak valid: ' + s);
+  return t;
+}
+
+/** Sheet data (yang ditulis aplikasi, termasuk yang diproteksi & tab arsip). Sheet master tidak termasuk. */
+function testDataSheets_() {
+  var names = SpreadsheetApp.getActive().getSheets().map(function (s) { return s.getName(); });
+  var pick = function (re) { return names.filter(function (n) { return re.test(n); }); };
+  return {
+    maint: [APP.SHEETS.MAINT].concat(pick(/^Arsip \d{4}$/)),
+    log: [APP.SHEETS.LOG].concat(pick(/^Arsip Log \d{4}$/)),
+    usage: [APP.SHEETS.PEMAKAIAN].concat(pick(/^Arsip Sparepart \d{4}$/))
+  };
+}
+
+/** Pekerjaan yang akan dihapus: dimulai sebelum `cutoff` (null = semua), beserta jumlah baris Log & sparepart-nya. */
+function testDataPlan_(cutoff) {
+  var ss = SpreadsheetApp.getActive(), sets = testDataSheets_(), ids = {};
+  var counts = { maintenance: 0, log: 0, sparepart: 0 };
+  sets.maint.forEach(function (name) {
+    if (!ss.getSheetByName(name)) return;
+    readTable_(name).forEach(function (r) {
+      if (cutoff && !(r['Mulai'] instanceof Date && r['Mulai'] < cutoff)) return;
+      var id = String(r['Maintenance ID']);
+      if (!ids[id]) { ids[id] = true; counts.maintenance++; }
+    });
+  });
+  var countIn = function (list) {
+    var c = 0;
+    list.forEach(function (name) {
+      if (ss.getSheetByName(name)) readTable_(name).forEach(function (r) { if (ids[String(r['Maintenance ID'])]) c++; });
+    });
+    return c;
+  };
+  counts.log = countIn(sets.log);
+  counts.sparepart = countIn(sets.usage);
+  return { ids: ids, counts: counts, sets: sets };
+}
+
+/**
+ * Hapus permanen pekerjaan yang dimulai sebelum `cutoff` (null = semua) dari Maintenance, Log, Pemakaian Sparepart
+ * dan tab arsip; tab arsip yang jadi kosong dihapus; Laporan & Rekap dibangun ulang (tahun tanpa data tersisa: tabnya dihapus).
+ * Tab rumus (Maintenance <baterai>, Pending Work) ikut bersih sendiri. Sheet master tidak disentuh.
+ */
+function hapusDataTesting_(cutoff) {
+  return withLock_(function () {
+    var ss = SpreadsheetApp.getActive();
+    var plan = testDataPlan_(cutoff), ids = plan.ids;
+    if (!plan.counts.maintenance) return plan.counts;
+    var all = plan.sets.maint.concat(plan.sets.log, plan.sets.usage);
+    all.forEach(function (name) {
+      var sh = ss.getSheetByName(name);
+      if (!sh || sh.getLastRow() < 2) return;
+      var vals = sh.getDataRange().getValues();
+      var iId = vals[0].map(function (h) { return String(h).trim(); }).indexOf('Maintenance ID');
+      if (iId >= 0) rewriteKeeping_(sh, vals, function (row) { return !ids[String(row[iId])]; });
+    });
+    all.forEach(function (name) {
+      var sh = ss.getSheetByName(name);
+      if (sh && /^Arsip /.test(name) && sh.getLastRow() < 2) ss.deleteSheet(sh);
+    });
+    resetHeaders_();
+    var nowY = yearOf_(new Date()), years = {};
+    years[nowY] = true;
+    ss.getSheets().forEach(function (s) { var m = /^(?:Laporan|Rekap) (\d{4})$/.exec(s.getName()); if (m) years[m[1]] = true; });
+    Object.keys(years).forEach(function (k) {
+      var y = Number(k);
+      if (y !== nowY && !rekapRows_(y).length && !laporanRows_(y).rows.length) {
+        [laporanName_(y), rekapName_(y)].forEach(function (n) { var sh = ss.getSheetByName(n); if (sh) ss.deleteSheet(sh); });
+      } else {
+        buildRekap_(y);
+        buildLaporan_(y);
+      }
+    });
+    return plan.counts;
+  });
+}
+
+function menuHapusDataTesting() {
+  requireUser_([APP.ROLES.ADMIN]);
+  var ui = SpreadsheetApp.getUi();
+  var r1 = ui.prompt('Hapus data testing',
+    'Hapus PERMANEN pekerjaan maintenance yang DIMULAI SEBELUM tanggal (dd/mm/yyyy), mis. tanggal mulai pakai sungguhan.\n' +
+    'Kosongkan = hapus SEMUA data maintenance.\n\n' +
+    'Ikut terhapus: Log, Pemakaian Sparepart, tab Arsip; Laporan & Rekap dibuat ulang.\n' +
+    'TIDAK dihapus: Users, Factory, Projects, Lines, Mesin, Sparepart, Pilihan, Form, Format Laporan, Catatan Panduan, Config.',
+    ui.ButtonSet.OK_CANCEL);
+  if (r1.getSelectedButton() !== ui.Button.OK) return;
+  var cutoff = parseTanggalWib_(r1.getResponseText());
+  var n = testDataPlan_(cutoff).counts;
+  if (!n.maintenance) { ui.alert('Tidak ada data yang cocok. Tidak ada yang dihapus.'); return; }
+  var r2 = ui.prompt('Konfirmasi hapus permanen',
+    'Akan DIHAPUS: ' + n.maintenance + ' pekerjaan, ' + n.log + ' baris Log, ' + n.sparepart + ' baris pemakaian sparepart' +
+    (cutoff ? ' (dimulai sebelum ' + Utilities.formatDate(cutoff, APP.TZ, 'dd/MM/yyyy') + ').' : ' (SEMUA DATA).') + '\n\n' +
+    'Sebaiknya backup dulu: File → Make a copy. Bisa juga dikembalikan lewat File → Version history.\n\n' +
+    'Ketik HAPUS untuk melanjutkan:', ui.ButtonSet.OK_CANCEL);
+  if (r2.getSelectedButton() !== ui.Button.OK || String(r2.getResponseText() || '').trim().toUpperCase() !== 'HAPUS') {
+    ui.alert('Dibatalkan. Tidak ada yang dihapus.');
+    return;
+  }
+  var out = hapusDataTesting_(cutoff);
+  ui.alert('Selesai: ' + out.maintenance + ' pekerjaan, ' + out.log + ' baris Log, ' + out.sparepart +
+    ' baris sparepart dihapus. Laporan & Rekap sudah dibuat ulang dari data yang tersisa.');
+}
+
 function menuArsipkanTahun() {
   requireUser_([APP.ROLES.ADMIN]);
   var ui = SpreadsheetApp.getUi();
