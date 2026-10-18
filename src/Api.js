@@ -137,6 +137,14 @@ function bootstrap_(user, lineId, mesinId, filter) {
   };
 }
 
+/**
+ * Akun Google yang benar-benar dipakai untuk panggilan google.script.run. Bisa BEDA dengan akun yang membuka halaman
+ * jika browser login beberapa akun (bug Google: panggilan memakai akun utama browser). Tanpa baca sheet.
+ */
+function apiWhoAmI() {
+  return currentEmail_();
+}
+
 /** Ringan: dipanggil ulang saat app kembali dibuka / tiap menit. */
 /**
  * @param {string=} clientVersion versi halaman yang sedang terbuka di HP. Beda dengan server (admin baru deploy

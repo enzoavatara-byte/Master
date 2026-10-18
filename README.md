@@ -171,8 +171,11 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
 2. **Dua factory = dua file = dua kali update.** Kalau salah satu lupa diupdate, kedua factory beda versi. Cek menu Tentang setelah update.
 3. **Sparepart hanya catatan pemakaian, bukan stok.** Tidak ada peringatan stok habis.
 4. **Mengubah nama/model di katalog tidak mengubah riwayat** (data lama tetap seperti saat dicatat). Itu disengaja; konsekuensinya rekap bisa terpecah jika nama sering diganti.
-5. **Kamera di dalam app tidak dijamin** di semua HP. Ada cadangan (kamera HP / cari line).
-6. **Performa**: jeda tetap ±1–2 detik per perjalanan ke server Apps Script tidak bisa dihilangkan. Tab `Maintenance` dibaca penuh per request → **arsipkan per tahun**.
+5. **Bug Google multi-akun.** Browser/HP yang login beberapa akun Google mengirim panggilan aplikasi atas nama *akun utama* browser, bukan akun yang membuka halaman. Akibatnya: ditolak, atau (kalau kedua akun terdaftar) tercatat atas nama yang salah.
+   Tidak bisa diperbaiki dari kode (selama aplikasi memakai *Execute as: User accessing* untuk mengenali teknisi). Aplikasi **mendeteksi** dan berhenti dengan petunjuk "Akun Google tidak cocok".
+   Solusi di sisi pengguna: Incognito (cepat), browser khusus kerja di HP + "Tambahkan ke layar utama", atau profil Chrome khusus kerja di PC. Jika Google sendiri menampilkan "Sorry, unable to open the file at this time", kode aplikasi belum sempat jalan; pakai solusi yang sama.
+6. **Kamera di dalam app tidak dijamin** di semua HP. Ada cadangan (kamera HP / cari line).
+7. **Performa**: jeda tetap ±1–2 detik per perjalanan ke server Apps Script tidak bisa dihilangkan. Tab `Maintenance` dibaca penuh per request → **arsipkan per tahun**.
 
 ---
 
@@ -199,7 +202,7 @@ BOM dihapus, jadi halaman line tidak lagi membawa daftar BOM.
 ## 9. Test & preview
 
 ```bash
-npm test          # 59 test logika server (mock Sheets + jam palsu)
+npm test          # 60 test logika server (mock Sheets + jam palsu)
 npm run perf      # jumlah panggilan ke Sheets per aksi
 npm run preview   # http://localhost:8787/?as=owner@gmail.com
                   # simulasi QR: &line=L01   QR mesin: &line=L11&mesin=M-E1

@@ -47,10 +47,40 @@
     var args = Array.prototype.slice.call(arguments, 1);
     return new Promise(function (resolve, reject) {
       var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(function (e) {
-        reject(new Error((e && e.message) || String(e)));
+        var msg = (e && e.message) || String(e);
+        // Halaman sudah lolos cek akses (doGet), jadi ditolak sekarang = Google memakai akun lain (multi-akun).
+        var denied = /ACCESS_DENIED: email (\S+)/.exec(msg);
+        if (AUTH_ERR.test(msg) || (denied && (!state.boot || denied[1] !== state.boot.user.email))) accountProblem(denied ? denied[1] : '');
+        reject(new Error(msg));
       });
       r[fn].apply(r, args);
     });
+  }
+
+  // ---------- Bug Google: browser login beberapa akun → google.script.run memakai akun utama browser ----------
+  var AUTH_ERR = /PERMISSION_DENIED|authoriz|HTTP 40[13]/i;
+  function accountProblem(other) {
+    if ($('acct')) return;
+    var mine = state.boot && state.boot.user ? state.boot.user.email : '';
+    var d = document.createElement('div');
+    d.id = 'acct';
+    d.className = 'acct-bg';
+    d.innerHTML = '<div class="card acct"><h2>Akun Google tidak cocok</h2><p class="small">' +
+      (other && mine ? 'Aplikasi dibuka sebagai <b>' + esc(mine) + '</b>, tetapi Google mengirim tombol sebagai <b>' + esc(other) + '</b> (akun utama di browser ini).'
+        : 'Google menolak permintaan dari browser ini' + (mine ? ' untuk <b>' + esc(mine) + '</b>' : '') + '.') +
+      ' Ini bug Google saat satu browser login dengan beberapa akun. Aplikasi dihentikan supaya data tidak tercatat atas nama yang salah.</p>' +
+      '<ol class="small"><li><b>Cepat:</b> buka link aplikasi di tab <b>Incognito / Private</b>, login hanya dengan akun kerja.</li>' +
+      '<li><b>Permanen di HP:</b> pakai satu browser khusus kerja (mis. Firefox, Edge, Samsung Internet) yang hanya login akun kerja, lalu ⋮ → <b>Tambahkan ke layar utama</b>.</li>' +
+      '<li><b>Permanen di PC:</b> buat <b>profil Chrome</b> khusus akun kerja, atau keluar dari semua akun lalu login akun kerja <b>paling dulu</b> (akun pertama = akun utama).</li></ol>' +
+      '<button class="btn" id="acct-reload">Muat ulang</button></div>';
+    document.body.appendChild(d);
+    $('acct-reload').onclick = function () { location.reload(); };
+  }
+  /** Bandingkan akun halaman (dari doGet) dengan akun yang dipakai Google untuk tombol. */
+  function checkAccount() {
+    call('apiWhoAmI').then(function (email) {
+      if (email && state.boot && email !== state.boot.user.email) accountProblem(email);
+    }).catch(function () { /* penolakan sudah ditangani di call() */ });
   }
   function cleanErr(e) { return String((e && e.message) || e).replace(/^(Error|Exception):\s*/, ''); }
   function syncClock(iso) { if (iso) state.offsetMs = new Date(iso).getTime() - Date.now(); }
@@ -266,6 +296,7 @@
     // Data awal sudah ditanam di halaman oleh server (doGet) → langsung tampil tanpa menunggu server lagi.
     if (window.BOOT) {
       try { applyBoot(window.BOOT); } catch (e) { bootError(e); return; }
+      checkAccount();
       if (hasFilter) refresh(true); // statistik Beranda dihitung ulang sesuai filter tersimpan
       return;
     }

@@ -1107,6 +1107,11 @@ test('deploy versi baru saat HP masih membuka versi lama: refresh memberi tahu (
   });
 });
 
+test('multi-akun: apiWhoAmI = akun yang benar-benar dipakai Google untuk panggilan (tanpa baca sheet)', () => {
+  as('budi@gmail.com', () => assert.strictEqual(ctx.apiWhoAmI(), 'budi@gmail.com'));
+  as('Akun.Lain@Gmail.com ', () => assert.strictEqual(ctx.apiWhoAmI(), 'akun.lain@gmail.com', 'belum terdaftar pun tetap dijawab, supaya HP bisa menjelaskan'));
+});
+
 // ---------- Paling akhir: menghapus data ----------
 test('hapus data testing: sebelum tanggal → pekerjaan + Log + sparepart (juga arsip) terhapus, laporan & rekap dibuat ulang, master utuh', () => {
   throwsMsg(() => ctx.parseTanggalWib_('2027-02-01'), /dd\/mm\/yyyy/);
