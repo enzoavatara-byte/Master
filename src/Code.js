@@ -24,7 +24,7 @@ function doGet(e) {
   try { boot = bootstrap_(user, t.lineId, t.mesinId, null); } catch (err) { console.warn('bootstrap di doGet gagal: ' + err); }
   t.boot = safeJson_(boot);
   return t.evaluate()
-    .setTitle(APP.NAME)
+    .setTitle(appName_())
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
 }
@@ -42,7 +42,7 @@ function renderMessage_(title, htmlBody) {
   var t = HtmlService.createTemplateFromFile('Message');
   t.title = title;
   t.body = htmlBody;
-  return t.evaluate().setTitle(APP.NAME + ' - ' + title)
+  return t.evaluate().setTitle(appName_() + ' - ' + title)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
@@ -53,15 +53,23 @@ function escapeHtml_(s) {
 }
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu(APP.NAME)
+  var name = APP.NAME;
+  try { name = appName_(); } catch (e) { /* belum setup: pakai nama default */ }
+  SpreadsheetApp.getUi().createMenu(name)
     .addItem('Setup / perbaiki sheet & trigger', 'setup')
     .addItem('Jalankan cek 3/4 jam sekarang', 'checkTimeouts')
     .addSeparator()
-    .addItem('Rekap tahunan (buat / perbarui)…', 'menuRekapTahunan')
+    .addItem('Laporan & Rekap tahunan (buat / perbarui)…', 'menuRekapTahunan')
     .addItem('Arsipkan data tahun lalu…', 'menuArsipkanTahun')
     .addSeparator()
     .addItem('Muat ulang data master (jika perubahan sheet belum muncul)', 'menuMuatUlangMaster')
+    .addItem('Tentang (versi ' + APP.VERSION + ')', 'menuTentang')
     .addToUi();
+}
+
+function menuTentang() {
+  SpreadsheetApp.getUi().alert(appName_() + ' versi ' + APP.VERSION + '\n\nCatatan perubahan: CHANGELOG.md di GitHub, atau menu Panduan di aplikasi.\n' +
+    'Dua factory: pastikan kedua spreadsheet memakai versi yang sama.');
 }
 
 /** Simple trigger: setiap edit manual di spreadsheet → cache master dihapus (perubahan langsung terlihat). */
@@ -122,7 +130,7 @@ function setup() {
 
   // Log & Maintenance hanya boleh ditulis kode. Proteksi "warning only": editor manual
   // mendapat peringatan (user tetap perlu akses Editor karena web app berjalan sebagai user).
-  [APP.SHEETS.MAINT, APP.SHEETS.LOG].forEach(function (name) {
+  [APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN].forEach(function (name) {
     var sh = ss.getSheetByName(name);
     if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) {
       sh.protect().setDescription('Ditulis oleh aplikasi MTTR. Jangan diedit manual.').setWarningOnly(true);
@@ -160,12 +168,27 @@ function setup() {
   APP.FORM_DEFAULTS.forEach(function (d) {
     var key = d[0] + '.' + d[1];
     var exists = formRows.some(function (r) { return String(r['Form']).trim() + '.' + String(r['Field']).trim() === key; });
-    var mustExist = formRows.length === 0 || APP.LOCKED_FIELDS.indexOf(key) !== -1;
+    var mustExist = formRows.length === 0 || APP.LOCKED_FIELDS.indexOf(key) !== -1 || APP.FORM_MIGRATE.indexOf(key) !== -1;
     if (!exists && mustExist) {
       appendObj_(APP.SHEETS.FORM, { 'Form': d[0], 'Field': d[1], 'Label': d[2], 'Tipe': d[3], 'Sumber': d[4],
         'Wajib': d[5], 'Lainnya isi sendiri': d[6], 'Urutan': d[7], 'Aktif': 'Ya' });
     }
   });
+
+  if (readTable_(APP.SHEETS.SPAREPART).length === 0) {
+    APP.SPAREPART_DEFAULTS.forEach(function (p, i) {
+      appendObj_(APP.SHEETS.SPAREPART, { 'Jenis Sparepart': p[0], 'Nama Sparepart': p[1], 'Model': p[2], 'Satuan': p[3], 'Urutan': i + 1, 'Aktif': 'Ya' });
+    });
+  }
+  if (readTable_(APP.SHEETS.FORMAT).length === 0) {
+    APP.REPORT_DEFAULTS.forEach(function (d, i) {
+      appendObj_(APP.SHEETS.FORMAT, { 'Kolom': d[0], 'Sumber': d[1], 'Urutan': i + 1, 'Aktif': d[2] });
+    });
+  }
+  if (readTable_(APP.SHEETS.PANDUAN).length === 0) {
+    appendObj_(APP.SHEETS.PANDUAN, { 'Untuk': 'Teknisi', 'Judul': 'Contoh catatan', 'Urutan': 1, 'Aktif': 'Tidak',
+      'Isi': 'Ubah Aktif menjadi Ya untuk menampilkan catatan ini di Panduan aplikasi. Contoh: masalah PLC hubungi Bang X (ext 123).' });
+  }
 
   invalidateMaster_();
   ensureMaintColumns_(customColumns_(masterData_()));
@@ -185,6 +208,7 @@ function setup() {
   var hasChange = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'onMasterChange'; });
   if (!hasChange) ScriptApp.newTrigger('onMasterChange').forSpreadsheet(ss).onChange().create(); // hapus/sisip baris → cache dihapus
   buildRekap_(yearOf_(new Date()));
+  buildLaporan_(yearOf_(new Date()));
 
   var blank = ss.getSheetByName('Sheet1');
   if (blank && ss.getSheets().length > 1 && blank.getLastRow() === 0) ss.deleteSheet(blank);

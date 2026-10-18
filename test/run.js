@@ -5,7 +5,7 @@
  */
 'use strict';
 const assert = require('assert');
-const { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache } = require('./mock');
+const { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache, ui } = require('./mock');
 
 // ---------- helpers ----------
 let passed = 0;
@@ -20,25 +20,34 @@ const rec = (id) => ctx.readTable_('Maintenance').find(r => r['Maintenance ID'] 
 const logOf = (id) => ctx.readTable_('Log').filter(r => r['Maintenance ID'] === id).map(r => r['Kejadian']);
 const jeq = (a, b, m) => assert.deepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), m);
 const near = (a, b) => assert.ok(Math.abs(a - b) < 0.02, a + ' ≈ ' + b);
-const sel = (masalah, extra) => ({ values: { Masalah: masalah, Penyebab: 'Komponen aus', Penanganan: 'Ganti part' }, other: {}, ...extra });
-const done = sel('Sensor error', { parts: [{ nama: 'Fuse', jumlah: 2 }] });
+const sel = (masalah, extra) => ({ values: { 'Jenis kerusakan': 'Elektrikal', Masalah: masalah, Penyebab: 'Komponen aus', Penanganan: 'Ganti part' }, other: {}, ...extra });
+const pid = (j, n, m) => ctx.partId_(j, n, m);
+const FUSE = pid('Elektrikal', 'Fuse', '10A');
+const done = sel('Sensor error', { parts: [{ id: FUSE, qty: 2 }] });
+/** Baris sheet berdasarkan NAMA kolom (bukan posisi) — seperti aplikasi membaca sheet. */
+const rowOf = (sheet, obj) => ctx.objToRow_(ss.getSheetByName(sheet).data[0].map(h => String(h).trim()), obj);
+const lineRow = (a, extra) => rowOf('Lines', Object.assign({ 'Line ID': a[0], 'Nama Line': a[1], 'Factory ID': a[2], 'Baterai': a[3], 'Grup': a[4], 'Area': a[5], 'Aktif': a[6] }, extra || {}));
 const pend = (dik, tertunda, tenggat, extra) => ({ values: { 'Pekerjaan dilakukan': dik, 'Yang tertunda': tertunda }, tenggat, ...extra });
 
 // ---------- tests ----------
-console.log('MTTR 2.1 server logic');
+console.log('MTTR 2.2 server logic');
 
 test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempotent)', () => {
   ctx.setup(); ctx.setup();
-  for (const n of ['Users', 'Factory', 'Projects', 'Lines', 'Mesin', 'BOM', 'Pilihan', 'Form', 'Config', 'Maintenance', 'Log', 'Maintenance VF7', 'Maintenance Limo7', 'Maintenance E22H', 'Maintenance E245', 'Pending Work']) assert.ok(ss.getSheetByName(n), n);
+  for (const n of ['Users', 'Factory', 'Projects', 'Lines', 'Mesin', 'Sparepart', 'Pemakaian Sparepart', 'Format Laporan', 'Catatan Panduan', 'Pilihan', 'Form', 'Config', 'Maintenance', 'Log', 'Maintenance VF7', 'Maintenance Limo7', 'Maintenance E22H', 'Maintenance E245', 'Pending Work', 'Rekap 2026', 'Laporan 2026']) assert.ok(ss.getSheetByName(n), n);
   assert.ok(!ss.getSheetByName('Sheet1'));
+  assert.ok(!ss.getSheetByName('BOM'), 'BOM tidak dibuat lagi');
   jeq(triggers.map(t => t.getHandlerFunction()), ['checkTimeouts', 'refreshRekap', 'onMasterChange'], 'trigger tidak dobel');
-  assert.strictEqual(ctx.readTable_('Config').length, 5);
+  assert.strictEqual(ctx.readTable_('Config').length, 8);
   assert.strictEqual(ctx.readTable_('Users')[0].Peran, 'Admin');
   jeq(ctx.readTable_('Projects').map(p => p['Factory ID'] + ':' + p.Baterai), ['F1:VF7', 'F1:Limo7', 'F2:E22H', 'F2:E245']);
   assert.strictEqual(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Masalah').length, 5, 'pilihan tidak terduplikasi');
-  assert.strictEqual(ctx.readTable_('Form').length, 15, 'form tidak terduplikasi');
+  assert.strictEqual(ctx.readTable_('Form').length, 20, 'form tidak terduplikasi');
+  assert.strictEqual(ctx.readTable_('Sparepart').length, 11, 'katalog contoh sekali saja');
+  assert.strictEqual(ctx.readTable_('Format Laporan').length, 22);
+  jeq(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Jenis Kerusakan').map(r => r.Nilai), ['Elektrikal', 'Mekanikal', 'Pneumatik', 'Program']);
   const f = ss.getSheetByName('Maintenance E22H').formulas.A1;
-  assert.match(f, /^=FILTER\('Maintenance'!A:AG, \(ROW\('Maintenance'!A:A\)=1\)\+\('Maintenance'!C:C="E22H"\)\)$/);
+  assert.match(f, /^=FILTER\('Maintenance'!A:AP, \(ROW\('Maintenance'!A:A\)=1\)\+\('Maintenance'!C:C="E22H"\)\)$/);
   const p = ss.getSheetByName('Pending Work').formulas.A2;
   assert.match(p, /'Maintenance'!D2:D="Pending"/);
   assert.match(p, /NOW\(\)-'Maintenance'!U2:U/);
@@ -51,10 +60,10 @@ U.appendRow(['Andi@Gmail.com ', 'Andi', 'ME', 'ya']);        // alias peran v1 +
 U.appendRow(['sari@gmail.com', 'Sari', 'Admin', 'Ya']);
 U.appendRow(['lama@gmail.com', 'Lama', 'Teknisi', 'Tidak']);
 const L = ss.getSheetByName('Lines');
-L.appendRow(['L01', 'Assy 1', 'F2', '', '', 'Hall A', 'Ya']);
-L.appendRow(['L02', 'Assy 2', 'F2', '', '', 'Hall A', 'Ya']);
-L.appendRow(['L03', 'Assy 3', 'F2', '', '', 'Hall B', 'Ya']);
-L.appendRow(['L99', 'Mati', 'F2', '', '', 'Hall C', 'Tidak']);
+L.appendRow(lineRow(['L01', 'Assy 1', 'F2', '', '', 'Hall A', 'Ya']));
+L.appendRow(lineRow(['L02', 'Assy 2', 'F2', '', '', 'Hall A', 'Ya']));
+L.appendRow(lineRow(['L03', 'Assy 3', 'F2', '', '', 'Hall B', 'Ya']));
+L.appendRow(lineRow(['L99', 'Mati', 'F2', '', '', 'Hall C', 'Tidak']));
 
 test('akses: tidak terdaftar / nonaktif ditolak; doGet menyanitasi ?line', () => {
   as('asing@gmail.com', () => {
@@ -113,16 +122,16 @@ test('pause/resume: hanya waktu aktif ke Total aktif, pause terpisah', () => {
 
 test('selesai: dropdown wajib, Lainnya butuh catatan, part + jumlah / Tidak ada → Completed, MTTR Ya', () => {
   as('budi@gmail.com', () => {
-    throwsMsg(() => ctx.apiComplete(A, sel('', { parts: done.parts })), /Masalah wajib/);
+    throwsMsg(() => ctx.apiComplete(A, sel('', { parts: done.parts })), /masalah wajib/i);
     throwsMsg(() => ctx.apiComplete(A, sel('Lainnya', { parts: done.parts })), /Lainnya.*keterangan/);
     throwsMsg(() => ctx.apiComplete(A, { ...done, parts: [] }), /Tidak ada/);
-    throwsMsg(() => ctx.apiComplete(A, { ...done, parts: [{ nama: 'Fuse', jumlah: 0 }] }), /Jumlah part/);
+    throwsMsg(() => ctx.apiComplete(A, { ...done, parts: [{ id: FUSE, qty: 0 }] }), /Jumlah "Fuse" harus/);
     const v = ctx.apiComplete(A, done);
     assert.strictEqual(v.open, null);
   });
   const r = rec(A);
   assert.strictEqual(r.Status, 'Completed');
-  assert.strictEqual(r.Part, 'Fuse x2');
+  assert.strictEqual(r.Part, 'Fuse 10A ×2');
   assert.strictEqual(r['Masuk MTTR'], 'Ya');
   near(r['Total aktif (menit)'], 30);
   jeq(logOf(A), ['start', 'pause', 'resume', 'complete']);
@@ -181,7 +190,7 @@ test('lanjutkan pending: wajib QR line yang sama, user lain, ID sama, waktu pend
   advance(10);
   as('andi@gmail.com', () => ctx.apiComplete(B, { ...done, tanpaPart: true }));
   near(rec(B)['Total aktif (menit)'], 25);
-  assert.strictEqual(rec(B).Part, 'Tidak ada');
+  assert.strictEqual(rec(B).Part, 'Tidak ada pergantian');
 });
 
 test('cancel: alasan wajib dari daftar, Lainnya butuh catatan, teknisi lain ditolak, Admin boleh', () => {
@@ -367,37 +376,51 @@ test('ID urut per line per hari', () => {
   });
 });
 
-test('BOM: sheet belum ada → [] (tidak error)', () => {
-  const sh = ss.getSheetByName('BOM');
-  ss.sheets = ss.sheets.filter(x => x !== sh);
-  as('budi@gmail.com', () => jeq(ctx.apiGetBom('L01'), []));
-  ss.sheets.push(sh);
-});
-
-test('BOM: per line + part umum (*), hanya Aktif, tampil di halaman line', () => {
-  const B = ss.getSheetByName('BOM');
-  B.appendRow(['L01', '', 'SN-100', 'Sensor proximity M12', 4, 'pcs', 'Rak A-01', 2, 'Ya']);
-  B.appendRow(['l01', '', '', 'Belt conveyor 1200', 1, 'pcs', 'Rak B-03', 1, 'Ya']);
-  B.appendRow(['L01', '', 'OLD-1', 'Part lama', 1, 'pcs', '', '', 'Tidak']);
-  B.appendRow(['L02', '', 'MT-7', 'Motor 0.75kW', 2, 'unit', 'Gudang', 1, 'Ya']);
-  B.appendRow(['*', '', 'FU-10', 'Fuse 10A', 10, 'pcs', 'Rak Umum', 20, 'Ya']);
+test('sparepart: katalog Jenis → Nama → Model dari sheet (model boleh kosong, nonaktif & duplikat dilewati)', () => {
+  const SP = ss.getSheetByName('Sparepart');
+  SP.appendRow(rowOf('Sparepart', { 'Jenis Sparepart': 'Mekanikal', 'Nama Sparepart': 'Bearing', 'Model': '6206-ZZ', 'Satuan': 'pcs', 'Aktif': 'Tidak' }));
+  SP.appendRow(rowOf('Sparepart', { 'Jenis Sparepart': 'Mekanikal', 'Nama Sparepart': 'Bearing', 'Model': '6205-2RS' }));   // duplikat
+  SP.appendRow(rowOf('Sparepart', { 'Jenis Sparepart': 'Hidrolik', 'Nama Sparepart': 'Seal', 'Model': '' }));             // jenis tak dikenal → peringatan
+  SP.appendRow(rowOf('Sparepart', { 'Jenis Sparepart': '', 'Nama Sparepart': 'Kabel', 'Model': 'NYAF 1.5' }));          // kolom pertama kosong → tetap terbaca & diperingatkan
   as('budi@gmail.com', () => {
-    const bom = ctx.apiGetBom('L01');
-    jeq(bom.map(b => b.value), ['Belt conveyor 1200', 'SN-100 Sensor proximity M12', 'FU-10 Fuse 10A']);
-    assert.strictEqual(bom[1].location, 'Rak A-01');
-    assert.strictEqual(bom[1].minStock, '2');
-    assert.strictEqual(bom[2].common, true);
-    jeq(ctx.apiGetLine('L01').bom.map(b => b.pn), ['', 'SN-100', 'FU-10']);
+    const cat = ctx.apiBootstrap('', '', {}).master.spareparts;
+    assert.ok(cat.some(p => p.nama === 'Bearing' && p.model === '6205-2RS'));
+    assert.ok(!cat.some(p => p.model === '6206-ZZ'), 'nonaktif tidak tampil');
+    assert.strictEqual(cat.filter(p => p.model === '6205-2RS').length, 1, 'duplikat diabaikan');
+    assert.ok(cat.some(p => p.nama === 'Backup Program PLC' && p.model === ''), 'model kosong boleh');
+  });
+  as('sari@gmail.com', () => {
+    const w = ctx.apiDashboard({}).warnings.join('\n');
+    assert.match(w, /ditulis dua kali/);
+    assert.match(w, /jenis "Hidrolik"/);
+    assert.match(w, /"Kabel" belum diisi Jenis Sparepart \(baris \d+\)/);
   });
 });
 
-test('BOM: selesai menerima part BOM line ini, menolak BOM line lain', () => {
+test('sparepart: banyak part + manual → kolom Part ditulis ke bawah, satu baris Pemakaian per part (nama PIC + email)', () => {
   as('budi@gmail.com', () => {
     const id = ctx.apiStart('L01', 'E22H').open.id;
-    throwsMsg(() => ctx.apiComplete(id, { ...done, parts: [{ nama: 'MT-7 Motor 0.75kW', jumlah: 1 }] }), /BOM line L01/);
-    assert.strictEqual(rec(id).Status, 'Aktif', 'ditolak tanpa mengubah record');
-    ctx.apiComplete(id, { ...done, parts: [{ nama: 'SN-100 Sensor proximity M12', jumlah: 2 }, { nama: 'FU-10 Fuse 10A', jumlah: 1 }, { nama: 'Relay', jumlah: 1 }] });
-    assert.strictEqual(rec(id).Part, 'SN-100 Sensor proximity M12 x2; FU-10 Fuse 10A x1; Relay x1');
+    throwsMsg(() => ctx.apiComplete(id, { ...done, parts: [] }), /Pilih sparepart/);
+    throwsMsg(() => ctx.apiComplete(id, { ...done, parts: [{ id: 'tidak|ada|ini', qty: 1 }] }), /tidak ditemukan di katalog/);
+    throwsMsg(() => ctx.apiComplete(id, { ...done, parts: [{ manual: true, jenis: 'Mekanikal', nama: '', qty: 1 }] }), /nama sparepart wajib/);
+    throwsMsg(() => ctx.apiComplete(id, { ...done, parts: [{ manual: true, jenis: 'Ngawur', nama: 'X', qty: 1 }] }), /pilih jenis sparepart/);
+    advance(20);
+    ctx.apiComplete(id, { ...done, parts: [
+      { id: pid('Mekanikal', 'Bearing', '6205-2RS'), qty: 2 },
+      { id: FUSE, qty: 1 },
+      { id: pid('Mekanikal', 'Bearing', '6205-2RS'), qty: 1 },          // dipilih dua kali → digabung
+      { manual: true, jenis: 'Pneumatik', nama: 'Fitting L', model: '8mm', qty: 4 }
+    ] });
+    const r = rec(id);
+    assert.strictEqual(r.Part, 'Bearing 6205-2RS ×3\nFuse 10A ×1\nFitting L 8mm ×4 (manual)');
+    assert.strictEqual(r['Nama PIC'], 'Budi');
+    assert.strictEqual(r['Jenis kerusakan'], 'Elektrikal');
+    const u = ctx.readTable_('Pemakaian Sparepart').filter(x => x['Maintenance ID'] === id);
+    assert.strictEqual(u.length, 3);
+    jeq(u.map(x => [x['Jenis Sparepart'], x['Nama Sparepart'], x.Model, x.Jumlah, x.Manual]),
+      [['Mekanikal', 'Bearing', '6205-2RS', 3, 'Tidak'], ['Elektrikal', 'Fuse', '10A', 1, 'Tidak'], ['Pneumatik', 'Fitting L', '8mm', 4, 'Ya']]);
+    assert.ok(u.every(x => x.PIC === 'Budi' && x['Email PIC'] === 'budi@gmail.com' && x.Line === 'L01'));
+    assert.deepStrictEqual(ctx.apiGetDetail(id).record.parts.length, 3);
   });
 });
 
@@ -412,10 +435,10 @@ test('2.1 persiapan: sub-line A/B (Grup), mesin per line & per grup, line F1', (
     const open = ctx.apiBootstrap('').myOpen;
     if (open) ctx.apiCancel(open.id, 'Input ganda');
   });
-  L.appendRow(['L05-A', 'Formation 5A', 'F1', '', 'L05', 'Hall D', 'Ya']);
-  L.appendRow(['L05-B', 'Formation 5B', 'F1', '', 'L05', 'Hall D', '']);           // Aktif kosong = aktif
-  L.appendRow(['L06', 'Packing', 'F1', 'Limo7', '', 'Hall D', 'Ya']);              // override baterai
-  L.appendRow(['L07', 'Salah', 'F1', 'X99', '', '', 'Ya']);                       // baterai tidak terdaftar
+  L.appendRow(lineRow(['L05-A', 'Formation 5A', 'F1', '', 'L05', 'Hall D', 'Ya']));
+  L.appendRow(lineRow(['L05-B', 'Formation 5B', 'F1', '', 'L05', 'Hall D', '']));           // Aktif kosong = aktif
+  L.appendRow(lineRow(['L06', 'Packing', 'F1', 'Limo7', '', 'Hall D', 'Ya']));              // override baterai
+  L.appendRow(lineRow(['L07', 'Salah', 'F1', 'X99', '', '', 'Ya']));                       // baterai tidak terdaftar
   const M = ss.getSheetByName('Mesin');
   M.appendRow(['M-PRESS', 'Press', 'L05', 'Ya']);      // milik grup → dipakai L05-A & L05-B
   M.appendRow(['M-OVEN', 'Oven', 'L05-A', 'Ya']);
@@ -511,7 +534,7 @@ test('2.1 form editable: label, field tambahan (kolom dibuat otomatis), Lainnya,
   P.appendRow(['Kondisi', 'Perlu monitor', 2, 'Ya']);
   as('budi@gmail.com', () => {
     const forms = ctx.apiBootstrap('').master.forms;
-    assert.strictEqual(forms.Selesai[0].label, 'Gejala');
+    assert.strictEqual(forms.Selesai.find(f => f.field === 'Masalah').label, 'Gejala');
     jeq(forms.Selesai.find(f => f.field === 'Kondisi akhir').options, ['Normal', 'Perlu monitor', 'Lainnya']);
     assert.ok(forms.Selesai.find(f => f.field === 'Part'), 'field sistem tetap ada');
     assert.ok(!forms.Selesai.find(f => f.field === 'Status'));
@@ -601,6 +624,189 @@ test('2.1 migrasi: setup() ulang menambah kolom & mengembalikan field sistem yan
   assert.strictEqual(triggers.length, 3);
 });
 
+// ---------- 2.2: stop line, laporan (format Excel), proses & alias, panduan, nama aplikasi ----------
+U.appendRow(rowOf('Users', { Email: 'dewi@gmail.com', Nama: 'Dewi', Peran: 'Teknisi', Aktif: 'Ya' }));
+L.appendRow(lineRow(['L10', 'Cell Retreatment 1', 'F2', '', '', 'Hall E', 'Ya'], { Alias: 'CR1, Retreat satu', Proses: 'Modul Line' }));
+L.appendRow(lineRow(['L11', 'Cell Retreatment 2', 'F2', '', '', 'Hall E', 'Ya'], { Proses: 'Modul Line' }));
+const lap = (y) => { const d = ss.getSheetByName('Laporan ' + y).data; return { title: d[0], head: d[1], rows: d.slice(2) }; };
+const lapRow = (y, pred) => { const t = lap(y); return t.rows.map(r => Object.fromEntries(t.head.map((h, i) => [String(h).split('\n').pop(), r[i]]))).filter(pred); };
+let J1, J2;
+
+test('2.2 stop line: ditanya saat Mulai, default dari tipe (Corrective = Ya, Preventive = Tidak), nilai salah ditolak', () => {
+  as('dewi@gmail.com', () => {
+    throwsMsg(() => ctx.apiStart('L10', { baterai: 'E22H', stopLine: 'Mungkin' }), /Stop line harus/);
+    let id = ctx.apiStart('L10', { baterai: 'E22H', tipe: 'Preventive' }).open.id;
+    assert.strictEqual(rec(id)['Stop line'], 'Tidak');
+    ctx.apiCancel(id, 'Input ganda');
+    id = ctx.apiStart('L10', { baterai: 'E22H', tipe: 'Preventive', stopLine: 'Ya' }).open.id;
+    assert.strictEqual(rec(id)['Stop line'], 'Ya', 'pilihan teknisi menang atas default');
+    ctx.apiCancel(id, 'Input ganda');
+    J1 = ctx.apiStart('L10', { baterai: 'E22H' }).open.id;
+    const r = rec(J1);
+    assert.strictEqual(r['Stop line'], 'Ya');
+    assert.strictEqual(r.Proses, 'Modul Line');
+    assert.strictEqual(r['Nama PIC'], 'Dewi');
+  });
+  jeq(as('dewi@gmail.com', () => ctx.apiBootstrap('').stopLineDefault), ['Corrective']);
+});
+
+test('2.2 Selesai: jenis kerusakan wajib, detail opsional tersimpan, banyak part', () => {
+  as('dewi@gmail.com', () => {
+    advance(30);
+    const x = sel('Sensor error', { parts: [{ id: FUSE, qty: 1 }, { id: pid('Mekanikal', 'Bearing', '6205-2RS'), qty: 2 }] });
+    delete x.values['Jenis kerusakan'];
+    throwsMsg(() => ctx.apiComplete(J1, x), /jenis kerusakan wajib/i);
+    x.values['Jenis kerusakan'] = 'Mekanikal';
+    x.values['Detail masalah'] = 'Conveyor A stop';
+    ctx.apiComplete(J1, x);
+    const r = rec(J1);
+    assert.strictEqual(r['Jenis kerusakan'], 'Mekanikal');
+    assert.strictEqual(r['Detail masalah'], 'Conveyor A stop');
+    assert.strictEqual(r['Detail penyebab'], '');
+    assert.strictEqual(r['Nama teknisi terlibat'], 'Dewi');
+    J2 = ctx.apiStart('L11', { baterai: 'E245', tipe: 'Preventive' }).open.id;
+    advance(12);
+    ctx.apiComplete(J2, sel('Kebocoran', { tanpaPart: true }));
+  });
+});
+
+test('2.2 laporan: kolom & isi sama dengan Excel (stop line 1/0, durasi, part ke bawah, nama PIC), Cancelled tidak ikut', () => {
+  ctx.buildLaporan_(2026);
+  const t = lap(2026);
+  assert.strictEqual(t.title[0], ctx.getConfig_('LAPORAN_JUDUL'));
+  assert.match(t.title[0], /Form Stop Line Peralatan/);
+  assert.strictEqual(t.head.length, 21, '21 kolom seperti Excel (Maintenance ID nonaktif)');
+  assert.strictEqual(t.head[0], '序号\nNO');
+  assert.strictEqual(t.head[20], '维修人员\nKaryawan Perbaikan');
+  const all = ctx.readTable_('Maintenance').filter(r => r.Mulai.getTime() < Date.UTC(2027, 0, 1) && r.Status !== 'Cancelled');
+  assert.strictEqual(t.rows.length, all.length, 'satu baris per pekerjaan, tanpa Cancelled');
+  jeq(t.rows.map(r => r[0]), all.map((_, i) => i + 1), 'NO urut');
+  const a = lapRow(2026, r => r.Station === 'Cell Retreatment 1')[0];
+  assert.ok(a, 'Station = nama line jika tanpa mesin');
+  assert.strictEqual(a['Pabrik yang bersangkutan'], 'F2');
+  assert.strictEqual(a.Project, 'E22H');
+  assert.strictEqual(a.Process, 'Modul Line');
+  assert.ok(a.Tanggal instanceof FakeDate);
+  assert.match(a['Waktu Perbaikan'], /^\d\d\.\d\d$/);
+  assert.match(a['Waktu Selesai Perbaikan'], /^\d\d\.\d\d$/);
+  assert.strictEqual(a['Apakah stop line (1-iya,0-tidak)'], 1);
+  assert.strictEqual(a['Durasi Stop Line (menit)'], 30);
+  assert.strictEqual(a['Jenis Kerusakan'], 'Mekanikal');
+  assert.strictEqual(a['Fenomena Kerusakan'], 'Sensor error – Conveyor A stop');
+  assert.strictEqual(a['Alasan Kerusakan'], 'Komponen aus');
+  assert.strictEqual(a['Jenis Sparepart'], 'Elektrikal\nMekanikal', 'satu part per baris, bukan ;');
+  assert.strictEqual(a['Nama Sparepart'], 'Fuse\nBearing');
+  assert.strictEqual(a['Model Sparepart'], '10A\n6205-2RS');
+  assert.strictEqual(a['Jumlah Sparepart'], '1\n2');
+  assert.strictEqual(a['Kondisi Perbaikan'], 'Selesai');
+  assert.strictEqual(a['Karyawan Perbaikan'], 'Dewi', 'nama, bukan email');
+  const b = lapRow(2026, r => r.Station === 'Cell Retreatment 2')[0];
+  assert.strictEqual(b['Apakah stop line (1-iya,0-tidak)'], 0);
+  assert.strictEqual(b['Durasi Stop Line (menit)'], 0, 'tidak stop line → durasi 0');
+  assert.strictEqual(b['Jenis Sparepart'], 'Tidak ada pergantian');
+  assert.strictEqual(b['Nama Sparepart'], '');
+  const one = lapRow(2026, r => r['Nama Sparepart'] === 'Fuse' && r['Model Sparepart'] === '10A')[0];
+  assert.strictEqual(one['Jumlah Sparepart'], 2, 'satu part → jumlah tetap angka');
+  const pend = lapRow(2026, r => r['Kondisi Perbaikan'] === 'Pending')[0];
+  assert.ok(pend && pend['Waktu Selesai Perbaikan'] === '' && pend['Jenis Sparepart'] === '', 'Pending: belum ada jam selesai / part');
+  ctx.buildLaporan_(2026);
+  assert.strictEqual(lap(2026).rows.length, t.rows.length, 'dibuat ulang, tidak menumpuk');
+});
+
+test('2.2 Format Laporan bisa diedit: ganti judul kolom, aktifkan kolom, sumber salah = peringatan', () => {
+  setRow('Format Laporan', (r, h) => r[h.indexOf('Sumber')] === 'Project', 'Kolom', 'Baterai');
+  setRow('Format Laporan', (r, h) => r[h.indexOf('Sumber')] === 'Maintenance ID', 'Aktif', 'Ya');
+  const F = ss.getSheetByName('Format Laporan');
+  F.appendRow(rowOf('Format Laporan', { Kolom: 'Tipe', Sumber: 'Tipe', Urutan: 2.5, Aktif: 'Ya' }));        // nama kolom Maintenance
+  F.appendRow(rowOf('Format Laporan', { Kolom: 'Ngawur', Sumber: 'Kolom tidak ada', Urutan: 99, Aktif: 'Ya' }));
+  ctx.resetMaster_();          // eksekusi baru (di Apps Script setiap trigger/menu = eksekusi baru)
+  ctx.buildLaporan_(2026);
+  const h = lap(2026).head;
+  assert.ok(h.includes('Baterai') && !h.includes('Project'));
+  assert.strictEqual(h[h.length - 2], 'Maintenance ID');
+  assert.strictEqual(h[h.length - 1], 'Ngawur');
+  assert.strictEqual(h[2], 'Tipe', 'urutan mengikuti kolom Urutan');
+  const r = lapRow(2026, x => x['Maintenance ID'] === J2)[0];
+  assert.strictEqual(r.Tipe, 'Preventive');
+  assert.strictEqual(r.Ngawur, '', 'sumber tidak dikenal → kolom kosong, laporan tetap jadi');
+  as('sari@gmail.com', () => assert.match(ctx.apiDashboard({}).warnings.join('\n'), /Kolom tidak ada/));
+  F.data = F.data.filter(x => x[0] !== 'Tipe' && x[0] !== 'Ngawur');
+  setRow('Format Laporan', (r, hh) => r[hh.indexOf('Sumber')] === 'Project', 'Kolom', 'Project');
+  setRow('Format Laporan', (r, hh) => r[hh.indexOf('Sumber')] === 'Maintenance ID', 'Aktif', 'Tidak');
+});
+
+test('2.2 tombol "Perbarui Laporan & Rekap": hanya admin', () => {
+  as('dewi@gmail.com', () => throwsMsg(() => ctx.apiBuildReports(), /tidak punya akses/));
+  as('sari@gmail.com', () => {
+    const out = ctx.apiBuildReports();
+    assert.strictEqual(out.laporan, 'Laporan 2026');
+    assert.strictEqual(out.rekap, 'Rekap 2026');
+    assert.ok(out.rows >= 2);
+  });
+});
+
+test('2.2 proses & alias: cari line lewat alias, filter proses, Line ID tidak berubah; dashboard jenis & sparepart', () => {
+  as('dewi@gmail.com', () => {
+    const l10 = ctx.apiBootstrap('').master.lines.find(l => l.id === 'L10');
+    assert.strictEqual(l10.alias, 'CR1, Retreat satu');
+    assert.strictEqual(l10.proses, 'Modul Line');
+    const byAlias = ctx.apiHistory({ q: 'retreat satu' }).items;
+    assert.ok(byAlias.length >= 1 && byAlias.every(i => i.line === 'L10'));
+    jeq([...new Set(ctx.apiHistory({ proses: 'Modul Line' }).items.map(i => i.line))].sort(), ['L10', 'L11']);
+    assert.strictEqual(ctx.apiGetLine('L10').line.proses, 'Modul Line');
+    assert.strictEqual(ctx.apiGetDetail(J1).record.proses, 'Modul Line');
+  });
+  as('sari@gmail.com', () => {
+    const d = ctx.apiDashboard({ periode: 30, proses: 'Modul Line' });
+    assert.strictEqual(d.kpi.corrective + d.kpi.preventive, 2);
+    jeq(d.jenis.map(j => j.key).sort(), ['Elektrikal', 'Mekanikal']);
+    const fuse = d.parts.find(p => p.key === 'Fuse 10A');
+    assert.ok(fuse && fuse.qty === 1 && fuse.jenis === 'Elektrikal');
+    assert.ok(ctx.apiListLinesForQr().lines.find(l => l.id === 'L10').proses === 'Modul Line');
+  });
+});
+
+test('2.2 nama aplikasi per lokasi + catatan panduan per peran (admin lihat semua)', () => {
+  setRow('Config', (r, h) => r[h.indexOf('Key')] === 'NAMA_APLIKASI', 'Value', 'MTTR Cikarang');
+  const N = ss.getSheetByName('Catatan Panduan');
+  N.appendRow(rowOf('Catatan Panduan', { Untuk: 'Teknisi', Judul: 'Kunci panel', Isi: 'Ambil di pos security', Urutan: 2, Aktif: 'Ya' }));
+  N.appendRow(rowOf('Catatan Panduan', { Untuk: 'Admin', Judul: 'Backup bulanan', Isi: 'File → Make a copy', Urutan: 3, Aktif: 'Ya' }));
+  N.appendRow(rowOf('Catatan Panduan', { Untuk: '', Judul: 'Kontak', Isi: 'WA grup maintenance', Urutan: 1, Aktif: 'Ya' }));
+  N.appendRow(rowOf('Catatan Panduan', { Untuk: 'Semua', Judul: 'Lama', Isi: 'x', Urutan: 4, Aktif: 'Tidak' }));
+  as('dewi@gmail.com', () => {
+    const b = ctx.apiBootstrap('');
+    assert.strictEqual(b.master.appName, 'MTTR Cikarang');
+    assert.strictEqual(b.master.version, ctx.APP.VERSION);
+    jeq(b.notes.map(n => n.judul), ['Kontak', 'Kunci panel']);
+    assert.strictEqual(ctx.doGet({ parameter: {} }).title, 'MTTR Cikarang');
+  });
+  as('sari@gmail.com', () => jeq(ctx.apiBootstrap('').notes.map(n => n.judul), ['Kontak', 'Kunci panel', 'Backup bulanan']));
+  ui.menus.length = 0; ctx.onOpen();
+  assert.strictEqual(ui.menus[0], 'MTTR Cikarang');
+  ctx.buildRekap_(2026);
+  assert.strictEqual(ss.getSheetByName('Rekap 2026').data[0][0], 'Rekap MTTR Cikarang 2026');
+  setRow('Config', (r, h) => r[h.indexOf('Key')] === 'NAMA_APLIKASI', 'Value', '');
+  as('dewi@gmail.com', () => assert.strictEqual(ctx.apiBootstrap('').master.appName, 'MTTR', 'kosong → default'));
+  setRow('Config', (r, h) => r[h.indexOf('Key')] === 'NAMA_APLIKASI', 'Value', 'MTTR');
+});
+
+test('2.2 migrasi dari 2.1: setup() menambah baris Form baru (stop line, jenis kerusakan, detail); Aktif = Tidak mematikan pertanyaan stop line', () => {
+  const F = ss.getSheetByName('Form'), h = F.data[0];
+  const key = (r) => r[h.indexOf('Form')] + '.' + r[h.indexOf('Field')];
+  F.data = F.data.filter((r, i) => i === 0 || !ctx.APP.FORM_MIGRATE.includes(key(r)));
+  ctx.setup();
+  jeq(ctx.APP.FORM_MIGRATE.filter(k => !F.data.some(r => key(r) === k)), [], 'semua baris 2.2 kembali');
+  ctx.setup();
+  assert.strictEqual(F.data.filter(r => key(r) === 'Mulai.Stop line').length, 1, 'tidak dobel');
+  setRow('Form', (r) => key(r) === 'Mulai.Stop line', 'Aktif', 'Tidak');
+  as('dewi@gmail.com', () => {
+    const id = ctx.apiStart('L11', { baterai: 'E245', stopLine: 'Ya' }).open.id;
+    assert.strictEqual(rec(id)['Stop line'], '', 'pertanyaan dimatikan → kosong');
+    ctx.apiCancel(id, 'Input ganda');
+  });
+  setRow('Form', (r) => key(r) === 'Mulai.Stop line', 'Aktif', 'Ya');
+});
+
 // ---------- Rekap tahunan & arsip ----------
 const rekapRows = (y) => ss.getSheetByName('Rekap ' + y).data.slice(3, 17).map(r => r.slice());
 const finalOf = (r) => r.Status === 'Completed' ? r.Selesai : (['Cancelled', 'Abandoned'].includes(r.Status) ? r['Status sejak'] : null);
@@ -657,8 +863,16 @@ test('arsip: tahun berjalan ditolak; Februari tahun berikutnya Dashboard menging
 test('arsip: pindah pekerjaan final 2026 + Log-nya; yang Pending/menunggu review tetap; rekap tidak berubah', () => {
   const before = rekapRows(2026);
   const mBefore = ctx.readTable_('Maintenance').length, lBefore = ctx.readTable_('Log').length;
+  const usageArchived = ctx.readTable_('Pemakaian Sparepart').filter(u => archived.includes(u['Maintenance ID'])).length;
+  assert.ok(usageArchived >= 5, 'ada pemakaian sparepart yang ikut diarsip: ' + usageArchived);
   const out = ctx.arsipkanTahun_(2026);
+  const lapBefore = lap(2026).rows;
   assert.strictEqual(out.maintenance, archived.length);
+  assert.strictEqual(out.sparepart, usageArchived);
+  assert.strictEqual(ctx.readTable_('Arsip Sparepart 2026').length, usageArchived);
+  assert.ok(ctx.readTable_('Pemakaian Sparepart').every(u => !archived.includes(u['Maintenance ID'])));
+  ctx.resetMaster_(); ctx.buildLaporan_(2026);
+  jeq(lap(2026).rows, lapBefore, 'laporan 2026 sama setelah arsip (data diambil dari tab Arsip)');
   const m = ctx.readTable_('Maintenance');
   assert.strictEqual(m.length, mBefore - archived.length);
   assert.ok(m.every(r => !archived.includes(r['Maintenance ID'])));
@@ -737,14 +951,14 @@ test('cache master: user dinonaktifkan → langsung ditolak setelah edit', () =>
   as('andi@gmail.com', () => assert.strictEqual(ctx.apiBootstrap('', '', {}).user.role, 'Teknisi'));
 });
 
-test('cache master: BOM besar dipecah ke beberapa potongan cache dan tetap utuh', () => {
-  const B = ss.getSheetByName('BOM');
-  for (let i = 0; i < 400; i++) B.appendRow(['L02', '', 'PN-' + i, 'Part panjang nomor ' + i + ' '.repeat(40), 1, 'pcs', 'Rak ' + i, 1, 'Ya']);
+test('cache master: katalog sparepart besar dipecah ke beberapa potongan cache dan tetap utuh', () => {
+  const B = ss.getSheetByName('Sparepart');
+  for (let i = 0; i < 400; i++) B.appendRow(rowOf('Sparepart', { 'Jenis Sparepart': 'Mekanikal', 'Nama Sparepart': 'Part panjang ' + i + ' '.repeat(40), 'Model': 'PN-' + i, 'Satuan': 'pcs' }));
   ctx.onMasterChange();
   as('budi@gmail.com', () => ctx.apiBootstrap('', '', {}));
   const n = Number(Object.keys(cache.store).filter(k => /:n$/.test(k)).map(k => cache.store[k])[0]);
   assert.ok(n >= 2, 'potongan cache: ' + n);
-  as('budi@gmail.com', () => assert.ok(ctx.apiGetBom('L02').length >= 400));
+  as('budi@gmail.com', () => assert.ok(ctx.apiBootstrap('', '', {}).master.spareparts.length >= 400));
   B.data = B.data.filter(r => !/^PN-\d+$/.test(r[2]));
   ctx.onMasterChange();
   cache.enabled = false;

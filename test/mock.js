@@ -47,6 +47,8 @@ class Range {
   }
   setFormula(f) { this.sh.formulas[this.a1 || (this.r + ',' + this.c)] = f; return this; }
   setNumberFormat() { return this; }
+  merge() { return this; }
+  setWrap() { return this; }
   setFontWeight() { return this; }
 }
 class Sheet {
@@ -116,13 +118,14 @@ const Utilities = {
   }
 };
 
+const ui = { menus: [] };
 const ctx = {
   console: { log() {}, warn: console.warn, error: console.error }, Math, JSON, Date: FakeDate, String, Number, Object, Array, Error, isFinite, isNaN, parseInt,
   SpreadsheetApp: {
     getActive: () => ss, flush() {},
     ProtectionType: { SHEET: 'SHEET' },
     RecalculationInterval: { HOUR: 'HOUR' },
-    getUi: () => ({ createMenu: () => ({ addItem() { return this; }, addSeparator() { return this; }, addToUi() {} }) })
+    getUi: () => ({ createMenu: (name) => { ui.menus.push(name); return { addItem() { return this; }, addSeparator() { return this; }, addToUi() {} }; } })
   },
   Session: { getActiveUser: () => ({ getEmail: () => user.email }) },
   LockService: {
@@ -151,7 +154,7 @@ const ctx = {
       const t = { _name: name };
       t.evaluate = () => {
         const out = { template: name, vars: t };
-        out.setTitle = () => out; out.addMetaTag = () => out; out.setXFrameOptionsMode = () => out;
+        out.setTitle = (x) => { out.title = x; return out; }; out.addMetaTag = () => out; out.setXFrameOptionsMode = () => out;
         return out;
       };
       return t;
@@ -165,4 +168,4 @@ fs.readdirSync(srcDir).filter(f => f.endsWith('.js')).sort().reverse() // urutan
   .forEach(f => vm.runInContext(fs.readFileSync(path.join(srcDir, f), 'utf8'), ctx, { filename: f }));
 
 
-module.exports = { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache };
+module.exports = { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache, ui };

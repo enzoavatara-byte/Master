@@ -179,6 +179,26 @@ function formInput_(input, firstField) {
   return input;
 }
 
+/** Nama teknisi (dari sheet Users) ikut ditulis di samping email: hasil akhir menampilkan nama, email tetap jadi ID. */
+function setNames_(r) {
+  var names = userNameMap_();
+  var nm = function (e) { e = String(e || '').trim().toLowerCase(); return names[e] || e; };
+  r['Nama PIC'] = nm(r['Teknisi terakhir']);
+  r['Nama teknisi awal'] = nm(r['Teknisi awal']);
+  r['Nama teknisi terlibat'] = String(r['Teknisi terlibat'] || '').split(',').map(function (e) { return e.trim(); })
+    .filter(String).map(nm).join(', ');
+}
+
+/** Stop line: Ya/Tidak dari form; kosong → otomatis Ya untuk tipe di Config STOP_LINE_DEFAULT (default Corrective). */
+function stopLineValue_(md, value, tipe) {
+  if (!fieldDef_(md, 'Mulai', 'Stop line')) return '';
+  var v = cleanText_(value, 10);
+  if (v === APP.YES || v === APP.NO) return v;
+  if (v) throw new Error('Stop line harus "Ya" atau "Tidak".');
+  var types = splitList_(getConfig_('STOP_LINE_DEFAULT')).map(function (t) { return t.toLowerCase(); });
+  return types.indexOf(String(tipe).toLowerCase()) !== -1 ? APP.YES : APP.NO;
+}
+
 function appendStamped_(r, col, text, now, user) {
   if (!text) return;
   var stamp = '[' + Utilities.formatDate(now, APP.TZ, 'dd/MM HH:mm') + ' ' + user.name + '] ';
@@ -235,6 +255,7 @@ function apiStart(lineId, p) {
   }
 
   var custom = validateForm_(md, 'Mulai', p);
+  var stop = stopLineValue_(md, p.stopLine, tipe);
 
   var rows = withLock_(function () {
     var rows = readTable_(APP.SHEETS.MAINT);
@@ -248,6 +269,8 @@ function apiStart(lineId, p) {
     r['Maintenance ID'] = newMaintenanceId_(rows, line.id, now);
     r['Line'] = line.id;
     r['Factory'] = line.factory;
+    r['Proses'] = line.proses;
+    r['Stop line'] = stop;
     r['Baterai'] = bat;
     r['Tipe'] = tipe;
     r['Mesin ID'] = mesinId;
@@ -264,9 +287,10 @@ function apiStart(lineId, p) {
     r['Konfirmasi terakhir'] = now;
     ensureMaintColumns_(Object.keys(custom.values));
     applyFormValues_(r, custom.values, now, user);
+    setNames_(r);
     appendObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], APP.EVENTS.START, user.email,
-      [tipe, 'Line ' + r['Line'], mesinName ? 'mesin ' + mesinName : '', 'baterai ' + bat].concat(custom.summary).filter(String).join(', '));
+      [tipe, 'Line ' + r['Line'], mesinName ? 'mesin ' + mesinName : '', 'baterai ' + bat, stop ? 'stop line ' + stop : ''].concat(custom.summary).filter(String).join(', '));
     rows.push(r);
     return rows;
   });
@@ -350,6 +374,7 @@ function apiContinue(id, scannedLineId) {
     transition_(r, APP.STATUS.ACTIVE, now);
     r['Teknisi terakhir'] = user.email;
     addInvolved_(r, user.email);
+    setNames_(r);
     r['Konfirmasi terakhir'] = now;
     r['Peringatan pada'] = '';
     r['Status review'] = '';
@@ -367,42 +392,82 @@ function countsForMttr_(r) {
 }
 
 /**
- * @param {{values:Object, other?:Object, tanpaPart:boolean, parts:{nama:string, jumlah:number, lain?:string}[]}} input
+ * Validasi daftar sparepart dari form Selesai.
+ * @param {{id?:string, manual?:boolean, jenis?:string, nama?:string, model?:string, qty:number}[]} parts
+ * @return {{jenis, nama, model, satuan, qty, manual}[]}
+ */
+function validateParts_(md, parts) {
+  var byId = {};
+  md.spareparts.forEach(function (p) { byId[p.id] = p; });
+  var jenisOk = uniq_((md.options['Jenis Kerusakan'] || []).concat(md.spareparts.map(function (p) { return p.jenis; })));
+  var out = (parts || []).map(function (p) {
+    p = p || {};
+    var qty = Math.floor(Number(p.qty));
+    var item;
+    if (p.manual) {
+      var nama = cleanText_(p.nama, 120), jenis = cleanText_(p.jenis, 60);
+      if (!nama) throw new Error('Sparepart manual: nama sparepart wajib diisi.');
+      if (jenisOk.indexOf(jenis) === -1) throw new Error('Sparepart manual "' + nama + '": pilih jenis sparepart.');
+      item = { jenis: jenis, nama: nama, model: cleanText_(p.model, 120), satuan: '', manual: true };
+    } else {
+      var c = byId[String(p.id || '')];
+      if (!c) throw new Error('Sparepart tidak ditemukan di katalog (mungkin baru diubah admin). Muat ulang aplikasi lalu pilih lagi.');
+      item = { jenis: c.jenis, nama: c.nama, model: c.model, satuan: c.satuan, manual: false };
+    }
+    if (!(qty >= 1 && qty <= 999)) throw new Error('Jumlah "' + item.nama + '" harus 1–999.');
+    item.qty = qty;
+    return item;
+  });
+  // Part yang sama dipilih dua kali → digabung.
+  var merged = [], idx = {};
+  out.forEach(function (p) {
+    var k = (p.manual ? 'm|' : 'c|') + partId_(p.jenis, p.nama, p.model);
+    if (idx.hasOwnProperty(k)) merged[idx[k]].qty += p.qty;
+    else { idx[k] = merged.length; merged.push(p); }
+  });
+  return merged;
+}
+
+/** Satu part per baris (bukan dipisah ";"), mis. "Motor Listrik ABB M2QA ×1". */
+function partText_(parts) {
+  if (!parts.length) return APP.NO_PART;
+  return parts.map(function (p) {
+    return p.nama + (p.model ? ' ' + p.model : '') + ' ×' + p.qty + (p.manual ? ' (manual)' : '');
+  }).join('\n');
+}
+
+/** Tulis baris Pemakaian Sparepart sekaligus (satu panggilan). Dipanggil di dalam lock. */
+function appendUsage_(r, parts, now) {
+  if (!parts.length) return;
+  var sh = sheet_(APP.SHEETS.PEMAKAIAN);
+  var h = headers_(sh);
+  var rows = parts.map(function (p) {
+    return objToRow_(h, {
+      'Tanggal': now, 'Maintenance ID': r['Maintenance ID'], 'Factory': r['Factory'], 'Line': r['Line'], 'Proses': r['Proses'],
+      'Mesin': String(r['Nama Mesin'] || '').replace(APP.OTHER_PREFIX, ''), 'Baterai': r['Baterai'], 'Jenis kerusakan': r['Jenis kerusakan'],
+      'Jenis Sparepart': p.jenis, 'Nama Sparepart': p.nama, 'Model': p.model, 'Jumlah': p.qty, 'Satuan': p.satuan,
+      'Manual': p.manual ? APP.YES : APP.NO, 'PIC': r['Nama PIC'], 'Email PIC': r['Teknisi terakhir']
+    });
+  });
+  sh.getRange(sh.getLastRow() + 1, 1, rows.length, h.length).setValues(rows);
+}
+
+/**
+ * @param {{values:Object, other?:Object, tanpaPart:boolean, parts:Object[]}} input  parts lihat validateParts_.
  */
 function apiComplete(id, input) {
   var user = requireUser_();
   var md = masterData_();
   input = formInput_(input, 'Masalah');
   var f = validateForm_(md, 'Selesai', input);
-  var partDef = fieldDef_(md, 'Selesai', 'Part');
-
-  var rawParts = [];
+  var parts = [];
   if (!input.tanpaPart) {
-    rawParts = (input.parts || []).map(function (p) {
-      var name = cleanText_(p && p.nama, 200);
-      if (!name) throw new Error('Part wajib dipilih.');
-      if (name === APP.OTHER) {
-        if (!partDef.other) throw new Error('Part "Lainnya" tidak diizinkan.');
-        var t = cleanText_(p.lain, 200);
-        if (!t) throw new Error('Part "Lainnya" wajib diisi nama part-nya.');
-        name = APP.OTHER_PREFIX + t;
-      }
-      var qty = Math.floor(Number(p.jumlah));
-      if (!(qty >= 1 && qty <= 999)) throw new Error('Jumlah part "' + name + '" harus 1–999.');
-      return { name: name, qty: qty };
-    });
-    if (!rawParts.length) throw new Error('Pilih part yang diganti, atau "Tidak ada".');
+    parts = validateParts_(md, input.parts);
+    if (!parts.length) throw new Error('Pilih sparepart yang diganti, atau "' + APP.NO_PART + '".');
   }
+  var part = partText_(parts);
 
   return mutate_(id, user, [APP.STATUS.ACTIVE], function (r, now) {
-    // Part yang sah = daftar Part umum + BOM line milik record ini (part BOM line lain ditolak).
-    var allowed = (md.options['Part'] || []).concat(bomForLine_(r['Line']).map(function (b) { return b.value; }));
-    var part = input.tanpaPart ? APP.NO_PART : rawParts.map(function (p) {
-      if (p.name.indexOf(APP.OTHER_PREFIX) !== 0 && allowed.indexOf(p.name) === -1) {
-        throw new Error('Part "' + p.name + '" tidak ada di daftar Part maupun BOM line ' + r['Line'] + '.');
-      }
-      return p.name + ' x' + p.qty;
-    }).join('; ');
     ensureMaintColumns_(Object.keys(f.values));
     transition_(r, APP.STATUS.COMPLETED, now);
     r['Selesai'] = now;
@@ -411,7 +476,9 @@ function apiComplete(id, input) {
     r['Masuk MTTR'] = countsForMttr_(r) ? APP.MTTR.YES : APP.MTTR.NO;
     r['Status review'] = '';
     r['Peringatan pada'] = '';
-    return [APP.EVENTS.COMPLETE, f.summary.concat(['Part: ' + part]).join(' · ')];
+    setNames_(r);
+    appendUsage_(r, parts, now);
+    return [APP.EVENTS.COMPLETE, f.summary.concat(['Sparepart: ' + part.replace(/\n/g, '; ')]).join(' · ')];
   });
 }
 
@@ -456,6 +523,7 @@ function mutate_(id, user, allowed, fn) {
     assertOwner_(r, user, allowed);
     var now = new Date();
     var ev = fn(r, now);
+    setNames_(r);
     writeObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], ev[0], user.email, ev[1]);
     return { line: r['Line'], rows: rows };

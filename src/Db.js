@@ -24,11 +24,11 @@ function headers_(sh) {
   return h;
 }
 
-function rowsToObjs_(headers, values, firstRow) {
+function rowsToObjs_(headers, values, firstRow, anyCol) {
   var out = [];
   for (var i = 0; i < values.length; i++) {
     var row = values[i];
-    if (row[0] === '' || row[0] === null) continue;
+    if (anyCol ? row.every(isBlank_) : isBlank_(row[0])) continue;
     var obj = { _row: firstRow + i };
     for (var j = 0; j < headers.length; j++) obj[headers[j]] = row[j];
     out.push(obj);
@@ -36,13 +36,19 @@ function rowsToObjs_(headers, values, firstRow) {
   return out;
 }
 
-/** Semua baris data sebagai object. `_row` = nomor baris di sheet (1-based). */
-function readTable_(name) {
+function isBlank_(v) { return v === '' || v === null || v === undefined; }
+
+/**
+ * Semua baris data sebagai object. `_row` = nomor baris di sheet (1-based).
+ * Default: baris dengan kolom pertama kosong dilewati (sheet data, kolom pertama = ID).
+ * anyCol = true: hanya baris yang seluruhnya kosong yang dilewati (sheet master yang diisi admin).
+ */
+function readTable_(name, anyCol) {
   var values = sheet_(name).getDataRange().getValues();
   if (values.length < 2) return [];
   var headers = values[0].map(function (h) { return String(h).trim(); });
   HEAD_MEMO_[name] = headers;
-  return rowsToObjs_(headers, values.slice(1), 2);
+  return rowsToObjs_(headers, values.slice(1), 2, anyCol);
 }
 
 /** N baris terakhir saja (untuk Log yang terus bertambah). */

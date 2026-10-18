@@ -1,6 +1,6 @@
 /**
- * Master data yang diedit user di Google Sheet: Users, Factory, Projects, Lines, Mesin, BOM, Pilihan,
- * Form, Config.
+ * Master data yang diedit user di Google Sheet: Users, Factory, Projects, Lines, Mesin, Sparepart, Pilihan,
+ * Form, Format Laporan, Catatan Panduan, Config.
  *
  * Kecepatan: membaca 9 sheet di setiap request = puluhan panggilan ke Sheets (lambat). Karena itu master
  * disimpan di CacheService (dipakai bersama semua user) dan HANYA dibaca ulang jika:
@@ -14,7 +14,7 @@
  */
 
 var MD_MEMO_ = null;
-var MD_CACHE_KEY_ = 'mttr-md-21b';   // naikkan jika struktur md berubah (cache lama otomatis diabaikan)
+var MD_CACHE_KEY_ = 'mttr-md-22a';   // naikkan jika struktur md berubah (cache lama otomatis diabaikan)
 var MD_CACHE_TTL_ = 600;             // detik
 var MD_CHUNK_ = 24000;               // karakter per potongan (batas CacheService 100 KB per nilai)
 
@@ -66,7 +66,7 @@ function invalidateMaster_() {
 }
 
 function readOptional_(name) {
-  return SpreadsheetApp.getActive().getSheetByName(name) ? readTable_(name) : [];
+  return SpreadsheetApp.getActive().getSheetByName(name) ? readTable_(name, true) : [];
 }
 
 function masterData_() {
@@ -85,7 +85,9 @@ function buildMaster_() {
   var md = { warnings: warnings };
 
   // ---- Factory ----
-  md.factories = readOptional_(APP.SHEETS.FACTORY).filter(function (f) { return isActiveRow_(f['Aktif']); }).map(function (f) {
+  md.factories = readOptional_(APP.SHEETS.FACTORY).filter(function (f) {
+    return isActiveRow_(f['Aktif']) && String(f['Factory ID'] || '').trim();
+  }).map(function (f) {
     return { id: normLine_(f['Factory ID']), name: String(f['Nama'] || f['Factory ID']), lokasi: String(f['Lokasi'] || '') };
   });
   md.factoryMap = {};
@@ -122,7 +124,8 @@ function buildMaster_() {
     if (factory && !md.factoryMap[factory]) warnings.push('Lines: Factory "' + factory + '" di line ' + id + ' tidak ada di sheet Factory.');
     md.lines[id] = {
       id: id, name: String(l['Nama Line'] || ''), factory: factory, batteries: uniq_(batteries),
-      grup: normLine_(l['Grup']), area: String(l['Area'] || ''), active: isActiveRow_(l['Aktif'])
+      grup: normLine_(l['Grup']), area: String(l['Area'] || ''), active: isActiveRow_(l['Aktif']),
+      alias: splitList_(l['Alias']).join(', '), proses: String(l['Proses'] || '').trim()
     };
   });
 
@@ -153,7 +156,7 @@ function buildMaster_() {
   // ---- Form ----
   md.forms = readForms_(warnings, opts);
 
-  // ---- Users (auth & nama), Config, BOM: ikut cache supaya tidak dibaca ulang tiap request ----
+  // ---- Users (auth & nama), Config, Sparepart, Format Laporan, Catatan Panduan: ikut cache ----
   md.users = readTable_(APP.SHEETS.USERS).map(function (u) {
     return { email: String(u['Email']).trim().toLowerCase(), name: String(u['Nama'] || u['Email']), peran: String(u['Peran'] || ''), aktif: u['Aktif'] };
   });
@@ -162,17 +165,62 @@ function buildMaster_() {
     var k = String(r['Key'] || '').trim();
     if (k) md.config[k] = r['Value'];
   });
-  md.bom = readOptional_(APP.SHEETS.BOM).filter(function (b) {
-    return isActiveRow_(b['Aktif']) && String(b['Nama Part'] || '').trim();
-  }).map(function (b) {
-    return {
-      line: normLine_(b['Line ID']), mesinId: normLine_(b['Mesin ID']), pn: String(b['Part Number'] || '').trim(),
-      name: String(b['Nama Part']).trim(), qty: b['Qty Terpasang'] === '' ? '' : String(b['Qty Terpasang']),
-      unit: String(b['Satuan'] || ''), location: String(b['Lokasi Simpan'] || ''),
-      minStock: b['Stok Minimum'] === '' ? '' : String(b['Stok Minimum'])
-    };
-  });
+  md.spareparts = readSpareparts_(warnings, opts);
+  md.report = readReportFormat_(warnings);
+  md.notes = readOptional_(APP.SHEETS.PANDUAN).filter(function (r) {
+    return isActiveRow_(r['Aktif']) && (String(r['Judul'] || '').trim() || String(r['Isi'] || '').trim());
+  }).map(function (r, i) {
+    var u = Number(r['Urutan']), untuk = String(r['Untuk'] || 'Semua').trim().toLowerCase();
+    return { untuk: untuk === 'admin' ? 'Admin' : (untuk === 'teknisi' ? 'Teknisi' : 'Semua'), judul: String(r['Judul'] || ''),
+      isi: String(r['Isi'] || ''), order: (r['Urutan'] !== '' && isFinite(u)) ? u : 1000 + i };
+  }).sort(function (a, b) { return a.order - b.order; });
   return md;
+}
+
+/** ID part katalog: stabil selama Jenis/Nama/Model tidak diganti. */
+function partId_(jenis, nama, model) {
+  return [jenis, nama, model].map(function (s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }).join('|');
+}
+
+/** Katalog sparepart (Jenis → Nama → Model). Model boleh kosong. */
+function readSpareparts_(warnings, opts) {
+  var seen = {}, out = [];
+  var jenisList = opts['Jenis Kerusakan'] || [];
+  readOptional_(APP.SHEETS.SPAREPART).forEach(function (r) {
+    if (!isActiveRow_(r['Aktif'])) return;
+    var jenis = String(r['Jenis Sparepart'] || '').trim(), nama = String(r['Nama Sparepart'] || '').trim(), model = String(r['Model'] || '').trim();
+    if (!nama) return;
+    if (!jenis) { warnings.push('Sparepart: "' + nama + '" belum diisi Jenis Sparepart (baris ' + r._row + ').'); return; }
+    var id = partId_(jenis, nama, model);
+    if (seen[id]) { warnings.push('Sparepart: "' + nama + (model ? ' ' + model : '') + '" ditulis dua kali (yang kedua diabaikan).'); return; }
+    seen[id] = true;
+    if (jenisList.length && jenisList.indexOf(jenis) === -1) {
+      warnings.push('Sparepart: jenis "' + jenis + '" (' + nama + ') tidak ada di Pilihan → Jenis Kerusakan. Filter otomatis tidak akan cocok.');
+    }
+    var u = Number(r['Urutan']);
+    out.push({ id: id, jenis: jenis, nama: nama, model: model, satuan: String(r['Satuan'] || ''),
+      order: (r['Urutan'] !== '' && isFinite(u)) ? u : 100000 + r._row });
+  });
+  out.sort(function (a, b) { return (a.order - b.order) || a.nama.localeCompare(b.nama) || a.model.localeCompare(b.model); });
+  return out;
+}
+
+/** Kolom tab Laporan. Sheet kosong / belum ada → format Excel bawaan. */
+function readReportFormat_(warnings) {
+  var rows = readOptional_(APP.SHEETS.FORMAT);
+  var src = rows.length ? rows.map(function (r, i) {
+    var u = Number(r['Urutan']);
+    return { kolom: String(r['Kolom'] || '').trim(), sumber: String(r['Sumber'] || '').trim(), aktif: isActiveRow_(r['Aktif']),
+      order: (r['Urutan'] !== '' && isFinite(u)) ? u : 1000 + i };
+  }) : APP.REPORT_DEFAULTS.map(function (d, i) { return { kolom: d[0], sumber: d[1], aktif: d[2] === 'Ya', order: i + 1 }; });
+  var known = APP.REPORT_SOURCES, maint = APP.HEADERS.Maintenance;
+  return src.filter(function (c) { return c.aktif && (c.kolom || c.sumber); }).map(function (c) {
+    if (!c.sumber) c.sumber = c.kolom;
+    if (known.indexOf(c.sumber) === -1 && maint.indexOf(c.sumber) === -1) {
+      warnings.push('Format Laporan: sumber "' + c.sumber + '" bukan sumber bawaan; diambil dari kolom Maintenance bernama sama (kosong jika tidak ada).');
+    }
+    return { kolom: c.kolom || c.sumber, sumber: c.sumber, order: c.order };
+  }).sort(function (a, b) { return a.order - b.order; });
 }
 
 function uniq_(list) {
@@ -349,9 +397,16 @@ function factoryOfRecord_(md, r) {
   return l ? l.factory : '';
 }
 
+/** Proses sebuah pekerjaan: disimpan saat Mulai (2.2), atau Proses line-nya sekarang (data lama). */
+function prosesOfRecord_(md, r) {
+  if (r['Proses']) return String(r['Proses']);
+  var l = lineOf_(md, r['Line']);
+  return l ? l.proses : '';
+}
+
 /**
  * Filter umum (Beranda, Pending, Review, Riwayat, Dashboard).
- * @param {{factory?:string, baterai?:string, line?:string, q?:string}} f  line boleh Line ID atau Grup.
+ * @param {{factory?:string, baterai?:string, proses?:string, line?:string, q?:string}} f  line boleh Line ID atau Grup.
  */
 function matchFilter_(md, r, f, names) {
   if (!f) return true;
@@ -361,11 +416,13 @@ function matchFilter_(md, r, f, names) {
     var key = normLine_(f.line), l = lineOf_(md, r['Line']);
     if (normLine_(r['Line']) !== key && !(l && l.grup === key)) return false;
   }
+  if (f.proses && prosesOfRecord_(md, r) !== String(f.proses)) return false;
   if (f.q) {
     var q = String(f.q).toLowerCase();
     var l2 = lineOf_(md, r['Line']);
-    var hay = [r['Maintenance ID'], r['Line'], l2 ? l2.name : '', r['Nama Mesin'], r['Mesin ID'], r['Masalah'], r['Penyebab'],
-      r['Yang tertunda'], r['Part'], names ? names[String(r['Teknisi terakhir']).toLowerCase()] : '', r['Teknisi terakhir']].join(' ').toLowerCase();
+    var hay = [r['Maintenance ID'], r['Line'], l2 ? l2.name : '', l2 ? l2.alias : '', prosesOfRecord_(md, r), r['Nama Mesin'], r['Mesin ID'],
+      r['Masalah'], r['Penyebab'], r['Jenis kerusakan'], r['Yang tertunda'], r['Part'],
+      names ? names[String(r['Teknisi terakhir']).toLowerCase()] : '', r['Teknisi terakhir']].join(' ').toLowerCase();
     if (hay.indexOf(q) === -1) return false;
   }
   return true;
@@ -386,6 +443,9 @@ function clientMaster_(md) {
     lines: Object.keys(md.lines).map(function (k) { return md.lines[k]; })
       .filter(function (l) { return l.active; }).sort(function (a, b) { return a.id.localeCompare(b.id); }),
     forms: forms,
-    partOptions: md.options['Part'] || []
+    spareparts: md.spareparts.map(function (p) { return { id: p.id, jenis: p.jenis, nama: p.nama, model: p.model, satuan: p.satuan }; }),
+    jenisKerusakan: md.options['Jenis Kerusakan'] || [],
+    appName: String(md.config.NAMA_APLIKASI || APP.NAME),
+    version: APP.VERSION
   };
 }

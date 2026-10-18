@@ -46,6 +46,13 @@ function serialize_(r, c) {
     penyebab: String(r['Penyebab'] || ''),
     penanganan: String(r['Penanganan'] || ''),
     part: String(r['Part'] || ''),
+    parts: String(r['Part'] || '').split(/\n|; /).map(function (x) { return x.trim(); }).filter(String),
+    proses: prosesOfRecord_(c.md, r),
+    stopLine: String(r['Stop line'] || ''),
+    jenisKerusakan: String(r['Jenis kerusakan'] || ''),
+    detailMasalah: String(r['Detail masalah'] || ''),
+    detailPenyebab: String(r['Detail penyebab'] || ''),
+    detailPenanganan: String(r['Detail penanganan'] || ''),
     tertunda: String(r['Yang tertunda'] || ''),
     tenggatIso: iso_(tenggat),
     tenggatText: fmtDate_(tenggat),
@@ -67,7 +74,8 @@ function serialize_(r, c) {
 /** Field tambahan (dibuat admin di sheet Form) untuk ditampilkan di Detail. */
 function extraFields_(r, c) {
   var out = [];
-  var system = ['Masalah', 'Penyebab', 'Penanganan', 'Yang tertunda', 'Alasan cancel', 'Catatan', 'Pekerjaan dilakukan'];
+  var system = ['Masalah', 'Penyebab', 'Penanganan', 'Yang tertunda', 'Alasan cancel', 'Catatan', 'Pekerjaan dilakukan',
+    'Jenis kerusakan', 'Detail masalah', 'Detail penyebab', 'Detail penanganan'];
   APP.FORMS.forEach(function (f) {
     (c.md.forms[f] || []).forEach(function (d) {
       if (d.type === 'sistem' || system.indexOf(d.field) !== -1) return;
@@ -119,6 +127,8 @@ function bootstrap_(user, lineId, mesinId, filter) {
     serverNowIso: c.now.toISOString(),
     limits: getLimits_(),
     master: clientMaster_(c.md),
+    notes: c.md.notes.filter(function (n) { return user.role === APP.ROLES.ADMIN || n.untuk !== APP.ROLES.ADMIN; }),
+    stopLineDefault: splitList_(getConfig_('STOP_LINE_DEFAULT')),
     myOpen: mine ? serialize_(mine, c) : null,
     counts: counts_(rows, user),
     stats: stats_(rows, c, filter),
@@ -245,7 +255,7 @@ function lineView_(lineId, rows, c, user, mesinId) {
   return {
     found: true,
     line: {
-      id: line.id, name: line.name, factory: line.factory,
+      id: line.id, name: line.name, factory: line.factory, proses: line.proses, alias: line.alias,
       factoryName: md.factoryMap[line.factory] ? md.factoryMap[line.factory].name : line.factory,
       batteries: line.batteries, grup: line.grup, area: line.area, active: line.active
     },
@@ -259,34 +269,8 @@ function lineView_(lineId, rows, c, user, mesinId) {
     myOpenElsewhere: (mineRow && !mineHere) ? serialize_(mineRow, c) : null,
     pendings: sortPending_(pendings),
     lastBattery: line.batteries.indexOf(last) !== -1 ? last : (line.batteries[0] || ''),
-    bom: bomForLine_(key),
     serverNowIso: c.now.toISOString()
   };
-}
-
-// ---------- BOM ----------
-
-/** BOM aktif untuk satu line: baris Line ID = line, Grup-nya, atau '*'. Sheet BOM belum ada -> []. */
-function bomForLine_(lineId) {
-  var md = masterData_();
-  var line = lineOf_(md, lineId);
-  var key = normLine_(lineId), grup = line ? line.grup : '';
-  var machineName = {};
-  md.machines.forEach(function (m) { machineName[m.id] = m.name; });
-  return (md.bom || []).filter(function (b) {
-    return b.line === key || (grup && b.line === grup) || b.line === '*';
-  }).map(function (b) {
-    return {
-      pn: b.pn, name: b.name, mesinId: b.mesinId, mesin: b.mesinId ? (machineName[b.mesinId] || b.mesinId) : '',
-      qty: b.qty, unit: b.unit, location: b.location, minStock: b.minStock,
-      common: b.line === '*', value: b.pn ? b.pn + ' ' + b.name : b.name
-    };
-  }).sort(function (a, b) { return (a.common - b.common) || a.mesin.localeCompare(b.mesin) || a.name.localeCompare(b.name); });
-}
-
-function apiGetBom(lineId) {
-  requireUser_();
-  return bomForLine_(lineId);
 }
 
 // ---------- Pending ----------
@@ -444,7 +428,7 @@ function apiDashboard(f) {
   var days = ytd ? 0 : ([7, 30, 90, 365].indexOf(Number(f.periode)) !== -1 ? Number(f.periode) : 30);
   // "Tahun ini" = 1 Januari (WIB) s/d sekarang, sama dengan tab Rekap <tahun>.
   var from = ytd ? Utilities.parseDate(yearOf_(c.now) + '-01-01 00:00:00', APP.TZ, 'yyyy-MM-dd HH:mm:ss') : new Date(c.now.getTime() - days * 86400000);
-  var filt = { factory: f.factory, baterai: f.baterai, line: f.line };
+  var filt = { factory: f.factory, baterai: f.baterai, proses: f.proses, line: f.line };
   var allRows = readTable_(APP.SHEETS.MAINT);
   var all = allRows.filter(function (r) { return matchFilter_(md, r, filt, c.names); });
   var inPeriod = all.filter(function (r) { return r['Mulai'] instanceof Date && r['Mulai'] >= from; });
@@ -452,7 +436,7 @@ function apiDashboard(f) {
   var kpi = { mttr: null, mttrN: 0, corrective: 0, preventive: 0, activeMin: 0, cancelled: 0, abandoned: 0,
     openNow: 0, pendingNow: 0, overdueNow: 0 };
   var sum = 0;
-  var byMachine = {}, byLine = {}, byTech = {}, byProblem = {}, byOther = {};
+  var byMachine = {}, byLine = {}, byTech = {}, byProblem = {}, byOther = {}, byJenis = {};
   var mttrTypes = mttrTypes_();
 
   inPeriod.forEach(function (r) {
@@ -473,6 +457,7 @@ function apiDashboard(f) {
     inc_(byLine, String(r['Line']), min, counted);
     if (st === APP.STATUS.COMPLETED || counted) inc_(byTech, nameOf_(c, r['Teknisi terakhir']), min, counted);
     if (r['Masalah']) inc_(byProblem, String(r['Masalah']), min, counted);
+    if (st === APP.STATUS.COMPLETED && r['Jenis kerusakan']) inc_(byJenis, String(r['Jenis kerusakan']), min, counted);
     ['Nama Mesin', 'Masalah', 'Penyebab', 'Penanganan', 'Yang tertunda', 'Alasan cancel'].forEach(function (col) {
       var v = String(r[col] || '');
       if (v.indexOf(APP.OTHER_PREFIX) === 0) inc_(byOther, col + ' → ' + v.slice(APP.OTHER_PREFIX.length).trim().toLowerCase(), 0, false);
@@ -487,6 +472,21 @@ function apiDashboard(f) {
       if (r['Tenggat'] instanceof Date && r['Tenggat'] < c.now) kpi.overdueNow++;
     }
   });
+
+  // Sparepart: dari sheet Pemakaian Sparepart (satu baris per part), periode & filter sama.
+  var byPart = {};
+  var idsInPeriod = {};
+  inPeriod.forEach(function (r) { idsInPeriod[String(r['Maintenance ID'])] = true; });
+  if (SpreadsheetApp.getActive().getSheetByName(APP.SHEETS.PEMAKAIAN)) {
+    readTable_(APP.SHEETS.PEMAKAIAN).forEach(function (u) {
+      if (!idsInPeriod[String(u['Maintenance ID'])]) return;
+      var key = String(u['Nama Sparepart']) + (u['Model'] ? ' ' + u['Model'] : '');
+      var o = inc_(byPart, key, 0, false);
+      o.qty = (o.qty || 0) + Number(u['Jumlah'] || 0);
+      o.jenis = String(u['Jenis Sparepart'] || '');
+      if (isYes_(u['Manual'])) inc_(byOther, 'Sparepart manual → ' + key.toLowerCase(), 0, false);
+    });
+  }
 
   // Tren 12 minggu (tidak tergantung periode).
   var weeks = [];
@@ -545,11 +545,24 @@ function apiDashboard(f) {
     lines: topList_(byLine, 10),
     techs: topList_(byTech, 10),
     problems: topList_(byProblem, 8),
+    jenis: topList_(byJenis, 10),
+    parts: topList_(byPart, 10, function (out, o) { out.qty = o.qty; out.jenis = o.jenis; }),
     others: topList_(byOther, 10),
     projects: projects,
     warnings: warnings,
     mttrTypes: String(getConfig_('MTTR_TIPE'))
   };
+}
+
+// ---------- Laporan (Admin) ----------
+
+/** Perbarui tab "Laporan <tahun>" dan "Rekap <tahun>" sekarang (selain otomatis tiap malam). */
+function apiBuildReports(year) {
+  requireUser_([APP.ROLES.ADMIN]);
+  var y = year ? checkYear_(year) : yearOf_(new Date());
+  var lap = buildLaporan_(y);
+  var rek = buildRekap_(y);
+  return { year: y, laporan: lap.sheet, rows: lap.rows, rekap: rek.sheet, spreadsheetUrl: SpreadsheetApp.getActive().getUrl() };
 }
 
 // ---------- QR ----------
@@ -562,7 +575,7 @@ function apiListLinesForQr() {
     baseUrl: ScriptApp.getService().getUrl(),
     lines: lines.map(function (l) {
       return {
-        id: l.id, name: l.name, area: l.area, active: l.active, grup: l.grup,
+        id: l.id, name: l.name, area: l.area, active: l.active, grup: l.grup, proses: l.proses,
         factoryName: md.factoryMap[l.factory] ? md.factoryMap[l.factory].name : l.factory,
         machines: machinesForLine_(md, l).map(function (m) { return { id: m.id, name: m.name }; })
       };

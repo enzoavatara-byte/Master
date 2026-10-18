@@ -33,7 +33,9 @@ function isArchivable_(r, year) {
 
 function archiveName_(year) { return 'Arsip ' + year; }
 function archiveLogName_(year) { return 'Arsip Log ' + year; }
+function archiveUsageName_(year) { return 'Arsip Sparepart ' + year; }
 function rekapName_(year) { return 'Rekap ' + year; }
+function laporanName_(year) { return 'Laporan ' + year; }
 
 function checkYear_(year) {
   var y = Number(year);
@@ -105,7 +107,7 @@ function buildRekap_(year) {
   var w = REKAP_HEADERS_.length;
   var pad = function (row) { while (row.length < w) row.push(''); return row; };
   var rows = [
-    pad(['Rekap MTTR ' + year]),
+    pad(['Rekap ' + appName_() + ' ' + year]),
     pad(['Dibuat ' + fmtDate_(new Date()) + ' WIB. MTTR = rata-rata waktu aktif pekerjaan "Masuk MTTR = Ya" (' + getConfig_('MTTR_TIPE') +
       '). Bulan = bulan selesai / cancel / abandoned. Nilai statis: jalankan rekap lagi untuk memperbarui.']),
     pad([]),
@@ -125,7 +127,116 @@ function refreshRekap() {
   var now = new Date();
   var y = yearOf_(now);
   buildRekap_(y);
-  if (monthOf_(now) === 1) buildRekap_(y - 1);
+  buildLaporan_(y);
+  if (monthOf_(now) === 1) { buildRekap_(y - 1); buildLaporan_(y - 1); }
+}
+
+// ---------- Laporan (format Excel "Form Stop Line Peralatan") ----------
+
+function stripOther_(v) {
+  var s = String(v || '');
+  return s.indexOf(APP.OTHER_PREFIX) === 0 ? s.slice(APP.OTHER_PREFIX.length).trim() : s;
+}
+
+function withDetail_(choice, detail) {
+  var a = stripOther_(choice), b = String(detail || '').trim();
+  return a && b ? a + ' – ' + b : (a || b);
+}
+
+/** Satu baris per pekerjaan (bukan Cancelled) yang MULAI di tahun tsb. Pemakaian sparepart ditulis ke bawah dalam satu sel. */
+function laporanRows_(year) {
+  var ss = SpreadsheetApp.getActive();
+  var seen = {}, rows = [];
+  var add = function (r) {
+    var id = String(r['Maintenance ID']);
+    if (seen[id] || r['Status'] === APP.STATUS.CANCELLED || !(r['Mulai'] instanceof Date) || yearOf_(r['Mulai']) !== year) return;
+    seen[id] = true;
+    rows.push(r);
+  };
+  readTable_(APP.SHEETS.MAINT).forEach(add);
+  if (ss.getSheetByName(archiveName_(year))) readTable_(archiveName_(year)).forEach(add);
+  rows.sort(function (a, b) { return (a['Mulai'] - b['Mulai']) || String(a['Maintenance ID']).localeCompare(String(b['Maintenance ID'])); });
+  var usage = {};
+  var addUsage = function (u) {
+    var id = String(u['Maintenance ID']);
+    if (!seen[id]) return;
+    (usage[id] = usage[id] || []).push(u);
+  };
+  if (ss.getSheetByName(APP.SHEETS.PEMAKAIAN)) readTable_(APP.SHEETS.PEMAKAIAN).forEach(addUsage);
+  if (ss.getSheetByName(archiveUsageName_(year))) readTable_(archiveUsageName_(year)).forEach(addUsage);
+  return { rows: rows, usage: usage };
+}
+
+function laporanValue_(src, r, i, used, md, names) {
+  var line = lineOf_(md, r['Line']);
+  var col = function (k) { return used.map(function (u) { return u[k] === '' || u[k] == null ? '-' : u[k]; }).join('\n'); };
+  var noPart = !used.length && r['Status'] === APP.STATUS.COMPLETED;
+  var legacy = noPart && r['Part'] && r['Part'] !== APP.NO_PART && r['Part'] !== 'Tidak ada';   // data 2.1 (teks bebas)
+  switch (src) {
+    case 'NO': return i + 1;
+    case 'Factory': return factoryOfRecord_(md, r);
+    case 'Nama factory': var f = md.factoryMap[factoryOfRecord_(md, r)]; return f ? f.name : factoryOfRecord_(md, r);
+    case 'Project': return r['Baterai'];
+    case 'Proses': return prosesOfRecord_(md, r);
+    case 'Line': return r['Line'];
+    case 'Station': return stripOther_(r['Nama Mesin']) || (line ? line.name || line.id : r['Line']);
+    case 'Tanggal': return r['Mulai'];
+    case 'Jam mulai': return Utilities.formatDate(r['Mulai'], APP.TZ, 'HH.mm');
+    case 'Jam selesai': return r['Selesai'] instanceof Date ? Utilities.formatDate(r['Selesai'], APP.TZ, 'HH.mm') : '';
+    case 'Stop line (1/0)': return r['Stop line'] === APP.YES ? 1 : (r['Stop line'] === APP.NO ? 0 : '');
+    case 'Durasi stop line':
+      if (r['Stop line'] === APP.NO) return 0;
+      if (r['Stop line'] !== APP.YES || !(r['Selesai'] instanceof Date)) return '';
+      return Math.round((r['Selesai'].getTime() - r['Mulai'].getTime()) / 60000);
+    case 'Waktu aktif (menit)': return Number(r['Total aktif (menit)'] || 0);
+    case 'Jenis kerusakan': return stripOther_(r['Jenis kerusakan']);
+    case 'Masalah + detail': return withDetail_(r['Masalah'], r['Detail masalah']);
+    case 'Penyebab + detail': return withDetail_(r['Penyebab'], r['Detail penyebab']);
+    case 'Penanganan + detail': return withDetail_(r['Penanganan'], r['Detail penanganan']);
+    case 'Jenis sparepart': return used.length ? col('Jenis Sparepart') : (noPart && !legacy ? APP.NO_PART : '');
+    case 'Nama sparepart': return used.length ? col('Nama Sparepart') : (legacy ? String(r['Part']).replace(/; /g, '\n') : '');
+    case 'Model sparepart': return used.length ? col('Model') : '';
+    case 'Jumlah sparepart': return used.length ? (used.length === 1 ? Number(used[0]['Jumlah']) : col('Jumlah')) : '';
+    case 'Catatan': return r['Catatan'];
+    case 'Kondisi perbaikan': return APP.STATUS_LABEL[r['Status']] || r['Status'];
+    case 'PIC':
+      return r['Nama teknisi terlibat'] || String(r['Teknisi terlibat'] || r['Teknisi terakhir'] || '').split(',').map(function (e) {
+        e = e.trim().toLowerCase(); return names[e] || e;
+      }).filter(String).join(', ');
+    case 'Tipe maintenance': return r['Tipe'];
+    case 'Maintenance ID': return r['Maintenance ID'];
+    default:
+      var v = r[src];
+      return v === undefined ? '' : (v instanceof Date ? fmtDate_(v) : v);
+  }
+}
+
+/** Buat/perbarui tab "Laporan <tahun>" sesuai sheet Format Laporan (default = Excel bang Risky). */
+function buildLaporan_(year) {
+  year = checkYear_(year);
+  var md = masterData_(), names = userNameMap_();
+  var cols = md.report;
+  var data = laporanRows_(year);
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(laporanName_(year)) || ss.insertSheet(laporanName_(year));
+  sh.clear();
+  var w = Math.max(1, cols.length);
+  var title = [String(getConfig_('LAPORAN_JUDUL') || '')];
+  while (title.length < w) title.push('');
+  var out = [title, cols.map(function (c) { return c.kolom; })];
+  data.rows.forEach(function (r, i) {
+    var used = data.usage[String(r['Maintenance ID'])] || [];
+    out.push(cols.map(function (c) { var v = laporanValue_(c.sumber, r, i, used, md, names); return v == null ? '' : v; }));
+  });
+  sh.getRange(1, 1, out.length, w).setValues(out);
+  sh.getRange(1, 1, 1, w).merge().setFontWeight('bold');
+  sh.getRange(2, 1, 1, w).setFontWeight('bold');
+  sh.getRange(2, 1, out.length - 1, w).setWrap(true);
+  sh.setFrozenRows(2);
+  cols.forEach(function (c, j) {
+    if (c.sumber === 'Tanggal' && out.length > 2) sh.getRange(3, j + 1, out.length - 2, 1).setNumberFormat('dd/mm/yyyy');
+  });
+  return { year: year, sheet: laporanName_(year), rows: data.rows.length };
 }
 
 // ---------- Arsip ----------
@@ -154,7 +265,7 @@ function appendArchive_(name, srcHeaders, srcRows, keyOf) {
     out.push(objToRow_(h, o));
   });
   if (out.length) sh.getRange(sh.getLastRow() + 1, 1, out.length, h.length).setValues(out);
-  (APP.DATE_COLUMNS.Maintenance.concat(APP.DATE_COLUMNS.Log)).forEach(function (col) {
+  (APP.DATE_COLUMNS.Maintenance.concat(APP.DATE_COLUMNS.Log, APP.DATE_COLUMNS['Pemakaian Sparepart'])).forEach(function (col) {
     var c = h.indexOf(col) + 1;
     if (c > 0 && sh.getLastRow() > 1) sh.getRange(2, c, sh.getLastRow() - 1, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
   });
@@ -170,6 +281,11 @@ function rewriteKeeping_(sh, values, keep) {
   if (body.length) sh.getRange(2, 1, body.length, head.length).setValues(body);
   return body.length;
 }
+
+var usageKey_ = function (o) {
+  var t = o['Tanggal'] instanceof Date ? o['Tanggal'].getTime() : String(o['Tanggal']);
+  return [t, o['Maintenance ID'], o['Jenis Sparepart'], o['Nama Sparepart'], o['Model'], o['Jumlah']].join('|');
+};
 
 var logKey_ = function (o) {
   var t = o['Timestamp'] instanceof Date ? o['Timestamp'].getTime() : String(o['Timestamp']);
@@ -188,7 +304,9 @@ function arsipkanTahun_(year) {
 
   return withLock_(function () {
     var rekap = buildRekap_(year);
+    buildLaporan_(year);
     var msh = sheet_(APP.SHEETS.MAINT), lsh = sheet_(APP.SHEETS.LOG);
+    var ush = SpreadsheetApp.getActive().getSheetByName(APP.SHEETS.PEMAKAIAN);
     var mvals = msh.getDataRange().getValues(), lvals = lsh.getDataRange().getValues();
     var mh = mvals[0].map(function (x) { return String(x).trim(); }), lh = lvals[0].map(function (x) { return String(x).trim(); });
     var mId = mh.indexOf('Maintenance ID'), lId = lh.indexOf('Maintenance ID');
@@ -202,6 +320,10 @@ function arsipkanTahun_(year) {
     var lRows = lvals.slice(1).filter(function (row) { return ids[String(row[lId])]; });
     appendArchive_(archiveName_(year), mh, mRows, function (o) { return String(o['Maintenance ID']); });
     appendArchive_(archiveLogName_(year), lh, lRows, logKey_);
+    var uvals = ush ? ush.getDataRange().getValues() : [[]];
+    var uh = uvals[0].map(function (x) { return String(x).trim(); }), uId = uh.indexOf('Maintenance ID');
+    var uRows = uId < 0 ? [] : uvals.slice(1).filter(function (row) { return ids[String(row[uId])]; });
+    if (uRows.length) appendArchive_(archiveUsageName_(year), uh, uRows, usageKey_);
     SpreadsheetApp.flush();
 
     var have = {};
@@ -211,7 +333,8 @@ function arsipkanTahun_(year) {
 
     rewriteKeeping_(msh, mvals, function (row) { return !ids[String(row[mId])]; });
     rewriteKeeping_(lsh, lvals, function (row) { return !ids[String(row[lId])]; });
-    return { year: year, maintenance: n, log: lRows.length, rekap: rekap };
+    if (uRows.length) rewriteKeeping_(ush, uvals, function (row) { return !ids[String(row[uId])]; });
+    return { year: year, maintenance: n, log: lRows.length, sparepart: uRows.length, rekap: rekap };
   });
 }
 
@@ -237,7 +360,8 @@ function menuRekapTahunan() {
   var year = String(res.getResponseText() || '').trim() || yearOf_(new Date());
   var out = buildRekap_(year);
   SpreadsheetApp.getActive().getSheetByName(out.sheet).activate();
-  ui.alert('Tab "' + out.sheet + '" diperbarui: ' + out.total.done + ' pekerjaan selesai, MTTR ' +
+  buildLaporan_(year);
+  ui.alert('Tab "' + out.sheet + '" dan "' + laporanName_(out.year) + '" diperbarui: ' + out.total.done + ' pekerjaan selesai, MTTR ' +
     (out.total.mttrN ? round2_(out.total.mttrSum / out.total.mttrN) + ' menit' : '-') + '.');
 }
 
@@ -251,10 +375,10 @@ function menuArsipkanTahun() {
   var n = readTable_(APP.SHEETS.MAINT).filter(function (r) { return isArchivable_(r, year); }).length;
   if (!n) { ui.alert('Tidak ada pekerjaan final tahun ' + year + ' yang perlu diarsipkan.'); return; }
   var ok = ui.alert('Konfirmasi arsip ' + year,
-    n + ' pekerjaan final tahun ' + year + ' (beserta Log-nya) akan dipindah ke tab "' + archiveName_(year) + '" dan "' + archiveLogName_(year) +
-    '". Rekap ' + year + ' dibuat ulang lebih dulu. Pekerjaan yang masih berjalan, pending, atau menunggu review tidak dipindah.\n\n' +
+    n + ' pekerjaan final tahun ' + year + ' (beserta Log & pemakaian sparepart-nya) akan dipindah ke tab "' + archiveName_(year) + '", "' +
+    archiveLogName_(year) + '" dan "' + archiveUsageName_(year) + '". Rekap & Laporan ' + year + ' dibuat ulang lebih dulu. Pekerjaan yang masih berjalan, pending, atau menunggu review tidak dipindah.\n\n' +
     'Setelah diarsipkan, pekerjaan itu tidak tampil lagi di Riwayat aplikasi (tetap ada di sheet arsip). Lanjutkan?', ui.ButtonSet.YES_NO);
   if (ok !== ui.Button.YES) return;
   var out = arsipkanTahun_(year);
-  ui.alert('Selesai: ' + out.maintenance + ' pekerjaan dan ' + out.log + ' baris Log dipindah ke arsip ' + year + '.');
+  ui.alert('Selesai: ' + out.maintenance + ' pekerjaan, ' + out.log + ' baris Log dan ' + out.sparepart + ' baris sparepart dipindah ke arsip ' + year + '.');
 }
