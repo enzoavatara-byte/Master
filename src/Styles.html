@@ -256,6 +256,20 @@
   .pitem:last-child { border-bottom: 0; }
   .pitem .add { font-weight: 800; color: var(--accent); flex: none; }
   .pitem.on { background: var(--accent-soft); }
+  .scroll-y { max-height: 280px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .cascade { margin-top: 10px; border: 2px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .cascade-head { display: grid; grid-template-columns: 1fr 1fr; background: var(--soft); font-size: 11px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .cascade-head span { padding: 8px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cascade-head span + span { border-left: 2px solid var(--line); }
+  .cascade-body { display: grid; grid-template-columns: 1fr 1fr; height: 264px; }
+  .ccol { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .ccol + .ccol { border-left: 2px solid var(--line); }
+  .nitem { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: var(--card); color: var(--text); border: 0;
+    border-bottom: 1px solid var(--line); padding: 12px; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .nitem.on { background: var(--accent-soft); color: var(--accent); }
+  .nitem .used-n { color: var(--accent); font-weight: 800; }
+  .ccol.models .pitem { padding: 12px; font-size: 13px; }
   .manual { margin-top: 10px; padding: 14px; border-radius: 16px; background: var(--soft); }
   .manual .chip { background: var(--card); }
 

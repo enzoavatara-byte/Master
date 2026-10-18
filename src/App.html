@@ -688,35 +688,45 @@
     function drawBrowse() {
       var box = $('pk-browse');
       if (!box) return;
+      // Posisi scroll kolom dipertahankan saat digambar ulang (tap nama / tambah part tidak melompat ke atas).
+      var keep = {};
+      ['pk-names', 'pk-models', 'pk-hits'].forEach(function (id) { if ($(id)) keep[id] = $(id).scrollTop; });
       var html = '';
       if (pk.q) {
         var words = pk.q.toLowerCase().split(/\s+/).filter(String);
         var hits = cat.filter(function (p) {
           var hay = (p.nama + ' ' + p.model + ' ' + p.jenis).toLowerCase();
           return words.every(function (w) { return hay.indexOf(w) !== -1; });
-        }).slice(0, 30);
-        html = hits.length ? '<div class="plist">' + hits.map(function (p) { return itemBtn(p, true); }).join('') + '</div>'
+        }).slice(0, 50);
+        html = hits.length ? '<div class="plist scroll-y" id="pk-hits">' + hits.map(function (p) { return itemBtn(p, true); }).join('') + '</div>'
           : '<p class="small muted" style="margin:10px 0 0">Tidak ditemukan di katalog. Pakai <b>Tambah manual</b> di bawah.</p>';
       } else {
         var names = [];
         cat.forEach(function (p) { if (p.jenis === pk.jenis && names.indexOf(p.nama) === -1) names.push(p.nama); });
         var models = cat.filter(function (p) { return p.jenis === pk.jenis && p.nama === pk.nama; });
-        html = '<label class="lbl" style="margin-top:12px">Jenis</label>' + chips('pjenis', jenisCat, { selected: pk.jenis }) +
-          '<label class="lbl" style="margin-top:12px">Nama sparepart</label>' + chips('pnama', names.map(function (n) {
-            var c = cat.filter(function (p) { return p.jenis === pk.jenis && p.nama === n; }).length;
-            return { value: n, label: n, sub: c > 1 ? c + ' model' : '' };
-          }), { selected: pk.nama }) +
-          (models.length > 1 ? '<label class="lbl" style="margin-top:12px">Model ' + esc(pk.nama) + '</label><div class="plist">' + models.map(function (p) { return itemBtn(p, false); }).join('') + '</div>' : '');
+        // Jenis = satu baris geser; Nama & Model = dua kolom tinggi tetap, masing-masing scroll sendiri.
+        html = '<div class="scroll-x" style="margin-top:12px">' + chips('pjenis', jenisCat, { selected: pk.jenis }) + '</div>' +
+          '<div class="cascade"><div class="cascade-head"><span>Nama sparepart (' + names.length + ')</span><span>Model' + (pk.nama ? ' · ' + esc(pk.nama) : '') + '</span></div>' +
+          '<div class="cascade-body"><div class="ccol" id="pk-names">' + names.map(function (n) {
+            var c = cat.filter(function (p) { return p.jenis === pk.jenis && p.nama === n; });
+            var q = c.reduce(function (sum, p) { return sum + usedQty(p.id); }, 0);
+            return '<button type="button" class="nitem' + (n === pk.nama ? ' on' : '') + '" data-nama="' + esc(n) + '"><span class="grow">' + esc(n) + '</span>' +
+              (q ? '<span class="tiny used-n">✓' + q + '</span>' : (c.length > 1 ? '<span class="tiny muted">' + c.length + ' model</span>' : '')) + '</button>';
+          }).join('') + '</div>' +
+          '<div class="ccol models" id="pk-models">' + (pk.nama ? models.map(function (p) { return itemBtn(p, false); }).join('')
+            : '<p class="tiny muted" style="margin:0;padding:12px">← Pilih nama sparepart</p>') + '</div></div></div>';
       }
       box.innerHTML = html;
+      Object.keys(keep).forEach(function (id) { if ($(id)) $(id).scrollTop = keep[id]; });
       bindChips(box, function (n, val) {
-        if (n === 'pjenis') { pk.jenis = val; pk.jenisTouched = true; pk.nama = ''; drawBrowse(); }
-        if (n === 'pnama') {
-          pk.nama = val;
-          var m = cat.filter(function (p) { return p.jenis === pk.jenis && p.nama === val; });
-          if (m.length === 1) addPart(m[0]); else drawBrowse();   // satu model → langsung masuk daftar
-        }
+        if (n === 'pjenis') { pk.jenis = val; pk.jenisTouched = true; pk.nama = ''; drawBrowse(); if ($('pk-names')) $('pk-names').scrollTop = 0; }
       });
+      var ns = box.querySelectorAll('[data-nama]');
+      for (var j = 0; j < ns.length; j++) ns[j].onclick = function () {
+        pk.nama = this.getAttribute('data-nama');
+        drawBrowse();
+        if ($('pk-models')) $('pk-models').scrollTop = 0;
+      };
       var adds = box.querySelectorAll('[data-add]');
       for (var k = 0; k < adds.length; k++) adds[k].onclick = function () {
         var id = this.getAttribute('data-add');
