@@ -1001,4 +1001,18 @@ test('file Message belum dibuat / setup belum dijalankan → pesan asli tetap ta
   as('budi@gmail.com', () => assert.strictEqual(ctx.doGet({ parameter: {} }).template, 'Index'));
 });
 
+test('setup: file proyek yang belum dibuat disebut namanya (bukan "currentEmail_ is not defined")', () => {
+  assert.strictEqual(ctx.cekFile(), ctx.APP.VERSION);
+  const H = ctx.HtmlService, origH = H.createHtmlOutputFromFile, origAuth = ctx.currentEmail_;
+  H.createHtmlOutputFromFile = (n) => { if (n === 'Message') throw new Error('No HTML file named Message was found.'); return origH.call(H, n); };
+  ctx.currentEmail_ = undefined;                            // seperti file Auth tidak ada
+  try {
+    throwsMsg(() => ctx.setup(), /File belum lengkap di Apps Script: Auth \(script\), Message \(HTML\)\. Buat file/);
+  } finally {
+    H.createHtmlOutputFromFile = origH;
+    ctx.currentEmail_ = origAuth;
+  }
+  assert.strictEqual(ctx.cekFile(), ctx.APP.VERSION);
+});
+
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

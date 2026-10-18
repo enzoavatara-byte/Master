@@ -108,7 +108,31 @@ function menuMuatUlangMaster() {
  * - Mendaftarkan pemanggil sebagai Admin jika sheet Users masih kosong.
  * - Memasang trigger checkTimeouts (tanpa duplikat).
  */
+/**
+ * Cek semua file proyek sudah dibuat (Run dari editor). Dipanggil juga di awal setup(),
+ * supaya file yang terlewat langsung disebut namanya, bukan muncul sebagai "X is not defined".
+ */
+function cekFile() {
+  var missing = [];
+  var scripts = { Config: typeof APP, Db: typeof readTable_, Auth: typeof currentEmail_, Master: typeof masterData_,
+    Maintenance: typeof apiStart, Api: typeof apiBootstrap, Rekap: typeof buildLaporan_ };
+  Object.keys(scripts).forEach(function (f) { if (scripts[f] === 'undefined') missing.push(f + ' (script)'); });
+  ['Index', 'App', 'Styles', 'Message', 'Panduan'].forEach(function (f) {
+    try { HtmlService.createHtmlOutputFromFile(f); } catch (e) { missing.push(f + ' (HTML)'); }
+  });
+  if (missing.length) {
+    throw new Error('File belum lengkap di Apps Script: ' + missing.join(', ') + '. Buat file dengan nama persis itu ' +
+      '(tanpa .gs / .html), paste isinya dari folder src di GitHub, Ctrl+S, lalu Run setup lagi.');
+  }
+  if (!SpreadsheetApp.getActive()) {
+    throw new Error('Script ini tidak menempel ke spreadsheet. Buka spreadsheet → Extensions → Apps Script, lalu paste file di sana.');
+  }
+  console.log('Semua file lengkap (versi ' + APP.VERSION + ').');
+  return APP.VERSION;
+}
+
 function setup() {
+  cekFile();
   invalidateMaster_();
   var ss = SpreadsheetApp.getActive();
   ss.setSpreadsheetTimeZone(APP.TZ);
