@@ -143,7 +143,8 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
 - **`Laporan <tahun>`** = format Excel. Satu baris per pekerjaan yang *dimulai* di tahun itu (Cancelled tidak ikut; Pending/Abandoned ikut dengan Kondisi masing-masing).
   Kolom sparepart: satu part per baris dalam sel, urutannya sejajar antar-kolom (Jenis / Nama / Model / Jumlah).
 - **`Rekap <tahun>`** = ringkasan per bulan (seperti 2.1).
-- Keduanya diperbarui **otomatis tiap malam ±01:00**. Manual: Dashboard → **Perbarui Laporan & Rekap**, atau menu spreadsheet → **Laporan & Rekap tahunan**.
+- Keduanya **salinan statis** yang diperbarui **otomatis tiap jam** (`APP.REKAP_HOURS`), bukan seketika. Pekerjaan yang baru selesai langsung ada di `Maintenance`, Dashboard, dan Riwayat, tapi baru muncul di Laporan/Rekap paling lambat 1 jam kemudian.
+  Perlu sekarang: Dashboard → **Perbarui Laporan & Rekap**, atau menu spreadsheet → **Laporan & Rekap tahunan**. Waktu pembaruan terakhir tertulis di kanan judul tab Laporan.
 - Jangan edit tab Laporan/Rekap (selalu ditulis ulang). Perbaiki datanya di `Maintenance`.
 - Untuk dikirim: klik kanan tab → **Copy to → New spreadsheet** → File → Download → Microsoft Excel.
 - **Arsip** (awal tahun, menu → Arsipkan data tahun lalu): pekerjaan final + Log + **pemakaian sparepart** pindah ke `Arsip <tahun>`, `Arsip Log <tahun>`, `Arsip Sparepart <tahun>`.
@@ -182,7 +183,7 @@ BOM dihapus, jadi halaman line tidak lagi membawa daftar BOM.
 ## 9. Test & preview
 
 ```bash
-npm test          # 54 test logika server (mock Sheets + jam palsu)
+npm test          # 55 test logika server (mock Sheets + jam palsu)
 npm run perf      # jumlah panggilan ke Sheets per aksi
 npm run preview   # http://localhost:8787/?as=owner@gmail.com
                   # simulasi QR: &line=L01   QR mesin: &line=L11&mesin=M-E1

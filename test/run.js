@@ -37,7 +37,8 @@ test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempot
   for (const n of ['Users', 'Factory', 'Projects', 'Lines', 'Mesin', 'Sparepart', 'Pemakaian Sparepart', 'Format Laporan', 'Catatan Panduan', 'Pilihan', 'Form', 'Config', 'Maintenance', 'Log', 'Maintenance VF7', 'Maintenance Limo7', 'Maintenance E22H', 'Maintenance E245', 'Pending Work', 'Rekap 2026', 'Laporan 2026']) assert.ok(ss.getSheetByName(n), n);
   assert.ok(!ss.getSheetByName('Sheet1'));
   assert.ok(!ss.getSheetByName('BOM'), 'BOM tidak dibuat lagi');
-  jeq(triggers.map(t => t.getHandlerFunction()), ['checkTimeouts', 'refreshRekap', 'onMasterChange'], 'trigger tidak dobel');
+  jeq(triggers.map(t => t.getHandlerFunction()).sort(), ['checkTimeouts', 'onMasterChange', 'refreshRekap'], 'trigger tidak dobel');
+  assert.strictEqual(triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every, 'jam:1', 'laporan & rekap tiap jam');
   assert.strictEqual(ctx.readTable_('Config').length, 8);
   assert.strictEqual(ctx.readTable_('Users')[0].Peran, 'Admin');
   jeq(ctx.readTable_('Projects').map(p => p['Factory ID'] + ':' + p.Baterai), ['F1:VF7', 'F1:Limo7', 'F2:E22H', 'F2:E245']);
@@ -675,6 +676,7 @@ test('2.2 laporan: kolom & isi sama dengan Excel (stop line 1/0, durasi, part ke
   const t = lap(2026);
   assert.strictEqual(t.title[0], ctx.getConfig_('LAPORAN_JUDUL'));
   assert.match(t.title[0], /Form Stop Line Peralatan/);
+  assert.match(t.title[21], /^Diperbarui \d{4}-\d\d-\d\d \d\d:\d\d:\d\d WIB · otomatis tiap 1 jam/, 'kapan terakhir diperbarui, di luar tabel');
   assert.strictEqual(t.head.length, 21, '21 kolom seperti Excel (Maintenance ID nonaktif)');
   assert.strictEqual(t.head[0], '序号\nNO');
   assert.strictEqual(t.head[20], '维修人员\nKaryawan Perbaikan');
@@ -805,6 +807,15 @@ test('2.2 migrasi dari 2.1: setup() menambah baris Form baru (stop line, jenis k
     ctx.apiCancel(id, 'Input ganda');
   });
   setRow('Form', (r) => key(r) === 'Mulai.Stop line', 'Aktif', 'Ya');
+});
+
+test('2.2.1 upgrade: setup mengganti trigger rekap harian (2.2.0) menjadi tiap jam, tidak dobel', () => {
+  triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every = 'hari:1@1';   // seperti dipasang 2.2.0
+  ctx.setup();
+  const r = triggers.filter(t => t.getHandlerFunction() === 'refreshRekap');
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r[0].every, 'jam:1');
+  assert.strictEqual(triggers.length, 3);
 });
 
 // ---------- Rekap tahunan & arsip ----------

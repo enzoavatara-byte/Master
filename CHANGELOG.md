@@ -3,6 +3,12 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.2.1
+- Laporan & Rekap diperbarui **tiap jam** (sebelumnya tiap malam). Waktu pembaruan terakhir tertulis di kanan judul tab Laporan.
+- `setup` mengecek semua file proyek dulu dan menyebut nama file yang belum dibuat. Fungsi baru `cekFile` (Run dari editor).
+- Pesan error asli tetap tampil walau file HTML `Message` belum dibuat.
+- **File**: `Config`, `Code`, `Rekap`, `Api`, `App`, `Panduan`. **Wajib Run `setup` lagi** supaya jadwal trigger berganti.
+
 ## 2.2.0 — diskusi mentor
 
 **Baru**

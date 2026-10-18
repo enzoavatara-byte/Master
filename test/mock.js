@@ -50,6 +50,7 @@ class Range {
   merge() { return this; }
   setWrap() { return this; }
   setFontWeight() { return this; }
+  setFontColor() { return this; }
 }
 class Sheet {
   constructor(name) { this.name = name; this.data = []; this.formulas = {}; this.protections = []; }
@@ -140,12 +141,13 @@ const ctx = {
   ScriptApp: {
     getProjectTriggers: () => triggers,
     newTrigger: (fn) => {
-      const done = { create: () => triggers.push({ getHandlerFunction: () => fn }) };
+      const make = (every) => ({ create: () => triggers.push({ getHandlerFunction: () => fn, every }) });
       return {
-        timeBased: () => ({ everyMinutes: () => done, everyDays: () => ({ atHour: () => done }) }),
-        forSpreadsheet: () => ({ onChange: () => done })
+        timeBased: () => ({ everyMinutes: (n) => make('menit:' + n), everyHours: (n) => make('jam:' + n), everyDays: (n) => ({ atHour: (h) => make('hari:' + n + '@' + h) }) }),
+        forSpreadsheet: () => ({ onChange: () => make('onChange') })
       };
     },
+    deleteTrigger: (t) => { const i = triggers.indexOf(t); if (i >= 0) triggers.splice(i, 1); },
     getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/XYZ/exec' })
   },
   HtmlService: {

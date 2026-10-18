@@ -5,7 +5,7 @@
  */
 var APP = {
   NAME: 'MTTR',          // nama default; per lokasi diubah lewat Config → NAMA_APLIKASI
-  VERSION: '2.2.0',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
+  VERSION: '2.2.1',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
   TZ: 'Asia/Jakarta',
   DATE_FMT: 'yyyy-MM-dd HH:mm:ss',
 
@@ -209,6 +209,8 @@ var APP = {
 
   LOCK_TIMEOUT_MS: 10000,
   TRIGGER_MINUTES: 15,
+  /** Laporan & Rekap tahun ini dibuat ulang tiap N jam (nilai Apps Script: 1, 2, 4, 6, 8, 12). */
+  REKAP_HOURS: 1,
   HISTORY_LIMIT: 500
 };
 

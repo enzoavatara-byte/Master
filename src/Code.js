@@ -236,8 +236,10 @@ function setup() {
 
   var hasTrigger = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'checkTimeouts'; });
   if (!hasTrigger) ScriptApp.newTrigger('checkTimeouts').timeBased().everyMinutes(APP.TRIGGER_MINUTES).create();
-  var hasRekap = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'refreshRekap'; });
-  if (!hasRekap) ScriptApp.newTrigger('refreshRekap').timeBased().everyDays(1).atHour(1).create(); // rekap tahun ini tiap malam
+  // Laporan & Rekap tahun ini diperbarui tiap REKAP_HOURS jam. Trigger lama selalu diganti, supaya jadwal baru
+  // (2.2.0 = tiap malam) ikut terpasang saat setup dijalankan ulang.
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'refreshRekap') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('refreshRekap').timeBased().everyHours(APP.REKAP_HOURS).create();
   var hasChange = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'onMasterChange'; });
   if (!hasChange) ScriptApp.newTrigger('onMasterChange').forSpreadsheet(ss).onChange().create(); // hapus/sisip baris → cache dihapus
   buildRekap_(yearOf_(new Date()));

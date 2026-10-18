@@ -556,7 +556,7 @@ function apiDashboard(f) {
 
 // ---------- Laporan (Admin) ----------
 
-/** Perbarui tab "Laporan <tahun>" dan "Rekap <tahun>" sekarang (selain otomatis tiap malam). */
+/** Perbarui tab "Laporan <tahun>" dan "Rekap <tahun>" sekarang (selain otomatis tiap jam). */
 function apiBuildReports(year) {
   requireUser_([APP.ROLES.ADMIN]);
   var y = year ? checkYear_(year) : yearOf_(new Date());

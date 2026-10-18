@@ -2,7 +2,7 @@
  * Rekap tahunan (tahun kalender, WIB) + arsip data per tahun.
  *
  * - Tab "Rekap <tahun>": 12 bulan + total, nilai statis (bukan rumus) supaya tetap benar setelah
- *   data diarsipkan. Diperbarui otomatis tiap malam (trigger refreshRekap) dan lewat menu.
+ *   data diarsipkan. Diperbarui otomatis tiap jam (trigger refreshRekap), lewat Dashboard, dan lewat menu.
  * - Arsip: pekerjaan tahun lalu yang sudah final dipindah ke tab "Arsip <tahun>" & "Arsip Log <tahun>"
  *   di spreadsheet yang sama. Aplikasi hanya membaca tab Maintenance & Log, jadi tetap cepat.
  *   Arsip di file terpisah sengaja tidak dipakai: butuh izin akses ke SEMUA spreadsheet setiap teknisi.
@@ -108,8 +108,8 @@ function buildRekap_(year) {
   var pad = function (row) { while (row.length < w) row.push(''); return row; };
   var rows = [
     pad(['Rekap ' + appName_() + ' ' + year]),
-    pad(['Dibuat ' + fmtDate_(new Date()) + ' WIB. MTTR = rata-rata waktu aktif pekerjaan "Masuk MTTR = Ya" (' + getConfig_('MTTR_TIPE') +
-      '). Bulan = bulan selesai / cancel / abandoned. Nilai statis: jalankan rekap lagi untuk memperbarui.']),
+    pad(['Diperbarui ' + fmtDate_(new Date()) + ' WIB (otomatis tiap ' + APP.REKAP_HOURS + ' jam). MTTR = rata-rata waktu aktif pekerjaan "Masuk MTTR = Ya" (' +
+      getConfig_('MTTR_TIPE') + '). Bulan = bulan selesai / cancel / abandoned.']),
     pad([]),
     REKAP_HEADERS_.slice()
   ].concat(data.months.map(rekapRow_)).concat([rekapRow_(data.total)]);
@@ -121,7 +121,7 @@ function buildRekap_(year) {
   return { year: year, total: data.total, sheet: rekapName_(year) };
 }
 
-/** Trigger harian: perbarui rekap tahun ini; di bulan Januari juga tahun lalu (review akhir tahun bisa menyusul). */
+/** Trigger tiap jam: perbarui rekap & laporan tahun ini; di bulan Januari juga tahun lalu (review akhir tahun bisa menyusul). */
 function refreshRekap() {
   resetMaster_();
   var now = new Date();
@@ -230,6 +230,9 @@ function buildLaporan_(year) {
   });
   sh.getRange(1, 1, out.length, w).setValues(out);
   sh.getRange(1, 1, 1, w).merge().setFontWeight('bold');
+  // Keterangan di luar tabel (kanan judul) supaya format Excel tetap sama.
+  sh.getRange(1, w + 1, 1, 1).setValues([['Diperbarui ' + fmtDate_(new Date()) + ' WIB · otomatis tiap ' + APP.REKAP_HOURS +
+    ' jam · perlu sekarang: Dashboard → Perbarui Laporan & Rekap']]).setFontColor('#888888');
   sh.getRange(2, 1, 1, w).setFontWeight('bold');
   sh.getRange(2, 1, out.length - 1, w).setWrap(true);
   sh.setFrozenRows(2);
