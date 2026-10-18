@@ -63,6 +63,14 @@ Langkah:
 
 Install baru dari nol: buat spreadsheet → Extensions → Apps Script → paste 12 file + `appsscript.json` → Run `setup` → Deploy web app *Execute as: User accessing*, *Anyone with Google account* → share spreadsheet sebagai Editor ke semua user.
 
+**Apakah update/deploy menghapus data, atau mengacaukan pekerjaan yang sedang berjalan?** Tidak:
+- Data ada di **Google Sheet**, kode ada di **Apps Script**. Deploy hanya mengganti kode. `setup` hanya *menambah* sheet/kolom/baris yang belum ada; tidak menghapus data.
+- Status, jam mulai, dan total waktu aktif/pause disimpan di sheet, bukan di HP. Pekerjaan yang sedang Aktif/Pause tetap berjalan, timer tidak ter-reset, MTTR tidak berubah.
+- HP yang masih membuka versi lama tetap bisa dipakai. Dalam ±1 menit muncul banner **"Versi baru sudah terpasang → Muat ulang"**. Kalau isian dari versi lama tidak cocok dengan server baru, server **menolak** dengan pesan error (tidak menulis data setengah jadi); muat ulang lalu ulangi.
+- Saat kode sedang di-paste (sebelum New version), trigger tiap 15 menit memakai kode yang baru disimpan. Paste semua file sekaligus (±5 menit); paling buruk satu jalannya trigger gagal dan dicoba lagi 15 menit kemudian.
+- Yang benar-benar berbahaya: **New deployment** (URL baru → semua QR mati), menghapus/mengganti nama sheet atau judul kolom, dan salah file saat menyalin untuk factory kedua.
+- Versi baru bermasalah? Deploy → Manage deployments → ✏️ → pilih **versi sebelumnya** → Deploy. Data tidak ikut mundur. Spreadsheet juga punya **File → Version history**.
+
 ---
 
 ## 3. Dua factory (data terpisah, kode sama)
@@ -188,7 +196,7 @@ BOM dihapus, jadi halaman line tidak lagi membawa daftar BOM.
 ## 9. Test & preview
 
 ```bash
-npm test          # 57 test logika server (mock Sheets + jam palsu)
+npm test          # 58 test logika server (mock Sheets + jam palsu)
 npm run perf      # jumlah panggilan ke Sheets per aksi
 npm run preview   # http://localhost:8787/?as=owner@gmail.com
                   # simulasi QR: &line=L01   QR mesin: &line=L11&mesin=M-E1

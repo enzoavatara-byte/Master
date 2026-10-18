@@ -297,8 +297,9 @@
   function refresh(force) {
     if (!state.boot || refreshing) return Promise.resolve();
     refreshing = true;
-    return call('apiRefresh', serverFilter()).then(function (r) {
+    return call('apiRefresh', serverFilter(), M().version).then(function (r) {
       syncClock(r.serverNowIso);
+      if (r.updated) showUpdateBanner(r.updated, r.appUrl);
       var b = state.boot;
       var changed = force || JSON.stringify(b.myOpen) !== JSON.stringify(r.myOpen) || JSON.stringify(b.recent) !== JSON.stringify(r.recent) ||
         JSON.stringify(b.stats) !== JSON.stringify(r.stats);
@@ -308,6 +309,17 @@
     }).catch(function () { /* diam: refresh latar belakang */ }).then(function () { refreshing = false; });
   }
   setInterval(function () { if (!document.hidden) refresh(); }, 60000);
+
+  /** Admin baru deploy versi baru: halaman lama tetap jalan, tapi sebaiknya dimuat ulang setelah isian yang terbuka disimpan. */
+  function showUpdateBanner(version, url) {
+    if ($('upd')) return;
+    var d = document.createElement('div');
+    d.id = 'upd';
+    d.className = 'updbar';
+    d.innerHTML = '<span class="grow">Versi baru (' + esc(version) + ') sudah terpasang. Simpan isian yang sedang dibuka, lalu muat ulang.</span>' +
+      (url ? '<a class="btn" href="' + esc(url) + '" target="_top">Muat ulang</a>' : '<b>Tutup & buka lagi aplikasinya.</b>');
+    document.body.appendChild(d);
+  }
   document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
 
   // ---------- HOME ----------

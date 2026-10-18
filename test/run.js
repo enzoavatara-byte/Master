@@ -1096,4 +1096,15 @@ test('setup: file proyek yang belum dibuat disebut namanya (bukan "currentEmail_
   assert.strictEqual(ctx.cekFile(), ctx.APP.VERSION);
 });
 
+test('deploy versi baru saat HP masih membuka versi lama: refresh memberi tahu (tanpa mengubah data)', () => {
+  as('budi@gmail.com', () => {
+    const same = ctx.apiRefresh({}, ctx.APP.VERSION);
+    assert.strictEqual(same.updated, undefined);
+    const old = ctx.apiRefresh({}, '2.1.1');
+    assert.strictEqual(old.updated, ctx.APP.VERSION);
+    assert.match(old.appUrl, /\/exec$/);
+    assert.strictEqual(ctx.apiRefresh({}).updated, undefined, 'klien lama tanpa versi: tidak diganggu');
+  });
+});
+
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

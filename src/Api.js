@@ -138,18 +138,27 @@ function bootstrap_(user, lineId, mesinId, filter) {
 }
 
 /** Ringan: dipanggil ulang saat app kembali dibuka / tiap menit. */
-function apiRefresh(filter) {
+/**
+ * @param {string=} clientVersion versi halaman yang sedang terbuka di HP. Beda dengan server (admin baru deploy
+ *   versi baru) → `updated` + URL aplikasi, supaya HP menampilkan ajakan muat ulang.
+ */
+function apiRefresh(filter, clientVersion) {
   var user = requireUser_();
   var rows = readTable_(APP.SHEETS.MAINT);
   var c = ctx_();
   var mine = openForUser_(rows, user.email);
-  return {
+  var out = {
     serverNowIso: c.now.toISOString(),
     myOpen: mine ? serialize_(mine, c) : null,
     counts: counts_(rows, user),
     stats: stats_(rows, c, filter),
     recent: recent_(rows, c, filter)
   };
+  if (clientVersion && clientVersion !== APP.VERSION) {
+    out.updated = APP.VERSION;
+    try { out.appUrl = ScriptApp.getService().getUrl(); } catch (e) { /* tanpa URL: HP diminta buka ulang manual */ }
+  }
+  return out;
 }
 
 /** QR mesin tanpa ?line=: cari line-nya (hanya jika mesin terdaftar di satu Line ID, bukan Grup). */

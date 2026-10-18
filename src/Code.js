@@ -242,8 +242,8 @@ function setup() {
   ScriptApp.newTrigger('refreshRekap').timeBased().everyDays(1).atHour(APP.REKAP_HOUR).create();
   var hasChange = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'onMasterChange'; });
   if (!hasChange) ScriptApp.newTrigger('onMasterChange').forSpreadsheet(ss).onChange().create(); // hapus/sisip baris → cache dihapus
-  buildRekap_(yearOf_(new Date()));
-  buildLaporan_(yearOf_(new Date()));
+  // Lock: setup boleh dijalankan saat teknisi sedang bekerja tanpa bentrok dengan sinkron laporan per aksi.
+  withLock_(function () { buildRekap_(yearOf_(new Date())); buildLaporan_(yearOf_(new Date())); });
 
   var blank = ss.getSheetByName('Sheet1');
   if (blank && ss.getSheets().length > 1 && blank.getLastRow() === 0) ss.deleteSheet(blank);
