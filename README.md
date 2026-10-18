@@ -182,7 +182,7 @@ BOM dihapus, jadi halaman line tidak lagi membawa daftar BOM.
 ## 9. Test & preview
 
 ```bash
-npm test          # 52 test logika server (mock Sheets + jam palsu)
+npm test          # 53 test logika server (mock Sheets + jam palsu)
 npm run perf      # jumlah panggilan ke Sheets per aksi
 npm run preview   # http://localhost:8787/?as=owner@gmail.com
                   # simulasi QR: &line=L01   QR mesin: &line=L11&mesin=M-E1

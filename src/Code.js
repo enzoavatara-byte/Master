@@ -39,10 +39,19 @@ function include(name) {
 }
 
 function renderMessage_(title, htmlBody) {
-  var t = HtmlService.createTemplateFromFile('Message');
-  t.title = title;
-  t.body = htmlBody;
-  return t.evaluate().setTitle(appName_() + ' - ' + title)
+  var out;
+  try {
+    var t = HtmlService.createTemplateFromFile('Message');
+    t.title = title;
+    t.body = htmlBody;
+    out = t.evaluate();
+  } catch (e) {
+    // File HTML Message/Styles belum dibuat: pesan aslinya tetap tampil, tidak tertutup error "file tidak ditemukan".
+    out = HtmlService.createHtmlOutput('<div style="font-family:sans-serif;max-width:520px;margin:40px auto;padding:0 16px">' +
+      '<h2>' + escapeHtml_(title) + '</h2><p>' + htmlBody + '</p><p style="color:#b7791f">Catatan admin: file HTML <b>Message</b> atau <b>Styles</b> ' +
+      'belum ada di Apps Script (' + escapeHtml_(String(e.message || e)) + '). Buat file HTML dengan nama persis seperti di folder src.</p></div>');
+  }
+  return out.setTitle(appName_() + ' - ' + title)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 

@@ -978,4 +978,27 @@ test('doGet menanam data awal di halaman (aman dari </script>), tanpa panggilan 
   setRow('Lines', (r) => r[0] === 'L02', 'Nama Line', 'Assy 2');
 });
 
+test('file Message belum dibuat / setup belum dijalankan → pesan asli tetap tampil, bukan error file', () => {
+  const H = ctx.HtmlService, orig = H.createTemplateFromFile;
+  H.createTemplateFromFile = (n) => { if (n === 'Message') throw new Error('No HTML file named Message was found.'); return orig.call(H, n); };
+  const Us = ss.getSheetByName('Users');
+  try {
+    as('asing@gmail.com', () => {
+      const out = ctx.doGet({ parameter: {} });
+      assert.match(out.html, /tidak terdaftar/);
+      assert.match(out.html, /file HTML <b>Message<\/b>/);
+    });
+    ss.sheets = ss.sheets.filter(x => x !== Us);         // seperti spreadsheet baru yang belum di-setup
+    as('budi@gmail.com', () => {
+      const out = ctx.doGet({ parameter: {} });
+      assert.match(out.html, /Konfigurasi belum lengkap/);
+      assert.match(out.html, /Sheet &quot;Users&quot; tidak ditemukan\. Admin perlu menjalankan setup\(\)/);
+    });
+  } finally {
+    H.createTemplateFromFile = orig;
+    if (!ss.getSheetByName('Users')) ss.sheets.push(Us);
+  }
+  as('budi@gmail.com', () => assert.strictEqual(ctx.doGet({ parameter: {} }).template, 'Index'));
+});
+
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

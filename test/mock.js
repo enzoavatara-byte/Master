@@ -159,7 +159,12 @@ const ctx = {
       };
       return t;
     },
-    createHtmlOutputFromFile: () => ({ getContent: () => '' })
+    createHtmlOutputFromFile: () => ({ getContent: () => '' }),
+    createHtmlOutput(html) {
+      const out = { template: null, html };
+      out.setTitle = (x) => { out.title = x; return out; }; out.addMetaTag = () => out;
+      return out;
+    }
   }
 };
 vm.createContext(ctx);
