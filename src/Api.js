@@ -129,6 +129,7 @@ function bootstrap_(user, lineId, mesinId, filter) {
     master: clientMaster_(c.md),
     notes: c.md.notes.filter(function (n) { return user.role === APP.ROLES.ADMIN || n.untuk !== APP.ROLES.ADMIN; }),
     stopLineDefault: splitList_(getConfig_('STOP_LINE_DEFAULT')),
+    cekAkun: isYes_(getConfig_('CEK_AKUN')),
     myOpen: mine ? serialize_(mine, c) : null,
     counts: counts_(rows, user),
     stats: stats_(rows, c, filter),

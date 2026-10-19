@@ -39,7 +39,7 @@ test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempot
   assert.ok(!ss.getSheetByName('BOM'), 'BOM tidak dibuat lagi');
   jeq(triggers.map(t => t.getHandlerFunction()).sort(), ['checkTimeouts', 'onMasterChange', 'refreshRekap'], 'trigger tidak dobel');
   assert.strictEqual(triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every, 'hari:1@1', 'bangun ulang penuh tiap malam');
-  assert.strictEqual(ctx.readTable_('Config').length, 9);
+  assert.strictEqual(ctx.readTable_('Config').length, 10);
   assert.strictEqual(ctx.readTable_('Users')[0].Peran, 'Admin');
   jeq(ctx.readTable_('Projects').map(p => p['Factory ID'] + ':' + p.Baterai), ['F1:VF7', 'F1:Limo7', 'F2:E22H', 'F2:E245']);
   assert.strictEqual(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Masalah').length, 5, 'pilihan tidak terduplikasi');
@@ -1110,6 +1110,10 @@ test('deploy versi baru saat HP masih membuka versi lama: refresh memberi tahu (
 test('multi-akun: apiWhoAmI = akun yang benar-benar dipakai Google untuk panggilan (tanpa baca sheet)', () => {
   as('budi@gmail.com', () => assert.strictEqual(ctx.apiWhoAmI(), 'budi@gmail.com'));
   as('Akun.Lain@Gmail.com ', () => assert.strictEqual(ctx.apiWhoAmI(), 'akun.lain@gmail.com', 'belum terdaftar pun tetap dijawab, supaya HP bisa menjelaskan'));
+  as('budi@gmail.com', () => assert.strictEqual(ctx.apiBootstrap('').cekAkun, true, 'default: pemeriksaan aktif'));
+  setRow('Config', (r, h) => r[h.indexOf('Key')] === 'CEK_AKUN', 'Value', 'Tidak');
+  as('budi@gmail.com', () => assert.strictEqual(ctx.apiBootstrap('').cekAkun, false, 'admin bisa mematikan'));
+  setRow('Config', (r, h) => r[h.indexOf('Key')] === 'CEK_AKUN', 'Value', 'Ya');
 });
 
 // ---------- Paling akhir: menghapus data ----------

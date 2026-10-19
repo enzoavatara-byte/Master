@@ -104,7 +104,7 @@ Nama header kolom jangan diganti. Urutan kolom boleh diubah.
 | `Form` | Field form | Form · Field · Label · Tipe · Sumber · Wajib · Lainnya isi sendiri · Urutan · Aktif |
 | `Format Laporan` | Kolom tab Laporan | Kolom (judul bebas) · Sumber (lihat di bawah) · Urutan · Aktif |
 | `Catatan Panduan` | Catatan lokal di halaman Panduan | Untuk (`Teknisi`/`Admin`/`Semua`) · Judul · Isi · Urutan · Aktif |
-| `Config` | Aturan | `WARN_HOURS` 3 · `ABANDON_HOURS` 4 · `EMAIL_PERINGATAN` · `SHIFT_MULAI` · `MTTR_TIPE` · `NAMA_APLIKASI` · `LAPORAN_JUDUL` · `STOP_LINE_DEFAULT` Corrective · `LAPORAN_LANGSUNG` Ya |
+| `Config` | Aturan | `WARN_HOURS` 3 · `ABANDON_HOURS` 4 · `EMAIL_PERINGATAN` · `SHIFT_MULAI` · `MTTR_TIPE` · `NAMA_APLIKASI` · `LAPORAN_JUDUL` · `STOP_LINE_DEFAULT` Corrective · `LAPORAN_LANGSUNG` Ya · `CEK_AKUN` Ya |
 
 **Jenis sparepart = nilai Jenis Kerusakan** (Elektrikal/Mekanikal/Pneumatik/Program). Kalau berbeda, Dashboard memberi peringatan karena filter otomatis tidak akan cocok.
 
@@ -172,7 +172,7 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
 3. **Sparepart hanya catatan pemakaian, bukan stok.** Tidak ada peringatan stok habis.
 4. **Mengubah nama/model di katalog tidak mengubah riwayat** (data lama tetap seperti saat dicatat). Itu disengaja; konsekuensinya rekap bisa terpecah jika nama sering diganti.
 5. **Bug Google multi-akun.** Browser/HP yang login beberapa akun Google mengirim panggilan aplikasi atas nama *akun utama* browser, bukan akun yang membuka halaman. Akibatnya: ditolak, atau (kalau kedua akun terdaftar) tercatat atas nama yang salah.
-   Tidak bisa diperbaiki dari kode (selama aplikasi memakai *Execute as: User accessing* untuk mengenali teknisi). Aplikasi **mendeteksi** dan berhenti dengan petunjuk "Akun Google tidak cocok".
+   Tidak bisa diperbaiki dari kode (selama aplikasi memakai *Execute as: User accessing* untuk mengenali teknisi). Aplikasi **mendeteksi** dan berhenti dengan petunjuk "Akun Google tidak cocok". Bisa dimatikan: `Config` → `CEK_AKUN` = `Tidak`.
    Solusi di sisi pengguna: Incognito (cepat), browser khusus kerja di HP + "Tambahkan ke layar utama", atau profil Chrome khusus kerja di PC. Jika Google sendiri menampilkan "Sorry, unable to open the file at this time", kode aplikasi belum sempat jalan; pakai solusi yang sama.
 6. **Kamera di dalam app tidak dijamin** di semua HP. Ada cadangan (kamera HP / cari line).
 7. **Performa**: jeda tetap ±1–2 detik per perjalanan ke server Apps Script tidak bisa dihilangkan. Tab `Maintenance` dibaca penuh per request → **arsipkan per tahun**.

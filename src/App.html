@@ -50,7 +50,7 @@
         var msg = (e && e.message) || String(e);
         // Halaman sudah lolos cek akses (doGet), jadi ditolak sekarang = Google memakai akun lain (multi-akun).
         var denied = /ACCESS_DENIED: email (\S+)/.exec(msg);
-        if (AUTH_ERR.test(msg) || (denied && (!state.boot || denied[1] !== state.boot.user.email))) accountProblem(denied ? denied[1] : '');
+        if (cekAkunOn() && (AUTH_ERR.test(msg) || (denied && (!state.boot || denied[1] !== state.boot.user.email)))) accountProblem(denied ? denied[1] : '');
         reject(new Error(msg));
       });
       r[fn].apply(r, args);
@@ -59,16 +59,20 @@
 
   // ---------- Bug Google: browser login beberapa akun → google.script.run memakai akun utama browser ----------
   var AUTH_ERR = /PERMISSION_DENIED|authoriz|HTTP 40[13]/i;
+  /** Admin bisa mematikan pemeriksaan lewat Config → CEK_AKUN = Tidak. */
+  function cekAkunOn() { return !state.boot || state.boot.cekAkun !== false; }
   function accountProblem(other) {
     if ($('acct')) return;
     var mine = state.boot && state.boot.user ? state.boot.user.email : '';
     var d = document.createElement('div');
     d.id = 'acct';
     d.className = 'acct-bg';
-    d.innerHTML = '<div class="card acct"><h2>Akun Google tidak cocok</h2><p class="small">' +
-      (other && mine ? 'Aplikasi dibuka sebagai <b>' + esc(mine) + '</b>, tetapi Google mengirim tombol sebagai <b>' + esc(other) + '</b> (akun utama di browser ini).'
-        : 'Google menolak permintaan dari browser ini' + (mine ? ' untuk <b>' + esc(mine) + '</b>' : '') + '.') +
-      ' Ini bug Google saat satu browser login dengan beberapa akun. Aplikasi dihentikan supaya data tidak tercatat atas nama yang salah.</p>' +
+    d.innerHTML = '<div class="card acct">' + (other && mine
+      ? '<h2>Akun Google tidak cocok</h2><p class="small">Aplikasi dibuka sebagai <b>' + esc(mine) + '</b>, tetapi Google mengirim tombol sebagai <b>' + esc(other) +
+        '</b> (akun utama di browser ini). Ini bug Google saat satu browser login dengan beberapa akun. Aplikasi dihentikan supaya data tidak tercatat atas nama yang salah.</p>'
+      // Tanpa info akun: bisa juga sesi login habis / sinyal → muat ulang dulu.
+      : '<h2>Tidak terhubung ke akun Google</h2><p class="small">Google menolak permintaan dari browser ini' + (mine ? ' untuk <b>' + esc(mine) + '</b>' : '') +
+        '. Tekan <b>Muat ulang</b> dulu (mungkin sesi login habis). Kalau masih muncul, biasanya karena browser login dengan beberapa akun Google:</p>') +
       '<ol class="small"><li><b>Cepat:</b> buka link aplikasi di tab <b>Incognito / Private</b>, login hanya dengan akun kerja.</li>' +
       '<li><b>Permanen di HP:</b> pakai satu browser khusus kerja (mis. Firefox, Edge, Samsung Internet) yang hanya login akun kerja, lalu ⋮ → <b>Tambahkan ke layar utama</b>.</li>' +
       '<li><b>Permanen di PC:</b> buat <b>profil Chrome</b> khusus akun kerja, atau keluar dari semua akun lalu login akun kerja <b>paling dulu</b> (akun pertama = akun utama).</li></ol>' +
@@ -78,6 +82,7 @@
   }
   /** Bandingkan akun halaman (dari doGet) dengan akun yang dipakai Google untuk tombol. */
   function checkAccount() {
+    if (!cekAkunOn()) return;
     call('apiWhoAmI').then(function (email) {
       if (email && state.boot && email !== state.boot.user.email) accountProblem(email);
     }).catch(function () { /* penolakan sudah ditangani di call() */ });
