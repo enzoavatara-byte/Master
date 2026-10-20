@@ -27,6 +27,54 @@ var KONDISI_WARNA_ = { 'Dikerjakan': 'Aktif', 'Pause': 'Pause', 'Pending': 'Pend
 var SARAN_WARNA_ = { 'Baru': 'Aktif', 'Dibaca': 'Pause', 'Direncanakan': 'Pending', 'Selesai': 'Completed', 'Ditolak': 'Cancelled' };
 var DATE_FMT_ = 'dd/mm/yyyy hh:mm';
 
+// ---------- rumus & locale ----------
+/*
+ * Semua rumus di kode ditulis dengan sintaks en_US: argumen "," · array kolom "," baris ";" · desimal ".".
+ * Spreadsheet ber-locale desimal koma (mis. Indonesia in_ID) membaca rumus dengan argumen ";", array kolom "\",
+ * desimal "," — di sana "{1,2}" diam-diam berarti angka 1,2 dan "IF(A,B,C)" error. Diuji di Google Sheets asli.
+ * fxMode_ menguji sekali per eksekusi apakah spreadsheet ini menerima sintaks en_US; jika tidak, fx_ mengonversi.
+ */
+var FX_MODE_ = null;
+function fxMode_() {
+  if (FX_MODE_) return FX_MODE_;
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(RINGKASAN_) || ss.insertSheet(RINGKASAN_, 0);
+  var cell = sh.getRange(5, 11);   // K5: kolom bantu Ringkasan (disembunyikan)
+  var hasil12 = function (f) {     // 12 hanya jika array 2 kolom DAN IF 3 argumen terbaca benar
+    try { cell.setFormula(f); SpreadsheetApp.flush(); return cell.getValue() === 12; } catch (e) { return false; }
+  };
+  try {
+    if (hasil12('=COLUMNS({1,2})+IF(TRUE,10,0)')) FX_MODE_ = 'en';
+    else if (hasil12('=COLUMNS({1\\2})+IF(TRUE;10;0)')) FX_MODE_ = 'koma';
+    else FX_MODE_ = 'en';
+  } finally {
+    cell.clearContent();
+  }
+  return FX_MODE_;
+}
+
+/** Rumus sintaks en_US → sintaks spreadsheet ini. Teks "…" dan nama sheet '…' tidak diubah. */
+function fx_(f) {
+  if (fxMode_() === 'en') return f;
+  return fxKoma_(f);
+}
+function fxKoma_(f) {
+  var out = '', stack = [], q = false, sq = false;   // q = teks "…", sq = nama sheet '…'
+  for (var i = 0; i < f.length; i++) {
+    var ch = f.charAt(i);
+    if (ch === '"' && !sq) q = !q;
+    else if (ch === "'" && !q) sq = !sq;
+    else if (!q && !sq) {
+      if (ch === '(' || ch === '{') stack.push(ch);
+      else if (ch === ')' || ch === '}') stack.pop();
+      else if (ch === ',') { out += stack[stack.length - 1] === '{' ? '\\' : ';'; continue; }
+      else if (ch === '.' && /\d/.test(f.charAt(i - 1)) && /\d/.test(f.charAt(i + 1)) && !/[A-Za-z!]/.test(f.charAt(i - 2))) { out += ','; continue; }
+    }
+    out += ch;
+  }
+  return out;
+}
+
 // ---------- pintu masuk ----------
 
 /**
@@ -196,13 +244,13 @@ function tableRules_(sh, h, o, max) {
     var dc = h.indexOf(o.late[0]) + 1, stc = h.indexOf(o.late[1]) + 1;
     if (dc && stc) {
       var d = '$' + colLetter_(dc) + '2', s = '$' + colLetter_(stc) + '2';
-      rules.push(rule().whenFormulaSatisfied('=AND(' + s + '="' + APP.STATUS.PENDING + '",ISNUMBER(' + d + '),' + d + '<NOW())')
+      rules.push(rule().whenFormulaSatisfied(fx_('=AND(' + s + '="' + APP.STATUS.PENDING + '",ISNUMBER(' + d + '),' + d + '<NOW())'))
         .setFontColor(TEMA_.late).setBold(true).setRanges([rng(dc)]).build());
     }
   }
   var oc = h.indexOf(o.off) + 1;
   if (o.off && oc) {
-    rules.push(rule().whenFormulaSatisfied('=$' + colLetter_(oc) + '2="' + APP.NO + '"').setFontColor(TEMA_.off)
+    rules.push(rule().whenFormulaSatisfied(fx_('=$' + colLetter_(oc) + '2="' + APP.NO + '"')).setFontColor(TEMA_.off)
       .setRanges([sh.getRange(2, 1, max - 1, h.length)]).build());
   }
   return rules;
@@ -232,7 +280,7 @@ function stylePendingWork_(ss, full) {
   sh.getRange(1, 1, max, w).applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, true, false)
     .setHeaderRowColor(TEMA_.head).setFirstRowColor('#FFFFFF').setSecondRowColor(TEMA_.band);
   sh.setConditionalFormatRules(foreignRules_(sh).concat([SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND(ISNUMBER($E2),$E2<NOW())').setFontColor(TEMA_.late).setBold(true).setRanges([sh.getRange(2, 5, max - 1, 1)]).build()]));
+    .whenFormulaSatisfied(fx_('=AND(ISNUMBER($E2),$E2<NOW())')).setFontColor(TEMA_.late).setBold(true).setRanges([sh.getRange(2, 5, max - 1, 1)]).build()]));
   if (!full) return;
   sh.getRange(1, 1, 1, w).setFontColor(TEMA_.headText).setFontWeight('bold').setWrap(true).setVerticalAlignment('middle');
   sh.setRowHeight(1, 36);
@@ -449,8 +497,9 @@ function buildRingkasan_(ss) {
     days.push(['=IF(MONTH(' + day + ')=MONTH(' + B0 + '),"' + dd + '","")', '=IF(MONTH(' + day + ')=MONTH(' + B0 + '),' + done(day, '(' + day + '+1)') + ',"")']);
   }
 
-  sh.getRange(1, 1, g.length, W).setValues(g);
-  sh.getRange(1, 13, days.length, 2).setValues(days);
+  writeGrid_(sh, g, 1, 1);
+  sh.getRange(1, 13, 1, 2).setValues([days[0]]);
+  sh.getRange(2, 13, days.length - 1, 2).setFormulas(days.slice(1).map(function (r) { return r.map(fx_); }));   // blok rumus utuh: satu panggilan
 
   // ---- format ----
   sh.setColumnWidth(1, 18);
@@ -509,7 +558,7 @@ function buildRingkasan_(ss) {
   Object.keys(TEMA_.status).forEach(function (s) {
     rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(s).setBackground(TEMA_.status[s][0]).setFontColor(TEMA_.status[s][1]).setRanges([open(4)]).build());
   });
-  rules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=AND(ISNUMBER($G' + (oHead + 1) + '),$G' + (oHead + 1) + '<NOW())')
+  rules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(fx_('=AND(ISNUMBER($G' + (oHead + 1) + '),$G' + (oHead + 1) + '<NOW())'))
     .setFontColor(TEMA_.late).setBold(true).setRanges([open(7)]).build());
   // kotak "Lewat tenggat" & "Perlu review" berwarna jika > 0; hasil project hijau / merah
   rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0).setBackground(TEMA_.status.Abandoned[0]).setFontColor(TEMA_.late)
@@ -536,6 +585,25 @@ function buildRingkasan_(ss) {
   var prot = sh.protect().setDescription('Ringkasan dibuat otomatis. Yang boleh diubah: sel tanggal (C4).').setWarningOnly(true);
   prot.setUnprotectedRanges([sh.getRange('C4')]);
   sh.setTabColor(TEMA_.tab.baca);
+}
+
+/**
+ * Tulis grid campuran: nilai biasa lewat setValues, rumus lewat setFormulas (per deret rumus yang bersebelahan),
+ * dikonversi ke sintaks locale spreadsheet (fx_).
+ */
+function writeGrid_(sh, grid, r0, c0) {
+  var isF = function (v) { return typeof v === 'string' && v.charAt(0) === '='; };
+  var w = grid[0].length;
+  sh.getRange(r0, c0, grid.length, w).setValues(grid.map(function (row) { return row.map(function (v) { return isF(v) ? '' : v; }); }));
+  grid.forEach(function (row, i) {
+    for (var j = 0; j < w; j++) {
+      if (!isF(row[j])) continue;
+      var k = j;
+      while (k + 1 < w && isF(row[k + 1])) k++;
+      sh.getRange(r0 + i, c0 + j, 1, k - j + 1).setFormulas([row.slice(j, k + 1).map(fx_)]);
+      j = k;
+    }
+  });
 }
 
 // ---------- Baca Saya ----------

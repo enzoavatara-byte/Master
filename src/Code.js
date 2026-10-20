@@ -297,7 +297,7 @@ function buildDerivedSheets_(ss) {
   batteries.forEach(function (bat) {
     var sh = prepDerived_(ss, APP.SHEETS.MAINT + ' ' + bat);
     var c = col('Baterai');
-    sh.getRange('A1').setFormula('=FILTER(' + src + 'A:' + lastCol + ', (ROW(' + src + 'A:A)=1)+(' + src + c + ':' + c + '="' + bat.replace(/"/g, '') + '"))');
+    sh.getRange('A1').setFormula(fx_('=FILTER(' + src + 'A:' + lastCol + ', (ROW(' + src + 'A:A)=1)+(' + src + c + ':' + c + '="' + bat.replace(/"/g, '') + '"))'));
     APP.DATE_COLUMNS.Maintenance.forEach(function (h) {
       var i = mh.indexOf(h) + 1;
       if (i > 0) sh.getRange(2, i, sh.getMaxRows() - 1, 1).setNumberFormat(DATE_FMT_);
@@ -311,8 +311,8 @@ function buildDerivedSheets_(ss) {
     return src + col(h) + '2:' + col(h);
   });
   parts.push('ROUND((NOW()-' + src + col('Status sejak') + '2:' + col('Status sejak') + ')*24,1)');
-  pw.getRange('A2').setFormula('=IFERROR(SORT(FILTER({' + parts.join(', ') + '}, ' + src + col('Status') + '2:' + col('Status') + '="' +
-    APP.STATUS.PENDING + '"), 7, FALSE), "")');
+  pw.getRange('A2').setFormula(fx_('=IFERROR(SORT(FILTER({' + parts.join(', ') + '}, ' + src + col('Status') + '2:' + col('Status') + '="' +
+    APP.STATUS.PENDING + '"), 7, FALSE), "")'));
   pw.getRange(2, 5, pw.getMaxRows() - 1, 1).setNumberFormat(DATE_FMT_);
 }
 

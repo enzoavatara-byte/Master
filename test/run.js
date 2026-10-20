@@ -1421,4 +1421,34 @@ test('2.5.1 tampilan gagal tidak menggagalkan setup (pesan menyebut bagian yang 
   finally { ctx.buildBacaSaya_ = orig; }
 });
 
+/** Koma di luar teks "…" dan nama sheet '…' (harus 0 di locale desimal koma). */
+const bareCommas = (f) => { let q = false, sq = false, n = 0; for (const ch of f) { if (ch === '"' && !sq) q = !q; else if (ch === "'" && !q) sq = !sq; else if (!q && !sq && ch === ',') n++; } return n; };
+test('2.5.1 locale: en_US → rumus koma; Indonesia (desimal koma) → ; dan \\ di Ringkasan, Pending Work, tab baterai & aturan warna (diuji di Google Sheets asli)', () => {
+  ctx.FX_MODE_ = null;
+  ctx.rapikanTampilan_({ full: true });
+  assert.strictEqual(ctx.FX_MODE_, 'en');
+  assert.strictEqual(cellOf(ring(), 'K1'), '=IF(ISNUMBER($C$4),INT($C$4),TODAY())');
+  ss.locale = 'in_ID'; ctx.FX_MODE_ = null;
+  try {
+    ctx.buildDerivedSheets_(ss);
+    ctx.rapikanTampilan_({ full: true });
+    assert.strictEqual(ctx.FX_MODE_, 'koma', 'uji rumus: koma ditolak, titik koma diterima');
+    const R = ring(), fs_ = [];
+    R.data.forEach(row => row.forEach(v => { if (typeof v === 'string' && v[0] === '=') fs_.push(v); }));
+    assert.ok(fs_.length > 60);
+    assert.strictEqual(cellOf(R, 'K1'), '=IF(ISNUMBER($C$4);INT($C$4);TODAY())');
+    jeq(fs_.filter(f => bareCommas(f)), [], 'tidak ada koma pemisah tersisa');
+    assert.ok(fs_.some(f => /^=SORT\(\{"Elektrikal 电气"\\COUNTIFS\(/.test(f)), 'array: kolom dipisah \\');
+    assert.ok(fs_.some(f => f.includes('"select Col1, Col2, count(Col3) where')), 'teks QUERY tidak diubah');
+    const pw = ss.getSheetByName('Pending Work').formulas.A2;
+    assert.ok(pw.includes("{'Maintenance'!A2:A\\ ") && !bareCommas(pw), 'Pending Work: ' + pw.slice(0, 60));
+    assert.ok(!bareCommas(ss.getSheetByName('Maintenance VF7').formulas.A1));
+    const late = ss.getSheetByName('Maintenance').cfRules.map(r => r.calls.whenFormulaSatisfied).filter(Boolean);
+    assert.ok(late.length && late.every(f => !bareCommas(f)), 'aturan warna: ' + late.join(' | '));
+  } finally {
+    ss.locale = 'en_US'; ctx.FX_MODE_ = null;
+    ctx.buildDerivedSheets_(ss); ctx.rapikanTampilan_({ full: true });
+  }
+});
+
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

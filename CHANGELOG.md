@@ -18,6 +18,9 @@ Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spr
 - Edit di sheet yang bukan pengaturan (Ringkasan, Laporan, Rekap, …) tidak lagi menghapus cache master → buka app berikutnya tetap cepat. Edit di Users/Lines/Mesin/… tetap langsung terlihat.
 - Aksi teknisi tidak bertambah panggilan Sheets. Format dirapikan saat setup, menu, dan tiap malam (hanya jika baris sheet bertambah).
 
+**Diuji di Google Sheets asli** (spreadsheet uji, locale Indonesia & en_US): semua rumus Ringkasan, Pending Work dan tab per baterai tanpa error, angka cocok dengan hitungan terpisah (hari ini, bulan lain, per project, jenis, per hari, pekerjaan terbuka), aturan warna & grafik tampil.
+- Temuan: spreadsheet ber-locale **Indonesia** membaca rumus dengan pemisah `;` (array `\`, desimal `,`); rumus berkoma error dan `{1,2}` diam-diam jadi angka 1,2. Sekarang `setup` menguji sekali lalu menulis semua rumus (Ringkasan, Pending Work, Maintenance per baterai, aturan warna) dengan sintaks locale spreadsheet. Rumus ditulis lewat `setFormulas`.
+
 **Catatan**
 - Aturan warna (conditional formatting) yang dibuat admin sendiri dipertahankan; filter di tabel dibuat ulang saat setup (kriteria filter yang sedang aktif hilang).
 - `setup` sedikit lebih lama (merapikan ±25 tab).

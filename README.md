@@ -133,7 +133,7 @@ Rekap gabungan dua factory (opsional): file ketiga dengan `IMPORTRANGE` ke tab `
 **Membaca spreadsheet (2.5.1).** Mulai dari tab **Ringkasan**; arti tab & warna ada di tab **Baca Saya**.
 Warna tab: hijau = mulai di sini · kuning = laporan · biru = pengaturan (boleh diedit admin) · abu-abu = ditulis aplikasi (jangan diedit).
 Tab yang jarang dipakai disembunyikan → menu → **Tampilkan semua tab**; menu → **Rapikan tampilan spreadsheet** menyembunyikannya lagi dan memperbaiki format.
-Ringkasan hanya berisi rumus ke `Maintenance` (dihitung Google Sheets, bukan aplikasi). Yang boleh diubah hanya sel tanggal kuning. Data tahun yang sudah diarsipkan tidak ikut dihitung.
+Ringkasan hanya berisi rumus ke `Maintenance` (dihitung Google Sheets, bukan aplikasi). Rumus mengikuti locale spreadsheet (Indonesia: pemisah `;`, en_US: `,`) — `setup` menguji sendiri; ganti locale (File → Settings) tidak merusak rumus yang sudah ada. Yang boleh diubah hanya sel tanggal kuning. Data tahun yang sudah diarsipkan tidak ikut dihitung.
 
 Aturan umum: **kolom `Aktif` boleh kosong = aktif** (kecuali di `Users`, wajib `Ya`). Matikan dengan `Tidak`; **jangan hapus baris**, karena riwayat masih merujuk ke baris itu.
 Nama header kolom jangan diganti. Urutan kolom boleh diubah.

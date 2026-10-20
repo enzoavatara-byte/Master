@@ -39,6 +39,7 @@ class Range {
   }
   getSheet() { return this.sh; }
   clearContent() {
+    for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) delete this.sh.formulas[(this.r + i) + ',' + (this.c + j)];
     for (let i = 0; i < this.nr; i++) {
       const row = this.sh.data[this.r - 1 + i];
       if (row) for (let j = 0; j < this.nc; j++) row[this.c - 1 + j] = '';
@@ -47,7 +48,14 @@ class Range {
   }
   setFormula(f) { this.sh.formulas[this.a1 || (this.r + ',' + this.c)] = f; return this; }
   setValue(v) { return this.setValues([[v]]); }
-  getValue() { return this.getValues()[0][0]; }
+  setFormulas(f) { this.sh.formulaWrites = (this.sh.formulaWrites || 0) + 1; return this.setValues(f); }
+  getValue() {
+    // Rumus uji locale (fxMode_): seperti Google Sheets asli — en_US menerima koma, in_ID (desimal koma) menerima ; dan \
+    const f = this.sh.formulas[this.r + ',' + this.c];
+    if (f === '=COLUMNS({1,2})+IF(TRUE,10,0)') return ss.locale === 'in_ID' ? '#ERROR!' : 12;
+    if (f === '=COLUMNS({1\\2})+IF(TRUE;10;0)') return ss.locale === 'in_ID' ? 12 : '#ERROR!';
+    return this.getValues()[0][0];
+  }
   getRow() { return this.r; }
   getColumn() { return this.c; }
   getNumRows() { return this.nr; }
@@ -134,7 +142,7 @@ class Sheet {
   removeChart(c) { this.charts = this.charts.filter(x => x !== c); }
 }
 class Spreadsheet {
-  constructor() { this.sheets = [new Sheet('Sheet1')]; this.sheets[0].ss = this; this.tz = 'UTC'; }
+  constructor() { this.sheets = [new Sheet('Sheet1')]; this.sheets[0].ss = this; this.tz = 'UTC'; this.locale = 'en_US'; }
   getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
   insertSheet(n, i) { const s = new Sheet(n); s.ss = this; if (i == null) this.sheets.push(s); else this.sheets.splice(i, 0, s); return s; }
   setActiveSheet(s) { this.active = s; return s; }
