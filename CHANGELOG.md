@@ -14,8 +14,17 @@ Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spr
 - Menu spreadsheet → **Isi terjemahan otomatis (中文 / English)…** untuk sel yang masih kosong.
 - Kartu QR yang dicetak: teks dua bahasa (Indonesia + 中文).
 
+**Kecepatan**
+- Tombol 🌐: banyak teks digabung jadi satu panggilan Google, hasil ditulis ke sheet sekaligus (15 teks: 15× Google + 37 panggilan Sheets → 1× Google + 9). Satu klik menerjemahkan sampai 50 teks.
+- Google menolak (mis. kuota harian habis) → langsung berhenti mencoba; teks asli tetap tampil tanpa error.
+- Menu **Isi terjemahan otomatis** memakai cara gabungan yang sama (tidak lagi satu panggilan per sel).
+- Tampilan 中文 menyebut font Han bawaan HP (PingFang / Noto / YaHei) → layout huruf Mandarin lebih cepat.
+- Aksi teknisi (Mulai, Pause, Selesai, …) tidak bertambah panggilan Sheets; teknisi Indonesia tidak lebih lambat dari 2.2.6.
+
 **Perbaikan**
 - Tombol 🌐 di kartu pending halaman line muncul juga saat teknisi belum punya pekerjaan terbuka.
+- Koreksi `Nilai (中文)` di sheet untuk nilai yang juga ada di kamus bawaan (mis. Corrective) sekarang dipakai.
+- Isi kolom isian (textarea) tidak ikut diterjemahkan otomatis (sebelumnya bisa tersimpan dalam 中文).
 
 **File**: baru `Translate` (Script), `I18n` (HTML). Berubah: `Config`, `Master`, `Api`, `Auth`, `Code`, `Index`, `App`, `Styles`, `Panduan`.
 **Wajib Run `setup`** (kolom & sheet baru), lalu New version. Tidak ada izin baru.

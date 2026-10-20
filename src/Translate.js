@@ -5,7 +5,8 @@
  */
 
 var TR_CODE_ = { id: 'id', zh: 'zh-CN', en: 'en' };
-var TR_MAX_ = 30;          // teks baru per panggilan; sisanya tetap teks asli dan diterjemahkan di panggilan berikutnya
+var TR_MAX_ = 50;          // teks baru per permintaan (= batas apiTranslate); sisanya tetap teks asli, diterjemahkan di permintaan berikutnya
+var TR_BATCH_CHARS_ = 4000; // teks satu baris digabung (dipisah baris baru) → satu panggilan Google untuk banyak teks
 var TR_TTL_ = 21600;       // 6 jam (maksimum CacheService)
 var TR_MEMO_ = null;       // isi sheet Terjemahan per request
 
@@ -64,45 +65,81 @@ function translate_(texts, lang, opts) {
   uniq.forEach(function (s, i) { if (hit[keys[i]] != null) got[s] = hit[keys[i]]; else miss.push(s); });
 
   if (miss.length) {
-    var table = trTable_(), put = {}, budget = opts.max == null ? TR_MAX_ : opts.max, fresh = [];
+    var table = trTable_(), put = {}, budget = opts.max == null ? TR_MAX_ : opts.max, ask = [];
     miss.forEach(function (s) {
       var row = table[s];
       if (row && row[lang]) { got[s] = row[lang]; put[trCacheKey_(lang, s)] = row[lang]; return; }
-      if (budget <= 0) return;
-      budget--;
-      var t;
-      try { t = String(LanguageApp.translate(s, '', TR_CODE_[lang]) || '').trim(); } catch (e) { console.warn('Terjemahan gagal: ' + e); return; }
-      if (!t) return;
-      got[s] = t;
-      put[trCacheKey_(lang, s)] = t;
-      fresh.push(s);
+      if (budget-- > 0) ask.push(s);
     });
+    var res = googleMany_(ask, lang), fresh = Object.keys(res);
+    fresh.forEach(function (s) { got[s] = res[s]; put[trCacheKey_(lang, s)] = res[s]; });
     if (Object.keys(put).length) cache.putAll(put, TR_TTL_);
     if (fresh.length) saveTranslations_(fresh, lang, got);
   }
   return src.map(function (s) { return got.hasOwnProperty(s) ? got[s] : s; });
 }
 
-/** Simpan hasil baru ke sheet Terjemahan. Sel per sel (bukan satu baris penuh) supaya dua user tidak saling menimpa. */
-function saveTranslations_(texts, lang, got) {
-  var ss = SpreadsheetApp.getActive();
-  var sh = ss.getSheetByName(APP.SHEETS.TERJEMAHAN);
-  if (!sh) return;
-  var h = headers_(sh), col = h.indexOf(lang) + 1, tcol = h.indexOf('Diperbarui') + 1;
-  var table = trTable_(), now = new Date();
+/**
+ * Google Translate untuk banyak teks dengan sesedikit mungkin panggilan: teks satu baris digabung per ±4000 karakter
+ * (dipisah baris baru). Jumlah baris hasil tidak cocok → teks itu diterjemahkan satu per satu.
+ * Google menolak (mis. kuota harian habis) → berhenti, sisa teks tetap teks asli.
+ * @return {Object<string,string>} teks → terjemahan (hanya yang berhasil)
+ */
+function googleMany_(texts, lang) {
+  var out = {}, code = TR_CODE_[lang], single = [], chunks = [], cur = [], len = 0, dead = false;
+  var call = function (s) {
+    if (dead) return null;
+    try { return String(LanguageApp.translate(s, '', code) || ''); } catch (e) { console.warn('Terjemahan gagal: ' + e); dead = true; return null; }
+  };
   texts.forEach(function (s) {
-    var row = table[s];
-    if (row && row._row && col > 0) {
-      sh.getRange(row._row, col).setValue(got[s]);
-      if (tcol > 0) sh.getRange(row._row, tcol).setValue(now);
-    } else {
+    if (s.indexOf('\n') !== -1) { single.push(s); return; }
+    if (cur.length && len + s.length > TR_BATCH_CHARS_) { chunks.push(cur); cur = []; len = 0; }
+    cur.push(s); len += s.length + 1;
+  });
+  if (cur.length) chunks.push(cur);
+  chunks.forEach(function (c) {
+    if (c.length === 1) { single.push(c[0]); return; }
+    var r = call(c.join('\n'));
+    if (r == null) return;
+    var lines = r.split('\n');
+    if (lines.length !== c.length) { single = single.concat(c); return; }
+    c.forEach(function (s, i) { var v = lines[i].trim(); if (v) out[s] = v; });
+  });
+  single.forEach(function (s) { var r = call(s); if (r != null && r.trim()) out[s] = r.trim(); });
+  return out;
+}
+
+/**
+ * Simpan hasil baru ke sheet Terjemahan: teks baru = satu tulisan untuk semua baris (di bawah lock singkat);
+ * teks yang sudah punya baris = isi sel bahasanya saja, supaya dua user tidak saling menimpa.
+ * Lock sedang dipakai → tidak disimpan (hasil tetap ada di cache 6 jam; sheet ini hanya cadangan & tempat koreksi).
+ * Jangan dipanggil dari dalam withLock_.
+ */
+function saveTranslations_(texts, lang, got) {
+  var sh = SpreadsheetApp.getActive().getSheetByName(APP.SHEETS.TERJEMAHAN);
+  if (!sh) return;
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return;
+  try {
+    var h = headers_(sh), col = h.indexOf(lang) + 1, tcol = h.indexOf('Diperbarui') + 1;
+    var table = trTable_(), now = new Date(), rows = [];
+    texts.forEach(function (s) {
+      var row = table[s];
+      if (row && row._row && col > 0) {
+        sh.getRange(row._row, col).setValue(got[s]);
+        if (tcol > 0) sh.getRange(row._row, tcol).setValue(now);
+        return;
+      }
       var o = { 'Teks': s, 'Bahasa asal': textLang_(s), 'Sumber': 'Google', 'Diperbarui': now };
       o[lang] = got[s];
-      appendObj_(APP.SHEETS.TERJEMAHAN, o);
+      rows.push(objToRow_(h, o));
       table[s] = row || {};
       table[s][lang] = got[s];
-    }
-  });
+    });
+    if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, h.length).setValues(rows);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /** Admin mengoreksi sheet Terjemahan → cache teks itu dibuang (dipanggil dari onEdit). */
@@ -135,10 +172,7 @@ function isiTerjemahanMaster_(useGoogle) {
   var ss = SpreadsheetApp.getActive(), n = 0;
   var forms = {};
   APP.FORM_DEFAULTS.forEach(function (d) { forms[d[0] + '.' + d[1]] = d; });
-  var google = function (s, lang) {
-    if (!useGoogle || !s) return '';
-    try { return String(LanguageApp.translate(s, '', TR_CODE_[lang]) || '').trim(); } catch (e) { console.warn('Terjemahan gagal: ' + e); return ''; }
-  };
+
   /** [sheet, kolom sumber, [[kolom tujuan, bahasa, bawaan(row)]]] */
   var jobs = [
     [APP.SHEETS.OPTIONS, 'Nilai', [['Nilai (中文)', 'zh', function (r) { return (APP.OPTION_I18N[String(r['Nilai']).trim()] || [])[0]; }],
@@ -159,14 +193,21 @@ function isiTerjemahanMaster_(useGoogle) {
     job[2].forEach(function (t) {
       var c = h.indexOf(t[0]);
       if (c < 0) return;
-      var changed = false;
-      var column = vals.slice(1).map(function (row) {
+      // 1) label bawaan; 2) sisanya sekaligus ke Google (googleMany_: sedikit panggilan, berhenti jika kuota habis)
+      var plan = vals.slice(1).map(function (row) {
         var cur = row[c];
-        if (String(cur == null ? '' : cur).trim() || !String(row[srcCol] || '').trim() || String(row[0] || '').trim() === '') return [cur];
+        if (String(cur == null ? '' : cur).trim() || !String(row[srcCol] || '').trim() || String(row[0] || '').trim() === '') return null;
         var o = {};
         h.forEach(function (k, i) { o[k] = row[i]; });
-        var v = (t[2] && t[2](o)) || google(String(row[srcCol]).trim(), t[1]);
-        if (!v) return [cur];
+        return { src: String(row[srcCol]).trim(), v: (t[2] && t[2](o)) || '' };
+      });
+      var ask = {};
+      plan.forEach(function (p) { if (p && !p.v) ask[p.src] = true; });
+      var res = useGoogle && Object.keys(ask).length ? googleMany_(Object.keys(ask), t[1]) : {};
+      var changed = false;
+      var column = plan.map(function (p, i) {
+        var v = p && (p.v || res[p.src]);
+        if (!v) return [vals[i + 1][c]];
         changed = true; n++;
         return [v];
       });

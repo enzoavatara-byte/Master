@@ -1189,11 +1189,31 @@ test('2.5 terjemahan: Google Translate sekali lalu dari sheet Terjemahan; koreks
   as('budi@gmail.com', () => assert.strictEqual(ctx.apiTranslate(['Sudah dalam bahasa Indonesia'], 'id')[0], 'Sudah dalam bahasa Indonesia'));
   as('budi@gmail.com', () => throwsMsg(() => ctx.apiTranslate(new Array(51).fill('x'), 'zh'), /Maksimal 50/));
   as('asing@gmail.com', () => throwsMsg(() => ctx.apiTranslate(['x'], 'zh'), /ACCESS_DENIED/));
-  const many = Array.from({ length: 40 }, (_, i) => 'teks unik nomor ' + i);
+  const many = Array.from({ length: 60 }, (_, i) => 'teks unik nomor ' + i);
   LA.calls = 0;
-  const part = as('budi@gmail.com', () => ctx.apiTranslate(many, 'zh'));
-  assert.strictEqual(LA.calls, 30, 'maks 30 teks baru per panggilan');
-  assert.strictEqual(part[35], 'teks unik nomor 35', 'sisanya tetap teks asli (diterjemahkan di panggilan berikutnya)');
+  const rowsBefore = ss.getSheetByName('Terjemahan').getLastRow();
+  const part = ctx.translate_(many, 'zh');
+  assert.strictEqual(LA.calls, 1, 'teks satu baris digabung: satu panggilan Google');
+  assert.strictEqual(part[49], '[zh-CN] teks unik nomor 49', 'baris hasil dipasangkan kembali dengan benar');
+  assert.strictEqual(part[55], 'teks unik nomor 55', 'lebih dari 50 teks baru: sisanya tetap teks asli (permintaan berikutnya)');
+  assert.strictEqual(ss.getSheetByName('Terjemahan').getLastRow(), rowsBefore + 50, '50 baris baru ditulis sekaligus');
+});
+
+test('2.5 terjemahan Google: jumlah baris tidak cocok → satu per satu; kuota habis → berhenti, teks asli', () => {
+  ctx.resetMaster_();
+  LA.calls = 0; LA.joinLines = true;
+  let out = ctx.translate_(['pompa vakum lemah', 'oli rembes di gearbox', 'Catatan:\nbaut kendor\nsudah dikencangkan'], 'zh');
+  LA.joinLines = false;
+  assert.strictEqual(LA.calls, 1 + 3, 'gabungan gagal dipasangkan → diulang per teks');
+  assert.strictEqual(out[1], '[zh-CN] oli rembes di gearbox');
+  ctx.resetMaster_();
+  LA.calls = 0; LA.fail = true;
+  out = ctx.translate_(['kabel sensor terjepit', 'motor panas', 'teks\ndua baris'], 'zh');
+  LA.fail = false;
+  assert.strictEqual(LA.calls, 1, 'Google menolak → tidak dicoba lagi di permintaan ini');
+  assert.deepStrictEqual(out, ['kabel sensor terjepit', 'motor panas', 'teks\ndua baris'], 'teks asli dikembalikan, tanpa error');
+  ctx.resetMaster_();
+  assert.strictEqual(ctx.translate_(['motor panas'], 'zh')[0], '[zh-CN] motor panas', 'gagal tidak di-cache: dicoba lagi berikutnya');
 });
 
 test('2.5 isi terjemahan otomatis: mengisi sel kosong Mesin/Lines/Pilihan, tidak menimpa yang sudah ada', () => {

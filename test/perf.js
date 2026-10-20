@@ -47,6 +47,12 @@ measure('Selesai (3 sparepart)', () => as(T, () => ctx.apiComplete(id, { values:
 measure('Tab Pending', () => as(T, () => ctx.apiListPending({})));
 measure('Dashboard', () => as('owner@gmail.com', () => ctx.apiDashboard({ periode: 30 })));
 measure('Refresh otomatis (tiap 60 dtk)', () => as(T, () => ctx.apiRefresh({})));
+// Tombol 🌐: 15 teks baru (kartu Aktivitas penuh). Kolom terakhir = panggilan Google Translate.
+const LA = ctx.LanguageApp, texts = Array.from({ length: 15 }, (_, i) => 'Cek konektor sensor nomor ' + i);
+LA.calls = 0;
+measure('Tombol 🌐 Terjemahkan, 15 teks baru', () => as('li@gmail.com', () => ctx.apiTranslate(texts, 'zh')));
+rows[rows.length - 1][0] += ' (' + LA.calls + '× Google)';
+measure('Tombol 🌐 lagi (teks sama, dari cache)', () => as('li@gmail.com', () => ctx.apiTranslate(texts, 'zh')));
 
 const w = [52, 8, 8, 8];
 console.log(['Aksi', 'Baca', 'Tulis', 'Total'].map((h, i) => h.padEnd(w[i])).join('│'));

@@ -238,6 +238,8 @@ Waktu aksi di Apps Script ditentukan oleh **jumlah panggilan ke Google Sheets**.
 | Refresh otomatis (60 dtk) | 55 | 10 | 10 | **10** |
 
 2.5.0 tidak menambah panggilan pada aksi teknisi (terjemahan hanya saat tombol 🌐 ditekan). Buka app dengan cache kosong +1 (sheet `Rencana`); admin +1 per refresh (jumlah saran baru).
+Tombol 🌐 dengan 15 teks baru: **1 panggilan Google + 9 Sheets** (teks digabung per panggilan, hasil ditulis sekaligus); teks yang sama berikutnya: 0 (cache).
+Ukuran halaman ±58 KB gzip (2.2.6: ±38 KB; kamus 中文 ±11 KB). Diukur di Chromium dengan CPU 4× lebih lambat: teknisi Indonesia tidak lebih lambat dari 2.2.6, tampilan 中文 ±0,1–0,2 detik lebih lama (render huruf Han).
 
 Laporan langsung menambah 4 panggilan per aksi (Selesai/Cancel: 6, karena Rekap ikut dihitung) ≈ 0,3–0,6 detik lebih lama per tombol.
 Itu harga "data langsung masuk laporan". Kalau di HP teknisi terasa terlalu lambat: `LAPORAN_LANGSUNG` = `Tidak` (kembali ke 12/17).

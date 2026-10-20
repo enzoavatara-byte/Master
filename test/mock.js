@@ -145,7 +145,12 @@ const ctx = {
   },
   MailApp: { sendEmail: (m) => mails.push(m) },
   // Google Translate palsu: "[zh-CN] teks" — cukup untuk menguji cache & alur, bukan kualitas terjemahan.
-  LanguageApp: { calls: 0, translate(text, src, tgt) { this.calls++; return '[' + tgt + '] ' + text; } },
+  // Seperti Google: baris per baris. fail = kuota habis; joinLines = hasil tanpa pemisah baris (jumlah baris tidak cocok).
+  LanguageApp: { calls: 0, fail: false, joinLines: false, translate(text, src, tgt) {
+    this.calls++;
+    if (this.fail) throw new Error('Service invoked too many times for one day: translate.');
+    return String(text).split('\n').map(l => '[' + tgt + '] ' + l).join(this.joinLines ? ' ' : '\n');
+  } },
   CacheService: { getScriptCache: () => scriptCache },
   Utilities,
   ScriptApp: {
