@@ -391,10 +391,10 @@
       $('f-line').onchange = function () { draft.line = this.value; };
     }
     draw();
-    $('f-reset').onclick = function () { draft = emptyFilter(); draw(); };
-    $('f-apply').onclick = function () {
-      state.filter = draft; saveFilter(); closeSheet(); onApply();
-    };
+    var apply = function () { state.filter = draft; saveFilter(); closeSheet(); onApply(); };
+    // Reset langsung berlaku (sebelumnya harus Terapkan juga; ditutup tanpa Terapkan = filter lama tetap aktif).
+    $('f-reset').onclick = function () { draft = emptyFilter(); apply(); };
+    $('f-apply').onclick = apply;
     return s;
   }
 

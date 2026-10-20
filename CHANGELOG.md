@@ -21,11 +21,15 @@ Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spr
 **Diuji di Google Sheets asli** (spreadsheet uji, locale Indonesia & en_US): semua rumus Ringkasan, Pending Work dan tab per baterai tanpa error, angka cocok dengan hitungan terpisah (hari ini, bulan lain, per project, jenis, per hari, pekerjaan terbuka), aturan warna & grafik tampil.
 - Temuan: spreadsheet ber-locale **Indonesia** membaca rumus dengan pemisah `;` (array `\`, desimal `,`); rumus berkoma error dan `{1,2}` diam-diam jadi angka 1,2. Sekarang `setup` menguji sekali lalu menulis semua rumus (Ringkasan, Pending Work, Maintenance per baterai, aturan warna) dengan sintaks locale spreadsheet. Rumus ditulis lewat `setFormulas`.
 
+**Perbaikan aplikasi**
+- Filter: tombol **Reset** langsung berlaku dan menutup lembar. Sebelumnya Reset hanya mengosongkan pilihan; kalau lembar ditutup tanpa **Terapkan**, filter lama diam-diam tetap aktif.
+- Semua alur aplikasi diuji ulang di preview (34 skenario: mulai, pause, pending, cancel, lanjut via QR oleh teknisi 中文, selesai + sparepart, review admin, riwayat & CSV, dashboard, QR, panduan, akun tidak cocok, banner versi baru) tanpa error JavaScript.
+
 **Catatan**
 - Aturan warna (conditional formatting) yang dibuat admin sendiri dipertahankan; filter di tabel dibuat ulang saat setup (kriteria filter yang sedang aktif hilang).
 - `setup` sedikit lebih lama (merapikan ±25 tab).
 
-**File**: baru `Tampilan` (Script). Berubah: `Config`, `Code`, `Rekap`, `Panduan`. **Wajib Run `setup`**, lalu New version.
+**File**: baru `Tampilan` (Script). Berubah: `Config`, `Code`, `Rekap`, `Panduan`, `App`. **Wajib Run `setup`**, lalu New version.
 
 ## 2.5.0 — bahasa 中文 & teknisi China
 **Baru**
