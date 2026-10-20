@@ -3,7 +3,7 @@
  * Bahasa tampilan: id (Indonesia = teks asli di App.html) / zh (中文 简体).
  * - Kunci kamus = teks Indonesia persis. Teks tetap yang masuk ke layar diganti otomatis (i18nObserve);
  *   teks yang berisi angka/nama memakai t('… {x} …', { x: … }) di App.html.
- * - Label dari Google Sheet (pilihan, mesin, line, form) ikut dari kolom 中文 di sheet masing-masing.
+ * - Label dari Google Sheet (pilihan, mesin, line, form) ikut dari kolom 中文 di sheet masing-masing dan menang atas kamus ini.
  * - Yang tidak ada di kamus tetap tampil dalam bahasa Indonesia (tidak error).
  * Terjemahan dibuat dengan bantuan AI; minta rekan berbahasa Mandarin mengoreksi istilah pabrik di sini.
  */
@@ -23,8 +23,8 @@ function i18nSet(lang, extra) {
   I18N_DICT = {};
   if (LANG === 'id') return;
   var k;
-  for (k in (extra || {})) I18N_DICT[k] = extra[k];
   for (k in I18N[LANG]) I18N_DICT[k] = I18N[LANG][k];
+  for (k in (extra || {})) I18N_DICT[k] = extra[k];   // label 中文 dari Google Sheet menang atas kamus bawaan
 }
 
 var I18N_ATTRS = ['placeholder', 'title', 'aria-label'];
