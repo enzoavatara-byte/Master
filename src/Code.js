@@ -69,6 +69,7 @@ function onOpen() {
     .addItem('Jalankan cek 3/4 jam sekarang', 'checkTimeouts')
     .addSeparator()
     .addItem('Laporan & Rekap tahunan (buat / perbarui)…', 'menuRekapTahunan')
+    .addItem('Perbarui tab TPM (format Excel manager)', 'menuTpm')
     .addItem('Arsipkan data tahun lalu…', 'menuArsipkanTahun')
     .addItem('Hapus data testing…', 'menuHapusDataTesting')
     .addSeparator()
@@ -136,7 +137,7 @@ function menuMuatUlangMaster() {
 function cekFile() {
   var missing = [];
   var scripts = { Config: typeof APP, Db: typeof readTable_, Auth: typeof currentEmail_, Master: typeof masterData_,
-    Maintenance: typeof apiStart, Api: typeof apiBootstrap, Rekap: typeof buildLaporan_, Translate: typeof translate_, Tampilan: typeof rapikanTampilan_ };
+    Maintenance: typeof apiStart, Api: typeof apiBootstrap, Rekap: typeof buildLaporan_, Translate: typeof translate_, Tampilan: typeof rapikanTampilan_, Tpm: typeof buildTpm_ };
   Object.keys(scripts).forEach(function (f) { if (scripts[f] === 'undefined') missing.push(f + ' (script)'); });
   ['Index', 'App', 'Styles', 'Message', 'Panduan', 'I18n'].forEach(function (f) {
     try { HtmlService.createHtmlOutputFromFile(f); } catch (e) { missing.push(f + ' (HTML)'); }
@@ -205,6 +206,7 @@ function setup() {
       appendObj_(APP.SHEETS.OPTIONS, { 'Jenis': jenis, 'Nilai': v, 'Urutan': i + 1, 'Aktif': 'Ya' });
     });
   });
+  migrateDiscipline_();   // 2.5.2: Jenis kerusakan Operasional / Produk / MES + kolom Discipline (tab TPM)
 
   if (readTable_(APP.SHEETS.FACTORY).length === 0) {
     APP.FACTORY_DEFAULTS.forEach(function (f) {
@@ -272,6 +274,9 @@ function setup() {
   if (!hasChange) ScriptApp.newTrigger('onMasterChange').forSpreadsheet(ss).onChange().create(); // hapus/sisip baris → cache dihapus
   // Lock: setup boleh dijalankan saat teknisi sedang bekerja tanpa bentrok dengan sinkron laporan per aksi.
   withLock_(function () { buildRekap_(yearOf_(new Date())); buildLaporan_(yearOf_(new Date())); });
+  // Di luar lock (terjemahan baru disimpan dengan lock sendiri). Gagal di sini tidak menggagalkan setup.
+  var tpmErr = '';
+  try { buildTpm_(); } catch (e) { tpmErr = 'TPM: ' + (e && e.message || e); console.warn(tpmErr); }
 
   var blank = ss.getSheetByName('Sheet1');
   if (blank && ss.getSheets().length > 1 && blank.getLastRow() === 0) ss.deleteSheet(blank);
@@ -279,6 +284,7 @@ function setup() {
   invalidateMaster_();
   // Tab Ringkasan & Baca Saya, warna, belang, filter, dropdown, urutan & sembunyikan tab. Gagal di sini tidak menggagalkan setup.
   var p = rapikanTampilan_({ full: true });
+  if (tpmErr) p.push(tpmErr);
   return p.length ? 'Setup selesai. Tampilan belum lengkap: ' + p.join(' · ') : 'Setup selesai.';
 }
 

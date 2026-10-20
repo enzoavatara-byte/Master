@@ -119,7 +119,10 @@ function tabPlan_(ss) {
   var S = APP.SHEETS, y = yearOf_(new Date()), plan = [], seen = {};
   var add = function (name, grp, hide) { if (!seen[name] && ss.getSheetByName(name)) { seen[name] = true; plan.push([name, grp, !!hide]); } };
   add(RINGKASAN_, 'baca'); add(BACA_, 'baca');
-  add(laporanName_(y), 'laporan'); add(rekapName_(y), 'laporan'); add(S.PENDING, 'laporan'); add(S.SARAN, 'laporan');
+  add(laporanName_(y), 'laporan'); add(rekapName_(y), 'laporan');
+  ss.getSheets().map(function (sh) { return sh.getName(); }).filter(function (n) { return n.indexOf(TPM_PREFIX_) === 0; }).sort()
+    .forEach(function (n) { add(n, 'laporan'); });
+  add(S.PENDING, 'laporan'); add(S.SARAN, 'laporan');
   add(S.MAINT, 'app'); add(S.PEMAKAIAN, 'app');
   [S.USERS, S.LINES, S.MESIN, S.SPAREPART, S.OPTIONS].forEach(function (n) { add(n, 'atur'); });
   [S.PROJECTS, S.FACTORY, S.FORM, S.FORMAT, S.PANDUAN, S.CONFIG, S.RENCANA].forEach(function (n) { add(n, 'atur', true); });
@@ -168,6 +171,7 @@ function tableSpecs_() {
   spec[S.USERS] = { off: 'Aktif', wide: { 'Email': 230, 'Nama': 180 }, dropdowns: { 'Peran': [APP.ROLES.TECH, APP.ROLES.ADMIN], 'Aktif': YT, 'Bahasa': ['id', 'zh'] } };
   [S.FACTORY, S.PROJECTS, S.FORMAT].forEach(function (n) { spec[n] = { off: 'Aktif', dropdowns: { 'Aktif': YT } }; });
   [S.LINES, S.MESIN, S.SPAREPART, S.OPTIONS].forEach(function (n) { spec[n] = { filter: true, off: 'Aktif', dropdowns: { 'Aktif': YT } }; });
+  spec[S.OPTIONS].dropdowns['Discipline'] = APP.TPM_DISCIPLINES;
   spec[S.FORM] = { filter: true, off: 'Aktif', wide: { 'Label': 230, 'Label (中文)': 160 },
     dropdowns: { 'Tipe': ['pilihan', 'teks', 'angka', 'sistem'], 'Wajib': YT, 'Lainnya isi sendiri': YT, 'Aktif': YT } };
   spec[S.PANDUAN] = { off: 'Aktif', wrap: ['Isi'], dropdowns: { 'Untuk': ['Teknisi', 'Admin', 'Semua'], 'Aktif': YT } };
@@ -623,6 +627,8 @@ function buildBacaSaya_(ss) {
     [T.baca, BACA_, 'Penjelasan ini.\n本说明。', 'Tidak\n否'],
     [T.laporan, laporanName_(y), 'Laporan format Excel (Form Stop Line). Satu baris = satu pekerjaan. Untuk dikirim ke atasan.\nExcel 格式报表（停线表）。一行 = 一项工作。', 'Tidak: dibuat ulang otomatis. Salah isi → perbaiki di tab Maintenance.\n否：自动重建。请在 Maintenance 中修改。'],
     [T.laporan, rekapName_(y), 'Jumlah pekerjaan & MTTR per bulan.\n每月工作数量和 MTTR。', 'Tidak (otomatis)\n否（自动）'],
+    [T.laporan, TPM_PREFIX_ + '<project>', 'Format Excel TPM manager (中文 + English): masalah Corrective yang selesai. Copy baris 9 ke bawah ke Excel manager.\nTPM 格式（中英文）：已完成的故障维修。复制第 9 行以下到经理的 Excel。',
+      'Tidak: dibuat ulang tiap malam & lewat Dashboard. Salah isi → perbaiki di Maintenance / Pilihan.\n否：每晚自动重建。'],
     [T.laporan, APP.SHEETS.PENDING, 'Pekerjaan yang tertunda (pending). Merah = lewat tenggat.\n挂起的工作。红色 = 已逾期。', 'Tidak (otomatis)\n否（自动）'],
     [T.laporan, APP.SHEETS.SARAN, 'Saran dari teknisi. Tanggapi lewat aplikasi (💡 Saran).\n技术员的建议。请在应用中回复。', 'Status & Tanggapan boleh\n可改状态和回复'],
     [T.app, APP.SHEETS.MAINT, 'Semua data pekerjaan (data asli aplikasi). Kolom email & waktu sistem disembunyikan.\n所有维修原始数据。邮箱和系统时间列已隐藏。', 'Hanya admin, untuk memperbaiki salah isi\n仅管理员修正错误'],
@@ -631,7 +637,7 @@ function buildBacaSaya_(ss) {
     [T.atur, APP.SHEETS.LINES, 'Daftar line. Satu baris = satu QR.\n产线列表。一行 = 一个二维码。', 'Ya (admin)\n可以（管理员）'],
     [T.atur, APP.SHEETS.MESIN, 'Mesin per line.\n每条产线的设备。', 'Ya (admin)\n可以（管理员）'],
     [T.atur, APP.SHEETS.SPAREPART, 'Katalog sparepart: Jenis → Nama → Model.\n备件目录：类别 → 名称 → 型号。', 'Ya (admin)\n可以（管理员）'],
-    [T.atur, APP.SHEETS.OPTIONS, 'Isi pilihan di form (masalah, penyebab, …) + nama 中文.\n表单选项（现象、原因 …）及中文名称。', 'Ya (admin)\n可以（管理员）']
+    [T.atur, APP.SHEETS.OPTIONS, 'Isi pilihan di form (masalah, penyebab, …) + nama 中文 / English + Discipline TPM per jenis kerusakan.\n表单选项（现象、原因 …）、中英文名称及 TPM 范围。', 'Ya (admin)\n可以（管理员）']
   ];
   var hidden = [
     [T.atur, APP.SHEETS.PROJECTS + ', ' + APP.SHEETS.FACTORY, 'Project baterai & target MTTR; daftar factory.\n电池项目和 MTTR 目标；工厂列表。'],

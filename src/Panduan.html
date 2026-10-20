@@ -59,11 +59,11 @@
     <li><b>Mesin</b>: mesin per line (= Station di laporan).</li>
     <li><b>Projects</b>: baterai per factory & target MTTR.</li>
     <li><b>Sparepart</b>: katalog Jenis → Nama → Model. Aktif = Tidak untuk menyembunyikan.</li>
-    <li><b>Pilihan</b>: isi pilihan (Jenis Kerusakan, Masalah, Penyebab, Penanganan, …).</li>
+    <li><b>Pilihan</b>: isi pilihan (Jenis Kerusakan, Masalah, Penyebab, Penanganan, …). Kolom <b>Discipline</b> (hanya Jenis Kerusakan) = isi kolom Discipline tab TPM.</li>
     <li><b>Form</b>: label, wajib/opsional, urutan, field tambahan. Matikan pertanyaan dengan Aktif = Tidak (jangan hapus barisnya).</li>
     <li><b>Format Laporan</b>: judul & urutan kolom tab Laporan.</li>
     <li><b>Catatan Panduan</b>: catatan lokal yang tampil di halaman ini (Untuk: Teknisi / Admin / Semua).</li>
-    <li><b>Config</b>: NAMA_APLIKASI, jam peringatan, shift, STOP_LINE_DEFAULT, judul laporan.</li>
+    <li><b>Config</b>: NAMA_APLIKASI, jam peringatan, shift, STOP_LINE_DEFAULT, judul laporan, pengaturan TPM (TPM_MULAI, TPM_TIPE, TPM_JUDUL, TPM_PROJECT).</li>
     <li><b>Saran</b>: saran dari teknisi (juga tampil di aplikasi → 💡 Saran). <b>Rencana</b>: daftar rencana update yang tampil di halaman ini.</li>
   </ul></div></details>
 
@@ -84,9 +84,18 @@
 
   <details class="g"><summary>Laporan (format Excel)</summary><div><ul>
     <li>Tab <b>Laporan &lt;tahun&gt;</b> = format Form Stop Line. Diperbarui <b>langsung</b> setiap Mulai / Pause / Selesai / Cancel / review.</li>
-    <li>Habis mengedit sheet Maintenance atau Format Laporan secara manual → Dashboard → <b>Perbarui Laporan & Rekap</b> (otomatis juga tiap malam).</li>
+    <li>Habis mengedit sheet Maintenance atau Format Laporan secara manual → Dashboard → <b>Perbarui Laporan, Rekap & TPM</b> (otomatis juga tiap malam).</li>
     <li>Jangan edit tab Laporan / Rekap (selalu ditulis ulang). Perbaiki datanya di sheet Maintenance.</li>
     <li>Data mentah sparepart: sheet <b>Pemakaian Sparepart</b> (1 baris per part, bisa di-pivot).</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Excel TPM untuk manager</summary><div><ul>
+    <li>Tab <b>TPM &lt;project&gt;</b> (satu per project) = format Excel TPM manager: kotak Status Overview, judul kolom baris 8, data mulai <b>B9</b>. Teks: <b>中文</b> lalu <b>(English)</b> di baris bawahnya.</li>
+    <li>Isinya pekerjaan <b>Corrective</b> yang sudah <b>Completed</b>, sejak 1 Januari (Config → <b>TPM_MULAI</b> untuk tanggal lain, <b>TPM_TIPE</b> untuk tipe lain).</li>
+    <li>Cara kirim: buka tab TPM → blok <b>B9</b> sampai baris terakhir kolom <b>K</b> → Copy → paste di Excel manager.</li>
+    <li>Diperbarui tiap malam, lewat Dashboard → <b>Perbarui Laporan, Rekap & TPM</b>, atau menu spreadsheet → <b>Perbarui tab TPM</b>. Jangan edit tab TPM (tertimpa).</li>
+    <li><b>Discipline</b> otomatis dari jenis kerusakan: Elektrikal/Mekanikal/Pneumatik/Program = Machine, Operasional = Operation, Produk = Product Item, MES = MES. Ubah di Pilihan → kolom Discipline.</li>
+    <li>Pilihan, mesin & line memakai kolom 中文/English di sheet. Teks bebas (detail, catatan) diterjemahkan Google; salah → koreksi di sheet <b>Terjemahan</b>, lalu perbarui lagi.</li>
   </ul></div></details>
 
   <details class="g"><summary>Dua factory (data terpisah)</summary><div><ol>
@@ -101,7 +110,7 @@
     <li>Spreadsheet → menu aplikasi → <b>Hapus data testing…</b></li>
     <li>Isi tanggal mulai pakai sungguhan (dd/mm/yyyy) → yang dimulai <b>sebelum</b> tanggal itu dihapus. Kosongkan = hapus semua.</li>
     <li>Cek jumlahnya, ketik <b>HAPUS</b>.</li>
-  </ol><p class="small muted">Ikut bersih: Maintenance, Log, Pemakaian Sparepart, Arsip, Laporan, Rekap, tab per baterai. Users, Lines, Mesin, Sparepart, Pilihan, Form, Config tetap.
+  </ol><p class="small muted">Ikut bersih: Maintenance, Log, Pemakaian Sparepart, Arsip, Laporan, Rekap, TPM, tab per baterai. Users, Lines, Mesin, Sparepart, Pilihan, Form, Config tetap.
   Jangan hapus baris langsung di tab Laporan/Rekap: tab itu dibuat ulang dari Maintenance.</p></div></details>
 
   <details class="g"><summary>Update ke versi baru</summary><div><ol>
@@ -124,6 +133,7 @@
 <template id="guide-baru">
   <h3>Apa yang baru di versi <span data-v></span></h3>
   <ul>
+    <li><b>Excel TPM</b> (admin): tab <b>TPM &lt;project&gt;</b> di Google Sheet, format sama dengan Excel manager (中文 + English), siap di-copy. Jenis kerusakan baru: <b>Operasional</b>, <b>Produk</b>, <b>MES</b>.</li>
     <li><b>Bahasa 中文</b>: tombol <b>中</b> / <b>ID</b> di Beranda. Semua menu, tombol & pilihan tampil dalam bahasa Mandarin.</li>
     <li><b>🌐 Terjemahkan</b> di detail & kartu pekerjaan: teks yang ditulis teknisi lain diterjemahkan (Indonesia ⇄ 中文).</li>
     <li><b>💡 Saran</b> di Beranda: kirim usul ke admin, lihat status & tanggapannya.</li>
@@ -189,11 +199,11 @@
     <li><b>Mesin</b>：每条产线的设备（= 报表中的 Station）。<b>Nama (中文)</b> / <b>Nama (English)</b>。</li>
     <li><b>Projects</b>：各工厂的电池项目和 MTTR 目标。</li>
     <li><b>Sparepart</b>：备件目录 类别 → 名称 → 型号。Aktif = Tidak 即隐藏。</li>
-    <li><b>Pilihan</b>：选项（故障类型、现象、原因、处理措施 …）。<b>Nilai (中文)</b> / <b>Nilai (English)</b> = 显示名称。</li>
+    <li><b>Pilihan</b>：选项（故障类型、现象、原因、处理措施 …）。<b>Nilai (中文)</b> / <b>Nilai (English)</b> = 显示名称。<b>Discipline</b> 列（仅故障类型）= TPM 页的“范围”。</li>
     <li><b>Form</b>：标题、必填 / 选填、顺序、附加字段。<b>Label (中文)</b> = 中文标题。停用问题请设 Aktif = Tidak（不要删除行）。</li>
     <li><b>Format Laporan</b>：Laporan 页的列标题和顺序。</li>
     <li><b>Catatan Panduan</b>：显示在本页的本地说明。<b>Saran</b>：技术员的建议。<b>Rencana</b>：更新计划。</li>
-    <li><b>Config</b>：NAMA_APLIKASI、提醒时间、班次、STOP_LINE_DEFAULT、报表标题。</li>
+    <li><b>Config</b>：NAMA_APLIKASI、提醒时间、班次、STOP_LINE_DEFAULT、报表标题、TPM 设置（TPM_MULAI、TPM_TIPE、TPM_JUDUL、TPM_PROJECT）。</li>
   </ul></div></details>
 
   <details class="g"><summary>阅读表格（Ringkasan、颜色、隐藏的标签页）</summary><div><ul>
@@ -201,6 +211,15 @@
     <li><b>Baca Saya</b> 标签页：每个标签页和颜色的说明（印尼语 + 中文）。</li>
     <li>标签页颜色：绿色 = 从这里开始，黄色 = 报表，蓝色 = 设置（管理员可编辑），灰色 = 应用写入（请勿编辑）。</li>
     <li>不常用的标签页已隐藏。菜单 → <b>Tampilkan semua tab</b>；重新整理：菜单 → <b>Rapikan tampilan spreadsheet</b>。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>给经理的 TPM Excel</summary><div><ul>
+    <li><b>TPM &lt;项目&gt;</b> 页（每个项目一页）= 经理的 TPM Excel 格式：Status Overview、第 8 行列标题、数据从 <b>B9</b> 开始。文字为<b>中文</b>，下一行为 <b>(English)</b>。</li>
+    <li>内容：已<b>完成</b>的<b>故障维修</b>（Corrective），从 1 月 1 日起（Config → <b>TPM_MULAI</b> 可改日期，<b>TPM_TIPE</b> 可改类型）。</li>
+    <li>发送方法：打开 TPM 页 → 选中 <b>B9</b> 到最后一行的 <b>K</b> 列 → 复制 → 粘贴到经理的 Excel。</li>
+    <li>每晚自动更新；也可在 Dashboard → <b>更新 Laporan、Rekap 和 TPM</b>，或表格菜单 → <b>Perbarui tab TPM</b>。请勿编辑 TPM 页（会被覆盖）。</li>
+    <li><b>范围 Discipline</b> 由故障类型自动决定：电气/机械/气动/程序 = Machine，操作 = Operation，产品 = Product Item，MES = MES。可在 Pilihan → Discipline 列修改。</li>
+    <li>选项、设备和产线使用表中的中文/English 列。自由文字（详情、备注）由 Google 翻译；有误 → 在 <b>Terjemahan</b> 表中修改后再更新。</li>
   </ul></div></details>
 
   <details class="g"><summary>中文和翻译</summary><div><ul>
@@ -211,7 +230,7 @@
 
   <details class="g"><summary>报表（Excel 格式）</summary><div><ul>
     <li><b>Laporan &lt;年份&gt;</b> 页 = 停线表格式。每次 开始 / 暂停 / 完成 / 取消 / 审核 后<b>实时</b>更新。</li>
-    <li>手动编辑 Maintenance 或 Format Laporan 表后 → 看板 → <b>更新 Laporan 和 Rekap</b>（每晚也会自动更新）。</li>
+    <li>手动编辑 Maintenance 或 Format Laporan 表后 → 看板 → <b>更新 Laporan、Rekap 和 TPM</b>（每晚也会自动更新）。</li>
     <li>不要编辑 Laporan / Rekap 页（会被重写）。请在 Maintenance 表中修正数据。</li>
     <li>备件原始数据：<b>Pemakaian Sparepart</b> 表（每个备件一行，可做数据透视）。</li>
   </ul></div></details>
@@ -234,6 +253,7 @@
 <template id="guide-baru-zh">
   <h3>版本 <span data-v></span> 新功能</h3>
   <ul>
+    <li><b>TPM Excel</b>（管理员）：Google Sheet 中的 <b>TPM &lt;项目&gt;</b> 页，格式与经理的 Excel 相同（中文 + English），可直接复制。新增故障类型：<b>操作</b>、<b>产品</b>、<b>MES</b>。</li>
     <li><b>中文界面</b>：首页的 <b>中</b> / <b>ID</b> 按钮。所有菜单、按钮和选项都以中文显示。</li>
     <li><b>🌐 翻译</b>：在详情和工作卡片中翻译其他技术员写的内容（印尼语 ⇄ 中文）。</li>
     <li><b>💡 建议</b>：在首页向管理员发送建议，查看状态和回复。</li>

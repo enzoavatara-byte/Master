@@ -3,6 +3,23 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.5.2 — Excel TPM untuk manager
+**Baru**
+- Tab **`TPM <project>`** (satu per project) dengan format Excel TPM manager ("Statistical Analysis of Issues Reported from Production"): kotak **Status Overview** per Discipline, Total tasks, nama project, judul kolom baris 8 persis contoh (`No.序号 · Machine · Issue Description 问题描述 · Root Cause 原因分析 · Solution 解决方案 · End Time 解决时间 · Discipline 范围 · Responsibility处理人 · Date · Notes`), data mulai **B9**, lebar kolom & warna sama, baris 1–8 dibekukan, dropdown Discipline.
+- Isi: pekerjaan **Corrective** yang **Completed** (sejak 1 Januari; ubah lewat Config `TPM_MULAI` / `TPM_TIPE`). Sel teks = **中文** + baris baru + **(English)**. Pilihan, mesin & line memakai kolom 中文/English di sheet; detail & catatan diterjemahkan Google (disimpan di sheet Terjemahan, koreksi admin dipakai). Sparepart = satu baris di bawah Solution.
+- Cara pakai: blok **B9 sampai baris terakhir kolom K** → Copy → paste di Excel manager.
+- Diperbarui tiap malam, lewat Dashboard → **Perbarui Laporan, Rekap & TPM**, menu spreadsheet → **Perbarui tab TPM**, dan saat `setup`. Tidak menambah waktu tombol teknisi.
+- Jenis kerusakan baru: **Operasional** (操作 / Operation), **Produk** (产品 / Product Item), **MES**. Sheet Pilihan dapat kolom **Discipline** (dropdown Machine / Operation / Product Item / MES), diisi otomatis: Elektrikal/Mekanikal/Pneumatik/Program = Machine.
+- Config baru: `TPM_MULAI`, `TPM_TIPE`, `TPM_JUDUL` (judul baris 6), `TPM_PROJECT` (teks baris 3).
+
+**Diuji di Google Sheets asli** (spreadsheet uji, locale Indonesia): tab TPM dari kode + data contoh. Rumus Status Overview & Total tasks benar, jam `h:mm` & tanggal tampil benar, warna/garis/lebar kolom sama dengan contoh manager.
+
+**Beda dengan contoh Excel (sengaja)**: Total tasks dihitung benar (contoh memakai `COUNT(...)-3`); judul baris 6 = `TPM_JUDUL` (contoh masih judul template checklist); kolom A (R/Y/G) dan aturan warna R/Y/G sisa template tidak dipakai; Date ditulis `yyyy-mm-dd` (contoh menampilkan angka seri 46310).
+
+**Belum**: download riwayat .xlsx (menyusul). Cek hasil terjemahan istilah teknis bersama teknisi China.
+
+**File**: baru `Tpm` (Script). Berubah: `Config`, `Master`, `Code`, `Rekap`, `Api`, `Tampilan`, `Translate` (Script), `App`, `I18n`, `Panduan` (HTML). Tidak berubah: `Auth`, `Db`, `Maintenance`, `Index`, `Styles`, `Message`, `appsscript.json`. **Wajib Run `setup`**, lalu New version. Tidak ada izin baru.
+
 ## 2.5.1 — spreadsheet mudah dibaca
 **Baru**
 - Tab **Ringkasan** paling depan (dua bahasa): pilih tanggal di sel kuning (kosong = hari ini) → kotak angka **hari ini** (dimulai, selesai, MTTR, stop line), **sekarang** (sedang dikerjakan, pending, lewat tenggat, perlu review), **bulan ini** (selesai, MTTR, corrective/preventive), status berwarna, grafik selesai per hari & jenis kerusakan, per project vs target, 5 mesin tersering, daftar pekerjaan yang masih terbuka. Semua berupa rumus: selalu terbaru, tidak memperlambat tombol teknisi. MTTR dihitung sama seperti Rekap.

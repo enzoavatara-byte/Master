@@ -5,7 +5,7 @@
  */
 var APP = {
   NAME: 'MTTR',          // nama default; per lokasi diubah lewat Config → NAMA_APLIKASI
-  VERSION: '2.5.1',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
+  VERSION: '2.5.2',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
   TZ: 'Asia/Jakarta',
   DATE_FMT: 'yyyy-MM-dd HH:mm:ss',
 
@@ -54,8 +54,9 @@ var APP = {
     'Format Laporan': ['Kolom', 'Sumber', 'Urutan', 'Aktif'],
     /** Catatan lokal admin yang tampil di Panduan aplikasi. Untuk: Teknisi / Admin / Semua. */
     'Catatan Panduan': ['Untuk', 'Judul', 'Isi', 'Urutan', 'Aktif'],
-    /** Nilai = yang disimpan (kanonik). Kolom 中文/English hanya label tampilan & untuk Excel TPM. */
-    Pilihan: ['Jenis', 'Nilai', 'Urutan', 'Aktif', 'Nilai (中文)', 'Nilai (English)'],
+    /** Nilai = yang disimpan (kanonik). Kolom 中文/English hanya label tampilan & untuk Excel TPM.
+     *  Discipline: hanya untuk Jenis Kerusakan = kolom "Discipline 范围" tab TPM (Machine / Operation / Product Item / MES). */
+    Pilihan: ['Jenis', 'Nilai', 'Urutan', 'Aktif', 'Nilai (中文)', 'Nilai (English)', 'Discipline'],
     Form: ['Form', 'Field', 'Label', 'Tipe', 'Sumber', 'Wajib', 'Lainnya isi sendiri', 'Urutan', 'Aktif', 'Label (中文)'],
     /** Cache terjemahan teks bebas (diisi otomatis; admin boleh mengoreksi sel id/zh/en, koreksi dipakai ulang). */
     Terjemahan: ['Teks', 'Bahasa asal', 'id', 'zh', 'en', 'Sumber', 'Diperbarui'],
@@ -101,6 +102,7 @@ var APP = {
   OPTION_I18N: {
     'Corrective': ['故障维修', 'Corrective'], 'Preventive': ['预防性维护', 'Preventive'],
     'Elektrikal': ['电气', 'Electrical'], 'Mekanikal': ['机械', 'Mechanical'], 'Pneumatik': ['气动', 'Pneumatic'], 'Program': ['程序', 'Program'],
+    'Operasional': ['操作', 'Operation'], 'Produk': ['产品', 'Product Item'], 'MES': ['MES', 'MES'],
     'Mesin berhenti': ['设备停机', 'Machine stopped'], 'Sensor error': ['传感器故障', 'Sensor error'], 'Kebocoran': ['泄漏', 'Leakage'],
     'Suara/getaran abnormal': ['异响/异常振动', 'Abnormal noise/vibration'], 'Hasil produk NG': ['产品不良 (NG)', 'Product NG'],
     'Komponen aus': ['零件磨损', 'Worn component'], 'Kabel/konektor longgar': ['线缆/接头松动', 'Loose cable/connector'],
@@ -148,7 +150,7 @@ var APP = {
    *  "Lainnya" tidak perlu ditulis: otomatis muncul jika kolom "Lainnya isi sendiri" di sheet Form = Ya. */
   OPTION_DEFAULTS: {
     'Tipe Maintenance': ['Corrective', 'Preventive'],
-    'Jenis Kerusakan': ['Elektrikal', 'Mekanikal', 'Pneumatik', 'Program'],
+    'Jenis Kerusakan': ['Elektrikal', 'Mekanikal', 'Pneumatik', 'Program', 'Operasional', 'Produk', 'MES'],
     'Masalah': ['Mesin berhenti', 'Sensor error', 'Kebocoran', 'Suara/getaran abnormal', 'Hasil produk NG'],
     'Penyebab': ['Komponen aus', 'Kabel/konektor longgar', 'Setting berubah', 'Kotor/kontaminasi', 'Salah operasi'],
     'Penanganan': ['Ganti part', 'Setting ulang', 'Bersihkan', 'Kencangkan/perbaiki koneksi'],
@@ -156,6 +158,13 @@ var APP = {
     'Yang Tertunda': ['Menunggu part', 'Menunggu jadwal stop produksi', 'Butuh teknisi lain'],
     'Alasan Cancel': ['Salah line', 'Input ganda', 'Masalah hilang sendiri']
   },
+
+  /** Pilihan baru di versi lama: setup() menambahkannya jika belum ada (baris Aktif = Tidak dihitung ada → tidak muncul lagi). */
+  OPTION_MIGRATE: { 'Jenis Kerusakan': ['Operasional', 'Produk', 'MES'] },
+  /** Kolom Discipline tab TPM = 4 nilai Excel manager. Bawaan per Jenis Kerusakan; admin mengubah di sheet Pilihan → Discipline. */
+  TPM_DISCIPLINES: ['Machine', 'Operation', 'Product Item', 'MES'],
+  DISCIPLINE_DEFAULTS: { Elektrikal: 'Machine', Mekanikal: 'Machine', Pneumatik: 'Machine', Program: 'Machine',
+    Operasional: 'Operation', Produk: 'Product Item', MES: 'MES' },
 
   /**
    * Isi awal sheet Form: [Form, Field, Label, Tipe, Sumber, Wajib, Lainnya isi sendiri, Urutan, Label (中文)].
@@ -248,7 +257,11 @@ var APP = {
     LAPORAN_JUDUL: { value: '印尼基地设备停机记录表 Form Stop Line Peralatan Base Indonesia', description: 'Judul baris pertama tab Laporan <tahun>' },
     STOP_LINE_DEFAULT: { value: 'Corrective', description: 'Tipe maintenance yang otomatis "Ya" untuk stop line saat Mulai (pisahkan dengan koma)' },
     LAPORAN_LANGSUNG: { value: 'Ya', description: 'Ya = tab Laporan & Rekap diperbarui setiap aksi (tombol ±0,5 dtk lebih lama). Tidak = hanya tiap malam & lewat tombol' },
-    CEK_AKUN: { value: 'Ya', description: 'Ya = aplikasi berhenti jika browser memakai akun Google lain (bug multi-akun) supaya data tidak tercatat atas nama salah. Tidak = tanpa pemeriksaan' }
+    CEK_AKUN: { value: 'Ya', description: 'Ya = aplikasi berhenti jika browser memakai akun Google lain (bug multi-akun) supaya data tidak tercatat atas nama salah. Tidak = tanpa pemeriksaan' },
+    TPM_MULAI: { value: '', description: 'Tab TPM: pekerjaan yang dimulai sejak tanggal ini (dd/mm/yyyy). Kosong = 1 Januari tahun ini' },
+    TPM_TIPE: { value: 'Corrective', description: 'Tab TPM: tipe maintenance yang masuk (pisahkan dengan koma). Hanya yang sudah Completed' },
+    TPM_JUDUL: { value: 'Statistical Analysis of Issues Reported from Production', description: 'Tab TPM: judul baris 6' },
+    TPM_PROJECT: { value: 'PROJECT NAME ATPU', description: 'Tab TPM: teks baris 3 (di atas nama project)' }
   },
 
   LOCK_TIMEOUT_MS: 10000,
@@ -291,6 +304,13 @@ function mttrTypes_() {
 function isYes_(v) {
   var s = String(v === true ? 'ya' : v || '').trim().toLowerCase();
   return s === 'ya' || s === 'yes' || s === 'true' || s === 'aktif' || s === 'active' || s === '1';
+}
+
+/** 'machine' / 'mes' / … → nilai Discipline TPM resmi; tidak dikenal → ''. (Dipakai Master: harus ada walau file Tpm belum dibuat.) */
+function normDiscipline_(v) {
+  var s = String(v || '').trim().toLowerCase();
+  for (var i = 0; i < APP.TPM_DISCIPLINES.length; i++) if (APP.TPM_DISCIPLINES[i].toLowerCase() === s) return APP.TPM_DISCIPLINES[i];
+  return '';
 }
 
 /** Kolom Aktif kosong dianggap aktif untuk sheet master (baris baru tidak langsung hilang). */

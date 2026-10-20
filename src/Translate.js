@@ -41,7 +41,8 @@ function trTable_() {
 /**
  * @param {string[]} texts
  * @param {string} lang 'id' | 'zh' | 'en'
- * @param {{max?:number}=} opts max = batas teks baru yang boleh dikirim ke Google Translate
+ * @param {{max?:number, stats?:Object}=} opts max = batas teks baru yang boleh dikirim ke Google Translate;
+ *   stats.left += jumlah teks yang perlu Google tetapi belum diterjemahkan (melewati batas / kuota habis / gagal)
  * @return {string[]} urutan sama dengan `texts`; teks yang sudah berbahasa tujuan / tak sempat diterjemahkan = teks asli
  */
 function translate_(texts, lang, opts) {
@@ -65,13 +66,14 @@ function translate_(texts, lang, opts) {
   uniq.forEach(function (s, i) { if (hit[keys[i]] != null) got[s] = hit[keys[i]]; else miss.push(s); });
 
   if (miss.length) {
-    var table = trTable_(), put = {}, budget = opts.max == null ? TR_MAX_ : opts.max, ask = [];
+    var table = trTable_(), put = {}, budget = opts.max == null ? TR_MAX_ : opts.max, ask = [], over = 0;
     miss.forEach(function (s) {
       var row = table[s];
       if (row && row[lang]) { got[s] = row[lang]; put[trCacheKey_(lang, s)] = row[lang]; return; }
-      if (budget-- > 0) ask.push(s);
+      if (budget-- > 0) ask.push(s); else over++;
     });
     var res = googleMany_(ask, lang), fresh = Object.keys(res);
+    if (opts.stats) opts.stats.left = (opts.stats.left || 0) + over + ask.length - fresh.length;
     fresh.forEach(function (s) { got[s] = res[s]; put[trCacheKey_(lang, s)] = res[s]; });
     if (Object.keys(put).length) cache.putAll(put, TR_TTL_);
     if (fresh.length) saveTranslations_(fresh, lang, got);

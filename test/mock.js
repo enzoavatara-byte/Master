@@ -136,6 +136,7 @@ class Sheet {
   setColumnWidth(c, w) { this.widths[c] = w; return this; }
   setRowHeight(r, h) { (this.heights = this.heights || {})[r] = h; return this; }
   setHiddenGridlines() { return this; }
+  insertRowsAfter() { return this; }
   newChart() { return recorder('chart'); }
   insertChart(c) { this.charts.push(c); }
   getCharts() { return this.charts.slice(); }
@@ -203,7 +204,8 @@ const ctx = {
     newConditionalFormatRule: () => recorder('cf'),
     newDataValidation: () => recorder('dv'),
     RecalculationInterval: { HOUR: 'HOUR' },
-    getUi: () => ({ createMenu: (name) => { ui.menus.push(name); return { addItem() { return this; }, addSeparator() { return this; }, addToUi() {} }; } })
+    getUi: () => ({ createMenu: (name) => { ui.menus.push(name); return { addItem() { return this; }, addSeparator() { return this; }, addToUi() {} }; },
+      alert: (msg) => { (ui.alerts = ui.alerts || []).push(msg); return 'OK'; } })
   },
   Session: { getActiveUser: () => ({ getEmail: () => user.email }) },
   LockService: {

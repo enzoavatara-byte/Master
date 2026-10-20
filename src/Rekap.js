@@ -147,7 +147,8 @@ function refreshRekap() {
     buildLaporan_(y);
     if (monthOf_(now) === 1) { buildRekap_(y - 1); buildLaporan_(y - 1); }
   });
-  // Di luar lock: hanya format & tab Ringkasan (rumus). Baris baru di tabel ikut belang & berwarna.
+  // Di luar lock: tab TPM (menerjemahkan teks baru; hasilnya disimpan dengan lock sendiri), lalu format & Ringkasan.
+  try { buildTpm_(); } catch (e) { console.warn('TPM gagal (dicoba lagi besok / lewat Dashboard): ' + e); }
   rapikanTampilan_({});
 }
 
@@ -586,8 +587,10 @@ function menuHapusDataTesting() {
     return;
   }
   var out = hapusDataTesting_(cutoff);
+  var tpm = '';
+  try { buildTpm_(); } catch (e) { tpm = ' Tab TPM gagal diperbarui (' + e.message + '): tekan Dashboard → Perbarui Laporan, Rekap & TPM.'; }
   ui.alert('Selesai: ' + out.maintenance + ' pekerjaan, ' + out.log + ' baris Log, ' + out.sparepart +
-    ' baris sparepart dihapus. Laporan & Rekap sudah dibuat ulang dari data yang tersisa.');
+    ' baris sparepart dihapus. Laporan, Rekap & TPM sudah dibuat ulang dari data yang tersisa.' + tpm);
 }
 
 function menuArsipkanTahun() {

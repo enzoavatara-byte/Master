@@ -156,11 +156,17 @@ function buildMaster_() {
 
   // ---- Pilihan ----
   var opts = {}, order = {};
+  md.discipline = {};
   readOptional_(APP.SHEETS.OPTIONS).forEach(function (r, i) {
     var jenis = String(r['Jenis'] || '').trim(), nilai = String(r['Nilai'] || '').trim();
     if (!jenis || !nilai || !isActiveRow_(r['Aktif'])) return;
     var def = APP.OPTION_I18N[nilai] || [];
     addTr_(md, nilai, r['Nilai (中文)'] || def[0], r['Nilai (English)'] || def[1]);
+    if (jenis === 'Jenis Kerusakan' && String(r['Discipline'] || '').trim()) {
+      var dsc = normDiscipline_(r['Discipline']);
+      if (dsc) md.discipline[nilai] = dsc;
+      else warnings.push('Pilihan: Discipline "' + r['Discipline'] + '" untuk ' + nilai + ' tidak dikenal (pakai ' + APP.TPM_DISCIPLINES.join(' / ') + ').');
+    }
     if (!opts[jenis]) opts[jenis] = [];
     if (opts[jenis].indexOf(nilai) !== -1) return;
     var u = Number(r['Urutan']);

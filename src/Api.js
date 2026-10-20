@@ -576,13 +576,18 @@ function apiDashboard(f) {
 
 // ---------- Laporan (Admin) ----------
 
-/** Bangun ulang penuh tab "Laporan <tahun>" dan "Rekap <tahun>" sekarang (sehari-hari diperbarui langsung tiap aksi). */
+/**
+ * Bangun ulang penuh tab "Laporan <tahun>" dan "Rekap <tahun>" sekarang (sehari-hari diperbarui langsung tiap aksi),
+ * lalu tab TPM per project (di luar lock: menerjemahkan teks baru). TPM gagal → Laporan & Rekap tetap dilaporkan berhasil.
+ */
 function apiBuildReports(year) {
   requireUser_([APP.ROLES.ADMIN]);
   var y = year ? checkYear_(year) : yearOf_(new Date());
   var built = withLock_(function () { return { lap: buildLaporan_(y), rek: buildRekap_(y) }; });   // tidak bentrok dengan sinkron langsung
-  var lap = built.lap, rek = built.rek;
-  return { year: y, laporan: lap.sheet, rows: lap.rows, rekap: rek.sheet, spreadsheetUrl: SpreadsheetApp.getActive().getUrl() };
+  var lap = built.lap, rek = built.rek, tpm = null, tpmError = '';
+  try { tpm = buildTpm_(); } catch (e) { tpmError = String(e && e.message || e); }
+  return { year: y, laporan: lap.sheet, rows: lap.rows, rekap: rek.sheet, spreadsheetUrl: SpreadsheetApp.getActive().getUrl(),
+    tpm: tpm ? tpm.sheets : [], tpmUntranslated: tpm ? tpm.untranslated : 0, tpmWarn: tpm ? tpm.warn : '', tpmError: tpmError };
 }
 
 // ---------- Saran teknisi → admin ----------

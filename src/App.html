@@ -1558,8 +1558,9 @@
     }
     if (isAdmin()) {
       html += '<div class="card"><div class="caps">Laporan format Excel</div><p class="small muted" style="margin:6px 0 12px">' +
-        t('Tab <b>Laporan {y}</b> & <b>Rekap</b> di Google Sheet diperbarui langsung setiap aksi. Tekan tombol ini setelah mengedit sheet Maintenance atau Format Laporan secara manual.', { y: new Date(serverNow()).getFullYear() }) + '</p>' +
-        '<button class="btn ghost" id="d-report">Perbarui Laporan & Rekap</button><div id="d-report-out"></div></div>';
+        t('Tab <b>Laporan {y}</b> & <b>Rekap</b> di Google Sheet diperbarui langsung setiap aksi. Tekan tombol ini setelah mengedit sheet Maintenance atau Format Laporan secara manual.', { y: new Date(serverNow()).getFullYear() }) + ' ' +
+        t('Tab <b>TPM &lt;project&gt;</b> (format Excel manager, 中文 + English) diperbarui tiap malam dan saat tombol ini ditekan.') + '</p>' +
+        '<button class="btn ghost" id="d-report">Perbarui Laporan, Rekap & TPM</button><div id="d-report-out"></div></div>';
     }
     if (d.warnings.length) {
       html += '<div class="card"><div class="caps" style="color:var(--warn)">' + t('Perlu dicek di Google Sheet ({n})', { n: d.warnings.length }) + '</div><ul class="small" style="margin:10px 0 0;padding-left:18px">' +
@@ -1571,7 +1572,12 @@
       busy(b, true, t('Membuat laporan…'));
       call('apiBuildReports').then(function (res) {
         busy(b, false);
+        var tpm = (res.tpm || []).map(function (s) { return s.sheet + ' (' + s.rows + ')'; }).join(', ');
         $('d-report-out').innerHTML = '<p class="small" style="margin:10px 0 0">' + esc(t('✓ {l} ({n} baris) & {r} diperbarui.', { l: res.laporan, n: res.rows, r: res.rekap })) + ' ' +
+          (tpm ? esc(t('✓ TPM: {s}.', { s: tpm })) + ' ' : '') +
+          (res.tpmError ? '<span style="color:var(--warn)">' + esc(t('TPM gagal: {e}', { e: res.tpmError })) + '</span> ' : '') +
+          (res.tpmWarn ? '<span style="color:var(--warn)">' + esc(res.tpmWarn) + '</span> ' : '') +
+          (res.tpmUntranslated ? esc(t('{n} teks belum diterjemahkan (kuota Google); tekan lagi nanti.', { n: res.tpmUntranslated })) + ' ' : '') +
           '<a href="' + esc(res.spreadsheetUrl) + '" target="_blank" style="color:var(--accent)">Buka Google Sheet</a></p>';
       }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
     };

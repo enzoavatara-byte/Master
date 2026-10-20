@@ -35,7 +35,10 @@ Riwayat versi: [CHANGELOG.md](CHANGELOG.md). Panduan singkat untuk teknisi & adm
 **2.5.1 — spreadsheet mudah dibaca:** tab **Ringkasan** (pilih tanggal → angka hari ini / sekarang / bulan ini, grafik, per project, pekerjaan terbuka) dan **Baca Saya** di depan,
 warna status & tab per kelompok, dropdown di sheet pengaturan, tab jarang dipakai disembunyikan (§4).
 
-Tahap berikutnya: **2.5.2** download riwayat (.xlsx) & Excel TPM; **2.5.3** statistik.
+**2.5.2**: tab **`TPM <project>`** = format Excel TPM manager (中文 + English per sel), siap di-copy ke Excel manager; jenis kerusakan baru
+Operasional / Produk / MES + kolom **Discipline** di `Pilihan` (§6).
+
+Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 
 ---
 
@@ -62,6 +65,10 @@ Tahap berikutnya: **2.5.2** download riwayat (.xlsx) & Excel TPM; **2.5.3** stat
 ---
 
 ## 2. Upgrade
+
+### Ke 2.5.2 (dari 2.5.1)
+Buat file Script **`Tpm`**; ganti `Config`, `Master`, `Code`, `Rekap`, `Api`, `Tampilan`, `Translate` (Script) dan `App`, `I18n`, `Panduan` (HTML). Yang lain tetap.
+**Run `setup`**: menambah kolom `Discipline` di `Pilihan` (diisi bawaan), jenis kerusakan Operasional / Produk / MES (jika belum ada), 4 kunci TPM di `Config`, dan tab `TPM <project>`. Lalu New version. Tidak ada izin baru.
 
 ### Ke 2.5.1 (dari 2.5.0)
 Buat file Script `Tampilan`; ganti `Config`, `Code`, `Rekap`, `Panduan`. **Run `setup`** (membuat Ringkasan & Baca Saya, merapikan semua tab), lalu New version.
@@ -103,7 +110,7 @@ Langkah:
 4. **Deploy → Manage deployments → ✏️ → New version → Deploy.** Bukan "New deployment" (URL berubah, semua QR mati).
 5. QR tidak perlu dicetak ulang.
 
-Install baru dari nol: buat spreadsheet → Extensions → Apps Script → paste 16 file + `appsscript.json` → Run `setup` → Deploy web app *Execute as: User accessing*, *Anyone with Google account* → share spreadsheet sebagai Editor ke semua user.
+Install baru dari nol: buat spreadsheet → Extensions → Apps Script → paste 17 file + `appsscript.json` → Run `setup` → Deploy web app *Execute as: User accessing*, *Anyone with Google account* → share spreadsheet sebagai Editor ke semua user.
 
 **Apakah update/deploy menghapus data, atau mengacaukan pekerjaan yang sedang berjalan?** Tidak:
 - Data ada di **Google Sheet**, kode ada di **Apps Script**. Deploy hanya mengganti kode. `setup` hanya *menambah* sheet/kolom/baris yang belum ada; tidak menghapus data.
@@ -209,12 +216,21 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
 - **`Rekap <tahun>`** = ringkasan per bulan (seperti 2.1).
 - Keduanya **diperbarui langsung setiap aksi** (Mulai, Pause, Resume, Pending, Lanjut, Selesai, Cancel, review, Abandoned): hanya baris pekerjaan itu yang ditulis di Laporan, dan angka Rekap dihitung ulang dari data yang sudah di memori.
   Cancel → barisnya dihapus dan NO diurutkan ulang. Matikan dengan `Config` → `LAPORAN_LANGSUNG` = `Tidak` jika tombol terasa terlalu lambat.
-- **Bangun ulang penuh** tiap malam ±01:00, lewat Dashboard → **Perbarui Laporan & Rekap**, atau menu spreadsheet → **Laporan & Rekap tahunan**. Perlu setelah admin **mengedit sheet `Maintenance` secara manual** (edit manual tidak memicu sinkron). Mengubah `Format Laporan` otomatis memicu bangun ulang di aksi berikutnya.
+- **Bangun ulang penuh** tiap malam ±01:00, lewat Dashboard → **Perbarui Laporan, Rekap & TPM**, atau menu spreadsheet → **Laporan & Rekap tahunan**. Perlu setelah admin **mengedit sheet `Maintenance` secara manual** (edit manual tidak memicu sinkron). Mengubah `Format Laporan` otomatis memicu bangun ulang di aksi berikutnya.
 - Kolom terakhir tab Laporan (tersembunyi, "ID sistem …") adalah kunci baris untuk sinkron. Jangan dihapus; kalau terhapus, aksi berikutnya membangun ulang tab.
 - Jangan edit tab Laporan/Rekap (ditulis ulang). Perbaiki datanya di `Maintenance`.
 - Untuk dikirim: klik kanan tab → **Copy to → New spreadsheet** → File → Download → Microsoft Excel.
+- **`TPM <project>`** (2.5.2) = format Excel TPM manager ("Statistical Analysis of Issues Reported from Production"): kotak Status Overview (COUNTIF per Discipline), Total tasks, judul kolom baris 8,
+  data mulai **B9**: No · Machine · Issue Description · Root Cause · Solution · End Time · Discipline · Responsibility · Date · Notes. Satu tab per project.
+  - Isi: pekerjaan `TPM_TIPE` (default Corrective) yang **Completed**, dimulai sejak `TPM_MULAI` (kosong = 1 Januari), urut waktu mulai. Sumber: Machine = mesin (atau line), Issue = Masalah + detail, Root Cause = Penyebab + detail,
+    Solution = Penanganan + detail + satu baris sparepart, End Time = jam selesai, Date = tanggal mulai, Responsibility = nama teknisi, Notes = Catatan (tanpa cap waktu).
+  - Sel teks = `中文` + baris baru + `(English)`. Pilihan, mesin & line memakai kolom 中文/English di sheet; teks bebas lewat Google Translate + sheet `Terjemahan` (koreksi admin dipakai). Maks 300 teks baru per bahasa sekali jalan; sisanya tetap teks asli dan diterjemahkan saat pembaruan berikutnya.
+  - **Discipline** dari `Pilihan` → kolom `Discipline` (Jenis Kerusakan): bawaan Elektrikal/Mekanikal/Pneumatik/Program = Machine, Operasional = Operation, Produk = Product Item, MES = MES. Kosong/salah = Machine (+ peringatan di Dashboard).
+  - Nilai statis, dibangun ulang tiap malam, lewat Dashboard → **Perbarui Laporan, Rekap & TPM**, menu spreadsheet → **Perbarui tab TPM**, dan saat `setup`. Tidak di jalur tombol teknisi (terjemahan butuh waktu).
+  - Cara kirim: blok **B9 sampai baris terakhir kolom K** → Copy → paste di Excel manager. Jangan edit tab TPM (tertimpa); perbaiki di `Maintenance` / `Pilihan` / `Terjemahan`.
+  - Bedanya dengan contoh Excel: Total tasks = jumlah baris sebenarnya (contoh: `COUNT(...)-3`), judul baris 6 dari `TPM_JUDUL` (contoh masih judul template checklist), kolom A (R/Y/G) dan aturan warna R/Y/G sisa template tidak dipakai, tanggal `yyyy-mm-dd`.
 - **Hapus data testing** (sebelum mulai pakai sungguhan): menu → **Hapus data testing…** → tanggal mulai pakai (dd/mm/yyyy; kosong = semua) → cek jumlah → ketik `HAPUS`.
-  Menghapus permanen pekerjaan yang dimulai sebelum tanggal itu dari `Maintenance`, `Log`, `Pemakaian Sparepart` dan tab Arsip (termasuk sheet yang diproteksi), lalu membangun ulang Laporan & Rekap. Tab per baterai & `Pending Work` ikut bersih (rumus). Sheet master tidak disentuh.
+  Menghapus permanen pekerjaan yang dimulai sebelum tanggal itu dari `Maintenance`, `Log`, `Pemakaian Sparepart` dan tab Arsip (termasuk sheet yang diproteksi), lalu membangun ulang Laporan, Rekap & TPM. Tab per baterai & `Pending Work` ikut bersih (rumus). Sheet master tidak disentuh.
   Menghapus baris langsung di tab Laporan/Rekap **tidak bisa**: tab itu selalu dibuat ulang dari `Maintenance`. Backup dulu (File → Make a copy); bisa dikembalikan lewat File → Version history.
 - **Arsip** (awal tahun, menu → Arsipkan data tahun lalu): pekerjaan final + Log + **pemakaian sparepart** pindah ke `Arsip <tahun>`, `Arsip Log <tahun>`, `Arsip Sparepart <tahun>`.
   Laporan tahun itu tetap utuh karena ikut membaca tab arsip.
