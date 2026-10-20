@@ -896,7 +896,7 @@ const wibMonth = (d) => new Date(d.getTime() + 7 * 3600e3).getUTCMonth();
 test('rekap: tab "Rekap 2026" 12 bulan + total, MTTR tertimbang, bulan = bulan selesai', () => {
   ctx.buildRekap_(2026);
   const rows = rekapRows(2026);
-  assert.strictEqual(rows[0][0], 'Bulan');
+  assert.strictEqual(rows[0][0], 'Bulan\n月份', 'judul kolom dua bahasa');
   jeq(rows.slice(1, 13).map(r => r[0]), ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']);
   const all = ctx.readTable_('Maintenance').filter(r => finalOf(r) instanceof Date);
   const done = all.filter(r => r.Status === 'Completed');
@@ -1304,6 +1304,121 @@ test('hapus data testing: sebelum tanggal → pekerjaan + Log + sparepart (juga 
     assert.strictEqual(lap(2027).rows.length, 1);
     ctx.apiCancel(id, 'Input ganda');
   });
+});
+
+// ---------- 2.5.1 tampilan spreadsheet ----------
+const ring = () => ss.getSheetByName('Ringkasan');
+const cellOf = (sh, a1) => { const m = /^([A-Z])(\d+)$/.exec(a1); return (sh.data[+m[2] - 1] || [])[m[1].charCodeAt(0) - 65]; };
+const findCell = (sh, re) => { for (let i = 0; i < sh.data.length; i++) for (let j = 0; j < sh.data[i].length; j++) if (re.test(String(sh.data[i][j]))) return { r: i + 1, c: j + 1, v: sh.data[i][j] }; return null; };
+const colL = (name) => ctx.colLetter_(ctx.headers_(ss.getSheetByName('Maintenance')).indexOf(name) + 1);
+
+test('2.5.1 setup: Ringkasan & Baca Saya paling depan, warna tab per kelompok, tab jarang dipakai disembunyikan', () => {
+  assert.strictEqual(ctx.setup(), 'Setup selesai.', 'tampilan tanpa masalah');
+  const y = ctx.yearOf_(new FakeDate()), names = ss.getSheets().map(s => s.getName());
+  jeq(names.slice(0, 8), ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'Rekap ' + y, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart']);
+  const shown = ss.getSheets().filter(s => !s.isSheetHidden()).map(s => s.getName());
+  jeq(shown, ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'Rekap ' + y, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart', 'Users', 'Lines', 'Mesin', 'Sparepart', 'Pilihan']);
+  for (const n of ['Log', 'Terjemahan', 'Config', 'Form', 'Maintenance VF7']) assert.ok(ss.getSheetByName(n).isSheetHidden(), n + ' disembunyikan');
+  ss.getSheets().filter(s => /^(Laporan|Rekap) \d{4}$/.test(s.getName()) && !s.getName().endsWith(' ' + y))
+    .forEach(s => assert.ok(s.isSheetHidden(), s.getName() + ' (tahun lain) disembunyikan'));
+  assert.strictEqual(ss.getSheetByName('Ringkasan').tabColor, ctx.TEMA_.tab.baca);
+  assert.strictEqual(ss.getSheetByName('Users').tabColor, ctx.TEMA_.tab.atur);
+  assert.strictEqual(ss.getSheetByName('Maintenance').tabColor, ctx.TEMA_.tab.app);
+  ctx.menuTampilkanSemuaTab();
+  assert.ok(ss.getSheets().every(s => !s.isSheetHidden()), 'menu → semua tab terlihat lagi');
+  ctx.rapikanTampilan_({ full: true });
+  assert.ok(ss.getSheetByName('Log').isSheetHidden(), 'rapikan lagi');
+});
+
+test('2.5.1 Ringkasan: rumus ke kolom Maintenance yang benar, tanggal pilihan dipertahankan, hanya sel tanggal terbuka', () => {
+  const R = ring();
+  assert.match(cellOf(R, 'K1'), /^=IF\(ISNUMBER\(\$C\$4\),INT\(\$C\$4\),TODAY\(\)\)$/, 'kosong = hari ini');
+  const st = colL('Status'), se = colL('Selesai'), ak = colL('Total aktif (menit)'), mm = colL('Masuk MTTR');
+  const selesai = findCell(R, /^Selesai 完成$/);
+  assert.match(R.data[selesai.r][selesai.c - 1], new RegExp("COUNTIFS\\('Maintenance'!" + st + '2:' + st + ',"Completed",\'Maintenance\'!' + se + '2:' + se));
+  const mttr = findCell(R, /^MTTR \(menit\)/);
+  assert.match(R.data[mttr.r][mttr.c - 1], new RegExp("FILTER\\('Maintenance'!" + ak + '2:' + ak + ",'Maintenance'!" + mm + '2:' + mm + '="Ya"'), 'MTTR = rata-rata Masuk MTTR = Ya (seperti Rekap)');
+  for (const t of ['HARI INI 今天', 'SEKARANG 现在', 'Per project', 'Jenis kerusakan', '5 mesin', 'Masih terbuka']) assert.ok(findCell(R, new RegExp(t)), t);
+  assert.ok(findCell(R, /^VF7$/) && findCell(R, /^E245$/), 'satu baris per project');
+  assert.ok(findCell(R, /"Elektrikal 电气"/), 'jenis kerusakan dua bahasa');
+  assert.strictEqual(R.charts.length, 2, 'grafik jenis kerusakan + selesai per hari');
+  assert.ok(R.charts.every(c => JSON.stringify(c.calls.setOption).length && c.calls.setPosition), 'grafik punya posisi');
+  // tanggal yang dipilih pembaca tidak hilang saat dibangun ulang (malam / setup)
+  R.data[3][2] = new FakeDate(Date.UTC(2026, 8, 15, 5));
+  ctx.rapikanTampilan_({});
+  assert.ok(cellOf(R, 'C4') instanceof Date && cellOf(R, 'C4').getUTCDate() === 15, 'tanggal pilihan tetap');
+  assert.strictEqual(R.charts.length, 2, 'grafik tidak dobel');
+  assert.strictEqual(R.protections.length, 1);
+  assert.strictEqual(R.protections[0].unprotected[0].a1, 'C4', 'hanya sel tanggal bebas diedit');
+  R.data[3][2] = '';
+});
+
+test('2.5.1 tabel: Maintenance belang + filter + status berwarna; kolom teknis disembunyikan; aturan warna admin tetap; idempotent', () => {
+  const M = ss.getSheetByName('Maintenance'), h = ctx.headers_(M);
+  assert.strictEqual(M.bandings.length, 1);
+  assert.ok(M.filter, 'filter di judul');
+  jeq([...M.hidden].map(c => h[c - 1]).sort(), ['Direview oleh', 'Konfirmasi terakhir', 'Mesin ID', 'Peringatan pada', 'Status sejak', 'Teknisi awal', 'Teknisi terakhir', 'Teknisi terlibat']);
+  const texts = M.cfRules.map(r => r.calls.whenTextEqualTo).filter(Boolean);
+  for (const s of ['Aktif', 'Pause', 'Pending', 'Completed', 'Cancelled', 'Abandoned', 'Perlu review']) assert.ok(texts.includes(s), s);
+  assert.ok(M.cfRules.some(r => /NOW\(\)/.test(r.calls.whenFormulaSatisfied || '')), 'tenggat lewat merah');
+  const admin = { kind: 'cf', calls: { whenTextEqualTo: 'L01', setBackground: '#ABCDEF' } };
+  admin.getBooleanCondition = () => ({ getBackground: () => '#ABCDEF', getFontColor: () => null });
+  M.cfRules.push(admin);
+  const n = M.cfRules.length;
+  ctx.rapikanTampilan_({ full: true });
+  assert.strictEqual(M.cfRules.length, n, 'tidak menumpuk');
+  assert.ok(M.cfRules.includes(admin), 'aturan warna buatan admin dipertahankan');
+  assert.strictEqual(M.bandings.length, 1);
+  const U = ss.getSheetByName('Users'), uh = ctx.headers_(U);
+  const dv = (name) => U.validations.filter(v => v.range.c === uh.indexOf(name) + 1).pop().rule.calls.requireValueInList[0];
+  jeq(dv('Peran'), ['Teknisi', 'Admin']); jeq(dv('Aktif'), ['Ya', 'Tidak']); jeq(dv('Bahasa'), ['id', 'zh']);
+  assert.ok(U.cfRules.some(r => /="Tidak"$/.test(r.calls.whenFormulaSatisfied || '')), 'baris nonaktif dipudarkan');
+});
+
+test('2.5.1 malam: tabel hanya disentuh jika baris sheet bertambah; Laporan & Rekap tetap berwarna setelah dibangun ulang', () => {
+  const M = ss.getSheetByName('Maintenance');
+  const before = M.bandings[0];
+  ctx.rapikanTampilan_({});
+  assert.strictEqual(M.bandings[0], before, 'tanpa baris baru: tidak diulang');
+  M.getMaxRows = () => 1500;
+  ctx.rapikanTampilan_({});
+  assert.strictEqual(M.bandings[0].range.nr, 1500, 'belang diperluas ke baris baru');
+  delete M.getMaxRows;
+  ctx.buildLaporan_(2026);
+  const L = ss.getSheetByName('Laporan 2026');
+  assert.strictEqual(L.bandings.length, 1);
+  jeq(L.cfRules.map(r => r.calls.whenTextEqualTo).sort(), ['Abandoned', 'Cancel', 'Dikerjakan', 'Pause', 'Pending', 'Selesai'], 'kolom Kondisi berwarna');
+  ctx.buildRekap_(2026);
+  assert.strictEqual(ss.getSheetByName('Rekap 2026').bandings.length, 1);
+});
+
+test('2.5.1 cache master: edit Ringkasan / Laporan tidak menghapus cache; sheet pengaturan & perubahan struktur tetap menghapus', () => {
+  cache.enabled = true; cache.store = {};
+  try {
+    as('budi@gmail.com', () => ctx.apiBootstrap('', '', {}));
+    const has = () => Object.keys(cache.store).some(k => /:n$/.test(k));
+    assert.ok(has());
+    ctx.onEdit({ range: ring().getRange(4, 3) });
+    ctx.onEdit({ range: ss.getSheetByName('Laporan 2026').getRange(5, 2) });
+    ctx.onMasterChange({ changeType: 'EDIT' });
+    ctx.onMasterChange({ changeType: 'FORMAT' });
+    assert.ok(has(), 'cache tetap → buka app tetap cepat');
+    ctx.onMasterChange({ changeType: 'REMOVE_ROW', source: ss });
+    assert.ok(!has(), 'hapus baris → cache dihapus (onChange tidak menyebut sheet-nya)');
+    as('budi@gmail.com', () => ctx.apiBootstrap('', '', {}));
+    ctx.onEdit({ range: ss.getSheetByName('Mesin').getRange(2, 2) });
+    assert.ok(!has(), 'edit Mesin → cache dihapus');
+    as('budi@gmail.com', () => ctx.apiBootstrap('', '', {}));
+    ctx.onMasterChange({ changeType: 'REMOVE_GRID', source: ss });
+    assert.ok(!has(), 'tab dihapus → cache dihapus');
+  } finally { cache.enabled = false; }
+});
+
+test('2.5.1 tampilan gagal tidak menggagalkan setup (pesan menyebut bagian yang gagal)', () => {
+  const orig = ctx.buildBacaSaya_;
+  ctx.buildBacaSaya_ = () => { throw new Error('uji gagal'); };
+  try { assert.match(ctx.setup(), /^Setup selesai\. Tampilan belum lengkap: Baca Saya: uji gagal/); }
+  finally { ctx.buildBacaSaya_ = orig; }
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

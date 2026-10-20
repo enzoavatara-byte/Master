@@ -11,8 +11,10 @@
  */
 
 var BULAN_ = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-var REKAP_HEADERS_ = ['Bulan', 'Pekerjaan selesai', 'Corrective', 'Preventive', 'MTTR Corrective (menit)',
-  'Total waktu aktif (jam)', 'Total waktu pause (jam)', 'Total waktu pending (jam)', 'Cancelled', 'Abandoned', 'Abandoned dihitung ke MTTR'];
+/** Judul kolom tab Rekap (tampilan saja, dua bahasa; tidak dibaca kode). */
+var REKAP_HEADERS_ = ['Bulan\n月份', 'Pekerjaan selesai\n完成数', 'Corrective\n故障维修', 'Preventive\n预防性维护', 'MTTR Corrective (menit)\n平均修复时间（分钟）',
+  'Total waktu aktif (jam)\n有效时间（小时）', 'Total waktu pause (jam)\n暂停时间（小时）', 'Total waktu pending (jam)\n挂起时间（小时）',
+  'Cancelled\n已取消', 'Abandoned\n已放弃', 'Abandoned dihitung ke MTTR\n计入 MTTR 的已放弃'];
 
 function yearOf_(d) { return Number(Utilities.formatDate(d, APP.TZ, 'yyyy')); }
 function monthOf_(d) { return Number(Utilities.formatDate(d, APP.TZ, 'MM')); }
@@ -115,6 +117,7 @@ function buildRekap_(year) {
   sh.getRange(4, 1, 1, w).setFontWeight('bold');
   sh.getRange(rows.length, 1, 1, w).setFontWeight('bold');
   sh.setFrozenRows(4);
+  styleRekap_(sh, rows.length, w);
   return { year: year, total: data.total, sheet: rekapName_(year) };
 }
 
@@ -144,6 +147,8 @@ function refreshRekap() {
     buildLaporan_(y);
     if (monthOf_(now) === 1) { buildRekap_(y - 1); buildLaporan_(y - 1); }
   });
+  // Di luar lock: hanya format & tab Ringkasan (rumus). Baris baru di tabel ikut belang & berwarna.
+  rapikanTampilan_({});
 }
 
 // ---------- Sinkron langsung: setiap aksi memperbarui Laporan & Rekap ----------
@@ -340,6 +345,7 @@ function buildLaporan_(year) {
   cols.forEach(function (c, j) {
     if (c.sumber === 'Tanggal' && fmtRows > 1) sh.getRange(3, j + 1, fmtRows - 1, 1).setNumberFormat('dd/mm/yyyy');
   });
+  styleLaporan_(sh, cols, fmtRows);
   return { year: year, sheet: laporanName_(year), rows: data.rows.length };
 }
 
@@ -371,7 +377,7 @@ function appendArchive_(name, srcHeaders, srcRows, keyOf) {
   if (out.length) sh.getRange(sh.getLastRow() + 1, 1, out.length, h.length).setValues(out);
   (APP.DATE_COLUMNS.Maintenance.concat(APP.DATE_COLUMNS.Log, APP.DATE_COLUMNS['Pemakaian Sparepart'])).forEach(function (col) {
     var c = h.indexOf(col) + 1;
-    if (c > 0 && sh.getLastRow() > 1) sh.getRange(2, c, sh.getLastRow() - 1, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
+    if (c > 0 && sh.getLastRow() > 1) sh.getRange(2, c, sh.getLastRow() - 1, 1).setNumberFormat(DATE_FMT_);
   });
   return out.length;
 }

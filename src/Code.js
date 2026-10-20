@@ -74,6 +74,9 @@ function onOpen() {
     .addSeparator()
     .addItem('Isi terjemahan otomatis (中文 / English)…', 'menuIsiTerjemahan')
     .addSeparator()
+    .addItem('Rapikan tampilan spreadsheet', 'menuRapikanTampilan')
+    .addItem('Tampilkan semua tab', 'menuTampilkanSemuaTab')
+    .addSeparator()
     .addItem('Muat ulang data master (jika perubahan sheet belum muncul)', 'menuMuatUlangMaster')
     .addItem('Tentang (versi ' + APP.VERSION + ')', 'menuTentang')
     .addToUi();
@@ -95,12 +98,20 @@ function onEdit(e) {
     } catch (err) { /* abaikan */ }
     return;
   }
-  if ([APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN, APP.SHEETS.SARAN].indexOf(name) !== -1) return; // bukan master
+  // Hanya sheet pengaturan yang ada di cache master. Edit lain (Maintenance, Ringkasan, Laporan, …) tidak menghapus cache,
+  // supaya buka app berikutnya tetap cepat. Nama tidak terbaca → hapus cache (aman).
+  if (name && APP.MASTER_SHEETS.indexOf(name) === -1) return;
   invalidateMaster_();
 }
 
-/** Trigger terpasang (setup): perubahan struktur (hapus/sisip baris, tab baru) juga menghapus cache. */
-function onMasterChange() {
+/**
+ * Trigger terpasang (setup): perubahan struktur (hapus/sisip baris, tab baru) juga menghapus cache.
+ * Edit nilai sudah ditangani onEdit (hanya sheet pengaturan) dan ganti format tidak mengubah data → dilewati.
+ * Event onChange tidak menyebut sheet mana yang berubah, jadi perubahan struktur selalu menghapus cache.
+ */
+function onMasterChange(e) {
+  var type = e && e.changeType;
+  if (type === 'EDIT' || type === 'FORMAT') return;
   invalidateMaster_();
 }
 
@@ -125,7 +136,7 @@ function menuMuatUlangMaster() {
 function cekFile() {
   var missing = [];
   var scripts = { Config: typeof APP, Db: typeof readTable_, Auth: typeof currentEmail_, Master: typeof masterData_,
-    Maintenance: typeof apiStart, Api: typeof apiBootstrap, Rekap: typeof buildLaporan_, Translate: typeof translate_ };
+    Maintenance: typeof apiStart, Api: typeof apiBootstrap, Rekap: typeof buildLaporan_, Translate: typeof translate_, Tampilan: typeof rapikanTampilan_ };
   Object.keys(scripts).forEach(function (f) { if (scripts[f] === 'undefined') missing.push(f + ' (script)'); });
   ['Index', 'App', 'Styles', 'Message', 'Panduan', 'I18n'].forEach(function (f) {
     try { HtmlService.createHtmlOutputFromFile(f); } catch (e) { missing.push(f + ' (HTML)'); }
@@ -167,7 +178,7 @@ function setup() {
     var h = headers_(sh);
     APP.DATE_COLUMNS[name].forEach(function (col) {
       var c = h.indexOf(col) + 1;
-      if (c > 0) sh.getRange(2, c, sh.getMaxRows() - 1, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
+      if (c > 0) sh.getRange(2, c, sh.getMaxRows() - 1, 1).setNumberFormat(DATE_FMT_);
     });
   });
 
@@ -266,7 +277,9 @@ function setup() {
   if (blank && ss.getSheets().length > 1 && blank.getLastRow() === 0) ss.deleteSheet(blank);
 
   invalidateMaster_();
-  return 'Setup selesai.';
+  // Tab Ringkasan & Baca Saya, warna, belang, filter, dropdown, urutan & sembunyikan tab. Gagal di sini tidak menggagalkan setup.
+  var p = rapikanTampilan_({ full: true });
+  return p.length ? 'Setup selesai. Tampilan belum lengkap: ' + p.join(' · ') : 'Setup selesai.';
 }
 
 /**
@@ -287,7 +300,7 @@ function buildDerivedSheets_(ss) {
     sh.getRange('A1').setFormula('=FILTER(' + src + 'A:' + lastCol + ', (ROW(' + src + 'A:A)=1)+(' + src + c + ':' + c + '="' + bat.replace(/"/g, '') + '"))');
     APP.DATE_COLUMNS.Maintenance.forEach(function (h) {
       var i = mh.indexOf(h) + 1;
-      if (i > 0) sh.getRange(2, i, sh.getMaxRows() - 1, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
+      if (i > 0) sh.getRange(2, i, sh.getMaxRows() - 1, 1).setNumberFormat(DATE_FMT_);
     });
   });
 
@@ -300,7 +313,7 @@ function buildDerivedSheets_(ss) {
   parts.push('ROUND((NOW()-' + src + col('Status sejak') + '2:' + col('Status sejak') + ')*24,1)');
   pw.getRange('A2').setFormula('=IFERROR(SORT(FILTER({' + parts.join(', ') + '}, ' + src + col('Status') + '2:' + col('Status') + '="' +
     APP.STATUS.PENDING + '"), 7, FALSE), "")');
-  pw.getRange(2, 5, pw.getMaxRows() - 1, 1).setNumberFormat('yyyy-mm-dd hh:mm');
+  pw.getRange(2, 5, pw.getMaxRows() - 1, 1).setNumberFormat(DATE_FMT_);
 }
 
 function prepDerived_(ss, name) {

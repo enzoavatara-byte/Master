@@ -46,17 +46,47 @@ class Range {
     return this;
   }
   setFormula(f) { this.sh.formulas[this.a1 || (this.r + ',' + this.c)] = f; return this; }
-  setNumberFormat() { return this; }
-  merge() { return this; }
-  setWrap() { return this; }
-  setFontWeight() { return this; }
-  setFontColor() { return this; }
   setValue(v) { return this.setValues([[v]]); }
+  getValue() { return this.getValues()[0][0]; }
   getRow() { return this.r; }
+  getColumn() { return this.c; }
   getNumRows() { return this.nr; }
+  getLastRow() { return this.r + this.nr - 1; }
+  getA1Notation() { return this.a1 || (this.r + ',' + this.c + ':' + this.nr + 'x' + this.nc); }
+  applyRowBanding(theme, header, footer) {
+    const b = { range: this, header, colors: {}, remove: () => { this.sh.bandings = this.sh.bandings.filter(x => x !== b); }, getRange: () => this };
+    ['setHeaderRowColor', 'setFirstRowColor', 'setSecondRowColor', 'setFooterRowColor'].forEach(m => { b[m] = (c) => { b.colors[m] = c; return b; }; });
+    this.sh.bandings.push(b);
+    return b;
+  }
+  createFilter() {
+    if (this.sh.filter) throw new Error('Sheet sudah punya filter');
+    const f = { range: this, remove: () => { this.sh.filter = null; } };
+    this.sh.filter = f;
+    return f;
+  }
+  setDataValidation(rule) { this.sh.validations.push({ range: this, rule }); return this; }
+  clearDataValidations() { this.sh.validations = []; return this; }
+}
+// Format: dicatat di sh.fmt ([nama, range, argumen]) supaya test bisa memeriksa, tanpa meniru tampilan Sheets.
+['setNumberFormat', 'merge', 'mergeAcross', 'breakApart', 'setWrap', 'setWrapStrategy', 'setFontWeight', 'setFontColor', 'setFontSize',
+ 'setBackground', 'setHorizontalAlignment', 'setVerticalAlignment', 'setBorder', 'setNote'].forEach((m) => {
+  Range.prototype[m] = function (...a) { this.sh.fmt.push([m, this.getA1Notation(), a]); return this; };
+});
+/** Builder Apps Script tiruan: setiap setX(..)/whenX(..) dicatat, build() mengembalikan catatan itu. */
+function recorder(kind) {
+  const spec = { kind, calls: {}, log: [] };
+  // seperti ConditionalFormatRule asli: warna aturan bisa dibaca lagi (dipakai untuk mengenali aturan buatan aplikasi)
+  spec.getBooleanCondition = () => ({ getBackground: () => spec.calls.setBackground || null, getFontColor: () => spec.calls.setFontColor || null });
+  const p = new Proxy({}, { get: (_, k) => k === 'build' ? () => spec : (...a) => { spec.calls[k] = a.length <= 1 ? a[0] : a; spec.log.push([k, a]); return p; } });
+  return p;
 }
 class Sheet {
-  constructor(name) { this.name = name; this.data = []; this.formulas = {}; this.protections = []; }
+  constructor(name) {
+    this.name = name; this.data = []; this.formulas = {}; this.protections = [];
+    this.fmt = []; this.bandings = []; this.filter = null; this.validations = []; this.cfRules = []; this.charts = [];
+    this.tabColor = null; this.isHidden = false; this.widths = {};
+  }
   getName() { return this.name; }
   getLastRow() {
     let n = this.data.length;
@@ -66,7 +96,7 @@ class Sheet {
   getLastColumn() { return this.data.reduce((m, r) => Math.max(m, r.length), 0); }
   getMaxRows() { return 1000; }
   getMaxColumns() { return Math.max(26, this.getLastColumn()); }
-  hideColumns(c) { (this.hidden = this.hidden || new Set()).add(c); }
+  hideColumns(c, n) { this.hidden = this.hidden || new Set(); for (let i = 0; i < (n || 1); i++) this.hidden.add(c + i); }
   showColumns() { this.hidden = new Set(); }
   deleteRow(r) { this.data.splice(r - 1, 1); }
   getRange(r, c, nr, nc) {
@@ -75,15 +105,41 @@ class Sheet {
   }
   getDataRange() { return new Range(this, 1, 1, this.getLastRow(), this.getLastColumn()); }
   appendRow(row) { this.data.push(row.slice()); }
-  setFrozenRows() {}
-  clear() { this.data = []; this.formulas = {}; }
+  setFrozenRows(n) { this.frozenRows = n; }
+  setFrozenColumns(n) { this.frozenCols = n; }
+  clear() { this.data = []; this.formulas = {}; this.fmt = []; }
   getProtections() { return this.protections; }
-  protect() { const p = { setDescription() { return p; }, setWarningOnly() { return p; } }; this.protections.push(p); return p; }
+  protect() {
+    const p = { unprotected: [], setDescription() { return p; }, setWarningOnly() { return p; },
+      setUnprotectedRanges: (r) => { p.unprotected = r; return p; }, remove: () => { this.protections = this.protections.filter(x => x !== p); } };
+    this.protections.push(p);
+    return p;
+  }
+  getBandings() { return this.bandings.slice(); }
+  getFilter() { return this.filter; }
+  getConditionalFormatRules() { return this.cfRules.slice(); }
+  setConditionalFormatRules(r) { this.cfRules = r.slice(); }
+  setTabColor(c) { this.tabColor = c; return this; }
+  getTabColor() { return this.tabColor; }
+  hideSheet() { if (this.ss && this.ss.active === this) throw new Error('Tab aktif tidak bisa disembunyikan'); this.isHidden = true; return this; }
+  showSheet() { this.isHidden = false; return this; }
+  isSheetHidden() { return this.isHidden; }
+  getIndex() { return this.ss ? this.ss.sheets.indexOf(this) + 1 : 1; }
+  setColumnWidth(c, w) { this.widths[c] = w; return this; }
+  setRowHeight(r, h) { (this.heights = this.heights || {})[r] = h; return this; }
+  setHiddenGridlines() { return this; }
+  newChart() { return recorder('chart'); }
+  insertChart(c) { this.charts.push(c); }
+  getCharts() { return this.charts.slice(); }
+  removeChart(c) { this.charts = this.charts.filter(x => x !== c); }
 }
 class Spreadsheet {
-  constructor() { this.sheets = [new Sheet('Sheet1')]; this.tz = 'UTC'; }
+  constructor() { this.sheets = [new Sheet('Sheet1')]; this.sheets[0].ss = this; this.tz = 'UTC'; }
   getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
-  insertSheet(n) { const s = new Sheet(n); this.sheets.push(s); return s; }
+  insertSheet(n, i) { const s = new Sheet(n); s.ss = this; if (i == null) this.sheets.push(s); else this.sheets.splice(i, 0, s); return s; }
+  setActiveSheet(s) { this.active = s; return s; }
+  getActiveSheet() { return this.active || this.sheets[0]; }
+  moveActiveSheet(pos) { const s = this.getActiveSheet(); this.sheets = this.sheets.filter(x => x !== s); this.sheets.splice(pos - 1, 0, s); }
   getSheets() { return this.sheets; }
   deleteSheet(s) { this.sheets = this.sheets.filter(x => x !== s); }
   setSpreadsheetTimeZone(tz) { this.tz = tz; }
@@ -133,6 +189,11 @@ const ctx = {
   SpreadsheetApp: {
     getActive: () => ss, flush() {},
     ProtectionType: { SHEET: 'SHEET' },
+    BandingTheme: { LIGHT_GREY: 'LIGHT_GREY' },
+    WrapStrategy: { CLIP: 'CLIP', OVERFLOW: 'OVERFLOW', WRAP: 'WRAP' },
+    BorderStyle: { SOLID: 'SOLID', SOLID_MEDIUM: 'SOLID_MEDIUM', SOLID_THICK: 'SOLID_THICK' },
+    newConditionalFormatRule: () => recorder('cf'),
+    newDataValidation: () => recorder('dv'),
     RecalculationInterval: { HOUR: 'HOUR' },
     getUi: () => ({ createMenu: (name) => { ui.menus.push(name); return { addItem() { return this; }, addSeparator() { return this; }, addToUi() {} }; } })
   },
@@ -152,6 +213,7 @@ const ctx = {
     return String(text).split('\n').map(l => '[' + tgt + '] ' + l).join(this.joinLines ? ' ' : '\n');
   } },
   CacheService: { getScriptCache: () => scriptCache },
+  Charts: { ChartType: { BAR: 'BAR', COLUMN: 'COLUMN', PIE: 'PIE' }, ChartHiddenDimensionStrategy: { SHOW_BOTH: 'SHOW_BOTH' } },
   Utilities,
   ScriptApp: {
     getProjectTriggers: () => triggers,

@@ -5,7 +5,7 @@
  */
 var APP = {
   NAME: 'MTTR',          // nama default; per lokasi diubah lewat Config → NAMA_APLIKASI
-  VERSION: '2.5.0',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
+  VERSION: '2.5.1',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
   TZ: 'Asia/Jakarta',
   DATE_FMT: 'yyyy-MM-dd HH:mm:ss',
 
@@ -29,6 +29,9 @@ var APP = {
     SARAN: 'Saran',
     RENCANA: 'Rencana'
   },
+
+  /** Sheet pengaturan yang dibaca ke cache master: edit di sini → cache dihapus. Edit sheet lain (Ringkasan, Laporan, …) tidak. */
+  MASTER_SHEETS: ['Users', 'Factory', 'Projects', 'Lines', 'Mesin', 'Sparepart', 'Format Laporan', 'Catatan Panduan', 'Pilihan', 'Form', 'Config', 'Rencana'],
 
   /** Sheet yang ditulis/dibaca kode. Tab turunan (FILTER) dibuat terpisah di setup(). */
   HEADERS: {

@@ -32,7 +32,10 @@ Riwayat versi: [CHANGELOG.md](CHANGELOG.md). Panduan singkat untuk teknisi & adm
 
 **Teknisi China tetap butuh akun Google** (dibuatkan Gmail; daftarkan di `Users` dengan `Bahasa` = `zh`). Login tanpa Google = update besar, lihat Rencana.
 
-Tahap berikutnya: **2.5.1** download riwayat (.xlsx) & Excel TPM; **2.5.2** statistik.
+**2.5.1 — spreadsheet mudah dibaca:** tab **Ringkasan** (pilih tanggal → angka hari ini / sekarang / bulan ini, grafik, per project, pekerjaan terbuka) dan **Baca Saya** di depan,
+warna status & tab per kelompok, dropdown di sheet pengaturan, tab jarang dipakai disembunyikan (§4).
+
+Tahap berikutnya: **2.5.2** download riwayat (.xlsx) & Excel TPM; **2.5.3** statistik.
 
 ---
 
@@ -59,6 +62,10 @@ Tahap berikutnya: **2.5.1** download riwayat (.xlsx) & Excel TPM; **2.5.2** stat
 ---
 
 ## 2. Upgrade
+
+### Ke 2.5.1 (dari 2.5.0)
+Buat file Script `Tampilan`; ganti `Config`, `Code`, `Rekap`, `Panduan`. **Run `setup`** (membuat Ringkasan & Baca Saya, merapikan semua tab), lalu New version.
+Dari 2.2.x langsung ke 2.5.1: ikuti langkah 2.5.0 di bawah ditambah file `Tampilan`, cukup satu kali Run `setup`.
 
 ### Ke 2.5.0 (dari 2.2.x)
 
@@ -96,7 +103,7 @@ Langkah:
 4. **Deploy → Manage deployments → ✏️ → New version → Deploy.** Bukan "New deployment" (URL berubah, semua QR mati).
 5. QR tidak perlu dicetak ulang.
 
-Install baru dari nol: buat spreadsheet → Extensions → Apps Script → paste 15 file + `appsscript.json` → Run `setup` → Deploy web app *Execute as: User accessing*, *Anyone with Google account* → share spreadsheet sebagai Editor ke semua user.
+Install baru dari nol: buat spreadsheet → Extensions → Apps Script → paste 16 file + `appsscript.json` → Run `setup` → Deploy web app *Execute as: User accessing*, *Anyone with Google account* → share spreadsheet sebagai Editor ke semua user.
 
 **Apakah update/deploy menghapus data, atau mengacaukan pekerjaan yang sedang berjalan?** Tidak:
 - Data ada di **Google Sheet**, kode ada di **Apps Script**. Deploy hanya mengganti kode. `setup` hanya *menambah* sheet/kolom/baris yang belum ada; tidak menghapus data.
@@ -123,6 +130,11 @@ Rekap gabungan dua factory (opsional): file ketiga dengan `IMPORTRANGE` ke tab `
 
 ## 4. Panduan edit sheet (apa yang diubah, di mana)
 
+**Membaca spreadsheet (2.5.1).** Mulai dari tab **Ringkasan**; arti tab & warna ada di tab **Baca Saya**.
+Warna tab: hijau = mulai di sini · kuning = laporan · biru = pengaturan (boleh diedit admin) · abu-abu = ditulis aplikasi (jangan diedit).
+Tab yang jarang dipakai disembunyikan → menu → **Tampilkan semua tab**; menu → **Rapikan tampilan spreadsheet** menyembunyikannya lagi dan memperbaiki format.
+Ringkasan hanya berisi rumus ke `Maintenance` (dihitung Google Sheets, bukan aplikasi). Yang boleh diubah hanya sel tanggal kuning. Data tahun yang sudah diarsipkan tidak ikut dihitung.
+
 Aturan umum: **kolom `Aktif` boleh kosong = aktif** (kecuali di `Users`, wajib `Ya`). Matikan dengan `Tidak`; **jangan hapus baris**, karena riwayat masih merujuk ke baris itu.
 Nama header kolom jangan diganti. Urutan kolom boleh diubah.
 
@@ -142,6 +154,7 @@ Nama header kolom jangan diganti. Urutan kolom boleh diubah.
 | `Terjemahan` | Hasil tombol 🌐 (Google Translate) | Teks · Bahasa asal · id · zh · en · Sumber · Diperbarui. Kolom id/zh/en boleh dikoreksi |
 | `Saran` | Saran teknisi (ditulis aplikasi) | Tanggal · Nama · Kategori · Isi · Terjemahan · Status · Tanggapan. Tanggapi dari aplikasi (💡 Saran) |
 | `Rencana` | Rencana update di Panduan | Judul · Isi · Status · Target · Urutan · Aktif |
+| `Ringkasan`, `Baca Saya` | Dibuat aplikasi (setup / tiap malam) | Jangan diedit selain sel tanggal kuning di Ringkasan |
 | `Config` | Aturan | `WARN_HOURS` 3 · `ABANDON_HOURS` 4 · `EMAIL_PERINGATAN` · `SHIFT_MULAI` · `MTTR_TIPE` · `NAMA_APLIKASI` · `LAPORAN_JUDUL` · `STOP_LINE_DEFAULT` Corrective · `LAPORAN_LANGSUNG` Ya · `CEK_AKUN` Ya |
 
 **Kolom 中文 / English** (`Pilihan`: `Nilai (中文)`, `Nilai (English)`; `Form`: `Label (中文)`; `Mesin`: `Nama (中文)`, `Nama (English)`; `Lines`: `Nama (中文)`):
@@ -252,7 +265,7 @@ BOM dihapus, jadi halaman line tidak lagi membawa daftar BOM.
 ## 9. Test & preview
 
 ```bash
-npm test          # 65 test logika server (mock Sheets + jam palsu + Google Translate palsu)
+npm test          # 72 test logika server (mock Sheets + jam palsu + Google Translate palsu)
 npm run perf      # jumlah panggilan ke Sheets per aksi
 npm run preview   # http://localhost:8787/?as=owner@gmail.com
                   # simulasi QR: &line=L01   QR mesin: &line=L11&mesin=M-E1

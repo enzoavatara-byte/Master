@@ -3,6 +3,27 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.5.1 — spreadsheet mudah dibaca
+**Baru**
+- Tab **Ringkasan** paling depan (dua bahasa): pilih tanggal di sel kuning (kosong = hari ini) → kotak angka **hari ini** (dimulai, selesai, MTTR, stop line), **sekarang** (sedang dikerjakan, pending, lewat tenggat, perlu review), **bulan ini** (selesai, MTTR, corrective/preventive), status berwarna, grafik selesai per hari & jenis kerusakan, per project vs target, 5 mesin tersering, daftar pekerjaan yang masih terbuka. Semua berupa rumus: selalu terbaru, tidak memperlambat tombol teknisi. MTTR dihitung sama seperti Rekap.
+- Tab **Baca Saya**: arti setiap tab & warna, mana yang boleh diedit, aturan penting.
+- Semua tabel: judul berwarna & dibekukan, baris belang, filter, status berwarna (Aktif biru, Pending kuning, Completed hijau, Abandoned merah), tenggat lewat merah, baris nonaktif dipudarkan, tanggal `dd/mm/yyyy hh:mm`, menit tanpa desimal.
+- Sheet pengaturan: **dropdown** untuk Aktif (Ya/Tidak), Peran, Bahasa, Untuk, Tipe, Wajib, status Saran (salah ketik diberi tanda).
+- Tab diberi warna per kelompok (hijau = mulai di sini, kuning = laporan, biru = pengaturan, abu-abu = ditulis aplikasi) dan diurutkan. Tab jarang dipakai disembunyikan: Projects, Factory, Form, Format Laporan, Catatan Panduan, Config, Rencana, Log, Terjemahan, Maintenance per baterai, Arsip, Laporan/Rekap tahun lalu.
+- Menu: **Rapikan tampilan spreadsheet**, **Tampilkan semua tab**.
+- Maintenance: kolom email & cap waktu sistem disembunyikan (data tetap ada), 2 kolom pertama dibekukan.
+- Laporan: warna & baris belang, kolom Kondisi berwarna (kolom & urutan tidak berubah). Rekap: judul kolom dua bahasa, baris total menonjol.
+
+**Kecepatan**
+- Edit di sheet yang bukan pengaturan (Ringkasan, Laporan, Rekap, …) tidak lagi menghapus cache master → buka app berikutnya tetap cepat. Edit di Users/Lines/Mesin/… tetap langsung terlihat.
+- Aksi teknisi tidak bertambah panggilan Sheets. Format dirapikan saat setup, menu, dan tiap malam (hanya jika baris sheet bertambah).
+
+**Catatan**
+- Aturan warna (conditional formatting) yang dibuat admin sendiri dipertahankan; filter di tabel dibuat ulang saat setup (kriteria filter yang sedang aktif hilang).
+- `setup` sedikit lebih lama (merapikan ±25 tab).
+
+**File**: baru `Tampilan` (Script). Berubah: `Config`, `Code`, `Rekap`, `Panduan`. **Wajib Run `setup`**, lalu New version.
+
 ## 2.5.0 — bahasa 中文 & teknisi China
 **Baru**
 - Tampilan **中文 (简体)**: tombol **中 / ID** di Beranda (tersimpan di HP). Bahasa awal per orang dari `Users` → kolom `Bahasa` (`zh`). Semua menu, tombol, pesan, panduan.
