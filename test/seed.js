@@ -21,13 +21,15 @@ U.appendRow(['andi@gmail.com', 'Andi Wijaya', 'Teknisi', 'Ya']);
 U.appendRow(['sari@gmail.com', 'Sari Lestari', 'Teknisi', 'Ya']);
 const L = ss.getSheetByName('Lines');
 const rowOf = (sheet, obj) => ctx.objToRow_(ss.getSheetByName(sheet).data[0].map(h => String(h).trim()), obj);
+// Teknisi China (2.5): tampilan 中文
+U.appendRow(rowOf('Users', { Email: 'li@gmail.com', Nama: 'Li Wei 李伟', Peran: 'Teknisi', Aktif: 'Ya', Bahasa: 'zh' }));
 // Factory 1 (VF7, Limo7) & Factory 2 (E22H, E245). L03 punya sub-line A/B (Grup L03).
-// [Line ID, Nama, Factory, Baterai, Grup, Area, Proses, Alias]
-[['L01', 'Assy Cell 1', 'F1', '', '', 'Hall A', 'Assembly', 'AC1, Cell satu'], ['L02', 'Assy Cell 2', 'F1', '', '', 'Hall A', 'Assembly', 'AC2'],
- ['L03-A', 'Formation 1A', 'F1', '', 'L03', 'Hall B', 'Formation', ''], ['L03-B', 'Formation 1B', 'F1', '', 'L03', 'Hall B', 'Formation', ''],
- ['L11', 'Assy E22H', 'F2', 'E22H', '', 'Gedung 2', 'Modul Line', 'E22 assy'], ['L12', 'Assy E245', 'F2', 'E245', '', 'Gedung 2', 'Modul Line', ''],
- ['L13', 'Packing', 'F2', '', '', 'Gedung 2', 'Packing', 'Wrapping']].forEach(l => L.appendRow(rowOf('Lines', {
-  'Line ID': l[0], 'Nama Line': l[1], 'Factory ID': l[2], 'Baterai': l[3], 'Grup': l[4], 'Area': l[5], 'Proses': l[6], 'Alias': l[7], 'Aktif': 'Ya' })));
+// [Line ID, Nama, Factory, Baterai, Grup, Area, Proses, Alias, Nama (中文)]
+[['L01', 'Assy Cell 1', 'F1', '', '', 'Hall A', 'Assembly', 'AC1, Cell satu', '电芯组装 1'], ['L02', 'Assy Cell 2', 'F1', '', '', 'Hall A', 'Assembly', 'AC2', '电芯组装 2'],
+ ['L03-A', 'Formation 1A', 'F1', '', 'L03', 'Hall B', 'Formation', '', '化成 1A'], ['L03-B', 'Formation 1B', 'F1', '', 'L03', 'Hall B', 'Formation', '', '化成 1B'],
+ ['L11', 'Assy E22H', 'F2', 'E22H', '', 'Gedung 2', 'Modul Line', 'E22 assy', ''], ['L12', 'Assy E245', 'F2', 'E245', '', 'Gedung 2', 'Modul Line', '', ''],
+ ['L13', 'Packing', 'F2', '', '', 'Gedung 2', 'Packing', 'Wrapping', '包装']].forEach(l => L.appendRow(rowOf('Lines', {
+  'Line ID': l[0], 'Nama Line': l[1], 'Factory ID': l[2], 'Baterai': l[3], 'Grup': l[4], 'Area': l[5], 'Proses': l[6], 'Alias': l[7], 'Aktif': 'Ya', 'Nama (中文)': l[8] })));
 const F = ss.getSheetByName('Factory');
 F.data[1][2] = 'Bogor'; F.data[2][2] = 'Cikarang';
 const P = ss.getSheetByName('Projects'), ph = P.data[0];
@@ -37,8 +39,9 @@ P.data.slice(1).forEach(r => {
   r[ph.indexOf('Target MTTR (menit)')] = { VF7: 45, Limo7: 30, E22H: 30, E245: 40 }[b];
 });
 const MS = ss.getSheetByName('Mesin');
-[['M-STK', 'Stacking', 'L01'], ['M-WLD', 'Welding', 'L01'], ['M-HPR', 'Heat press', 'L02'], ['M-CHG', 'Charger', 'L03'], ['M-AGE', 'Aging rack', 'L03-A'],
- ['M-E1', 'Filling', 'L11'], ['M-E2', 'Sealing', 'L11'], ['M-E3', 'Filling', 'L12'], ['M-PK', 'Wrapping', 'L13']].forEach(m => MS.appendRow([...m, 'Ya']));
+[['M-STK', 'Stacking', 'L01', '叠片机'], ['M-WLD', 'Welding', 'L01', '焊接机'], ['M-HPR', 'Heat press', 'L02', '热压机'], ['M-CHG', 'Charger', 'L03', '充电机'],
+ ['M-AGE', 'Aging rack', 'L03-A', '老化架'], ['M-E1', 'Filling', 'L11', '注液机'], ['M-E2', 'Sealing', 'L11', '封口机'], ['M-E3', 'Filling', 'L12', '注液机'],
+ ['M-PK', 'Wrapping', 'L13', '缠绕机']].forEach(m => MS.appendRow(rowOf('Mesin', { 'Mesin ID': m[0], 'Nama Mesin': m[1], 'Line ID': m[2], 'Aktif': 'Ya', 'Nama (中文)': m[3] })));
 ss.getSheetByName('Catatan Panduan').appendRow(rowOf('Catatan Panduan', { Untuk: 'Teknisi', Judul: 'Kunci panel listrik', Isi: 'Ambil di pos security Hall A.\nTulis nama & jam di buku kunci.', Urutan: 1, Aktif: 'Ya' }));
 const pid = (j, n, m) => ctx.partId_(j, n, m);
 const PARTS = [[{ id: pid('Elektrikal', 'Fuse', '10A'), qty: 1 }], [{ id: pid('Mekanikal', 'Bearing', '6205-2RS'), qty: 2 }, { id: pid('Mekanikal', 'Timing Belt', 'HTD 5M-450'), qty: 1 }],
@@ -87,6 +90,18 @@ at(3 * 60); as('sari@gmail.com', () => {
   const id = ctx.apiStart('L11', { mesin: 'M-E2', baterai: 'E22H' }).open.id; at(3 * 60 - 25);
   ctx.apiPending(id, { values: { 'Pekerjaan dilakukan': 'Bongkar cover, seal aus', 'Yang tertunda': 'Menunggu jadwal stop produksi' }, tenggat: 'BESOK' });
 });
+// teknisi China: pekerjaan selesai & pending dengan teks 中文, saran 中文 + Indonesia
+at(2 * 1440); as('li@gmail.com', () => {
+  const id = ctx.apiStart('L02', { mesin: 'M-HPR', baterai: 'VF7' }).open.id; at(2 * 1440 - 35);
+  const x = done(1); x.values['Detail masalah'] = '加热板温度不稳定'; x.values['Detail penanganan'] = '更换温控器并重新校准';
+  ctx.apiComplete(id, x);
+});
+at(5 * 60); as('li@gmail.com', () => {
+  const id = ctx.apiStart('L03-B', { mesin: 'M-CHG', baterai: 'Limo7' }).open.id; at(5 * 60 - 30);
+  ctx.apiPending(id, { values: { 'Pekerjaan dilakukan': '已检查充电模块，通讯板损坏', 'Yang tertunda': 'Menunggu part', Catatan: '备件已下单' }, tenggat: 'BESOK' });
+});
+at(4 * 60); as('li@gmail.com', () => ctx.apiSaranKirim({ kategori: 'Fitur aplikasi', isi: '希望可以在历史记录里按设备筛选' }));
+at(3 * 60 + 30); as('andi@gmail.com', () => ctx.apiSaranKirim({ kategori: 'Pilihan / isian baru', isi: 'Tambah pilihan masalah "Vacuum drop" untuk mesin filling' }));
 // sedang berjalan: 2 teknisi di 2 mesin pada line yang sama (L01)
 at(50); as('budi@gmail.com', () => ctx.apiStart('L01', { mesin: 'M-WLD', baterai: 'VF7' }));
 at(25); as('owner@gmail.com', () => ctx.apiStart('L01', { mesin: 'M-STK', baterai: 'Limo7' }));

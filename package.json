@@ -1,7 +1,7 @@
 {
   "name": "mttr-apps-script",
   "private": true,
-  "version": "2.2.6",
+  "version": "2.5.0",
   "description": "MTTR Maintenance 2.2 - Google Apps Script + Google Sheets",
   "scripts": {
     "test": "node test/run.js",

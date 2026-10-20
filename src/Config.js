@@ -5,7 +5,7 @@
  */
 var APP = {
   NAME: 'MTTR',          // nama default; per lokasi diubah lewat Config → NAMA_APLIKASI
-  VERSION: '2.2.6',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
+  VERSION: '2.5.0',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
   TZ: 'Asia/Jakarta',
   DATE_FMT: 'yyyy-MM-dd HH:mm:ss',
 
@@ -24,20 +24,24 @@ var APP = {
     CONFIG: 'Config',
     MAINT: 'Maintenance',
     LOG: 'Log',
-    PENDING: 'Pending Work'
+    PENDING: 'Pending Work',
+    TERJEMAHAN: 'Terjemahan',
+    SARAN: 'Saran',
+    RENCANA: 'Rencana'
   },
 
   /** Sheet yang ditulis/dibaca kode. Tab turunan (FILTER) dibuat terpisah di setup(). */
   HEADERS: {
-    Users: ['Email', 'Nama', 'Peran', 'Aktif'],
+    /** Bahasa: id (kosong) / zh = tampilan aplikasi berbahasa Mandarin untuk user ini. */
+    Users: ['Email', 'Nama', 'Peran', 'Aktif', 'Bahasa'],
     Factory: ['Factory ID', 'Nama', 'Lokasi', 'Aktif'],
     /** Satu baris per baterai/project. Sumber "baterai apa saja di factory ini" + status project. */
     Projects: ['Factory ID', 'Baterai', 'Fase', 'Target MTTR (menit)', 'Catatan', 'Aktif'],
     /** Satu baris = satu QR. Alias = nama lain untuk pencarian. Proses = kelompok di atas line (kolom "Process" laporan).
      *  Baterai kosong = semua project di factory-nya. Grup = induk sub-line (L03 untuk L03-A, L03-B). */
-    Lines: ['Line ID', 'Nama Line', 'Alias', 'Proses', 'Factory ID', 'Baterai', 'Grup', 'Area', 'Aktif'],
+    Lines: ['Line ID', 'Nama Line', 'Alias', 'Proses', 'Factory ID', 'Baterai', 'Grup', 'Area', 'Aktif', 'Nama (中文)'],
     /** Line ID boleh berisi Line ID atau Grup (mesin dipakai bersama sub-line). Nama Mesin = kolom "Station" laporan. */
-    Mesin: ['Mesin ID', 'Nama Mesin', 'Line ID', 'Aktif'],
+    Mesin: ['Mesin ID', 'Nama Mesin', 'Line ID', 'Aktif', 'Nama (中文)', 'Nama (English)'],
     /** Katalog sparepart, sama dengan Excel: Jenis → Nama → Model (Model boleh kosong). */
     Sparepart: ['Jenis Sparepart', 'Nama Sparepart', 'Model', 'Satuan', 'Urutan', 'Aktif'],
     /** Satu baris per part per pekerjaan (ditulis aplikasi) → bisa direkap. */
@@ -47,8 +51,15 @@ var APP = {
     'Format Laporan': ['Kolom', 'Sumber', 'Urutan', 'Aktif'],
     /** Catatan lokal admin yang tampil di Panduan aplikasi. Untuk: Teknisi / Admin / Semua. */
     'Catatan Panduan': ['Untuk', 'Judul', 'Isi', 'Urutan', 'Aktif'],
-    Pilihan: ['Jenis', 'Nilai', 'Urutan', 'Aktif'],
-    Form: ['Form', 'Field', 'Label', 'Tipe', 'Sumber', 'Wajib', 'Lainnya isi sendiri', 'Urutan', 'Aktif'],
+    /** Nilai = yang disimpan (kanonik). Kolom 中文/English hanya label tampilan & untuk Excel TPM. */
+    Pilihan: ['Jenis', 'Nilai', 'Urutan', 'Aktif', 'Nilai (中文)', 'Nilai (English)'],
+    Form: ['Form', 'Field', 'Label', 'Tipe', 'Sumber', 'Wajib', 'Lainnya isi sendiri', 'Urutan', 'Aktif', 'Label (中文)'],
+    /** Cache terjemahan teks bebas (diisi otomatis; admin boleh mengoreksi sel id/zh/en, koreksi dipakai ulang). */
+    Terjemahan: ['Teks', 'Bahasa asal', 'id', 'zh', 'en', 'Sumber', 'Diperbarui'],
+    /** Saran teknisi untuk admin (menu Saran di Beranda). */
+    Saran: ['ID', 'Tanggal', 'Email', 'Nama', 'Kategori', 'Isi', 'Bahasa', 'Terjemahan', 'Status', 'Tanggapan', 'Ditanggapi oleh', 'Ditanggapi pada'],
+    /** Rencana update berikutnya, tampil di Panduan → Rencana. Status: Rencana / Dikerjakan / Selesai. */
+    Rencana: ['Judul', 'Isi', 'Status', 'Target', 'Urutan', 'Aktif'],
     Config: ['Key', 'Value', 'Keterangan'],
     Maintenance: [
       'Maintenance ID', 'Line', 'Baterai', 'Status', 'Teknisi awal', 'Teknisi terakhir',
@@ -68,7 +79,35 @@ var APP = {
   DATE_COLUMNS: {
     Maintenance: ['Mulai', 'Selesai', 'Tenggat', 'Status sejak', 'Konfirmasi terakhir', 'Peringatan pada', 'Direview pada'],
     Log: ['Timestamp'],
-    'Pemakaian Sparepart': ['Tanggal']
+    'Pemakaian Sparepart': ['Tanggal'],
+    Saran: ['Tanggal', 'Ditanggapi pada'],
+    Terjemahan: ['Diperbarui']
+  },
+
+  LANGS: ['id', 'zh'],
+  SARAN_KATEGORI: ['Fitur aplikasi', 'Pilihan / isian baru', 'Sparepart', 'Mesin / Line', 'Lainnya'],
+  SARAN_STATUS: ['Baru', 'Dibaca', 'Direncanakan', 'Selesai', 'Ditolak'],
+  /** Isi awal sheet Rencana (poin 2 & 3 diskusi 2.5). */
+  RENCANA_DEFAULTS: [
+    ['Login tanpa akun Google', 'Untuk teknisi yang tidak memakai Google. Opsi: login PIN di aplikasi ini, atau aplikasi di Lark/Feishu (飞书), DingTalk (钉钉), WeCom (企业微信).', 'Rencana', 'Update besar'],
+    ['Pindah dari Google Apps Script', 'Jika proyek sudah diakui perusahaan: aplikasi & database di platform perusahaan (lebih cepat, tanpa batas Google, tanpa bug multi-akun).', 'Rencana', 'Update besar'],
+    ['SOP perawatan untuk operator produksi', 'Teknisi ME mengusulkan pengecekan harian untuk operator supaya mesin tidak cepat rusak; admin menetapkan, lalu SOP diberikan ke produksi.', 'Rencana', ''],
+    ['Terjemahan AI (Claude API)', 'Jika terjemahan Google kurang tepat untuk istilah teknis. Perlu API key berbayar dan izin akses internet (semua user izin ulang sekali).', 'Rencana', '']
+  ],
+  /** Label bawaan 中文 / English untuk isi awal sheet Pilihan (admin boleh mengubah di sheet). */
+  OPTION_I18N: {
+    'Corrective': ['故障维修', 'Corrective'], 'Preventive': ['预防性维护', 'Preventive'],
+    'Elektrikal': ['电气', 'Electrical'], 'Mekanikal': ['机械', 'Mechanical'], 'Pneumatik': ['气动', 'Pneumatic'], 'Program': ['程序', 'Program'],
+    'Mesin berhenti': ['设备停机', 'Machine stopped'], 'Sensor error': ['传感器故障', 'Sensor error'], 'Kebocoran': ['泄漏', 'Leakage'],
+    'Suara/getaran abnormal': ['异响/异常振动', 'Abnormal noise/vibration'], 'Hasil produk NG': ['产品不良 (NG)', 'Product NG'],
+    'Komponen aus': ['零件磨损', 'Worn component'], 'Kabel/konektor longgar': ['线缆/接头松动', 'Loose cable/connector'],
+    'Setting berubah': ['参数设置变化', 'Setting changed'], 'Kotor/kontaminasi': ['脏污/污染', 'Dirt/contamination'], 'Salah operasi': ['操作失误', 'Operating error'],
+    'Ganti part': ['更换零件', 'Replace part'], 'Setting ulang': ['重新设置', 'Reset settings'], 'Bersihkan': ['清洁', 'Clean'],
+    'Kencangkan/perbaiki koneksi': ['紧固/修复连接', 'Tighten/repair connection'],
+    'Istirahat': ['休息', 'Break'], 'Ambil part/alat': ['取备件/工具', 'Get parts/tools'],
+    'Menunggu part': ['等待备件', 'Waiting for parts'], 'Menunggu jadwal stop produksi': ['等待停产时间', 'Waiting for production stop'],
+    'Butuh teknisi lain': ['需要其他技术员', 'Need another technician'],
+    'Salah line': ['选错产线', 'Wrong line'], 'Input ganda': ['重复录入', 'Duplicate entry'], 'Masalah hilang sendiri': ['问题自行消失', 'Problem resolved itself']
   },
 
   STATUS: {
@@ -116,33 +155,33 @@ var APP = {
   },
 
   /**
-   * Isi awal sheet Form: [Form, Field, Label, Tipe, Sumber, Wajib, Lainnya isi sendiri, Urutan].
+   * Isi awal sheet Form: [Form, Field, Label, Tipe, Sumber, Wajib, Lainnya isi sendiri, Urutan, Label (中文)].
    * Tipe: pilihan | teks | angka | sistem. Field = nama kolom di sheet Maintenance.
    * Baris "sistem" punya logika khusus: label/urutan boleh diubah, tidak bisa dihapus/dinonaktifkan.
    * Baris baru dengan Tipe pilihan/teks/angka = field tambahan; kolomnya dibuat otomatis di Maintenance.
    */
   FORM_DEFAULTS: [
     // Urutan pecahan (2.5, 1.5, …) = field baru 2.2, supaya langsung berada di posisi yang benar di sheet Form lama.
-    ['Mulai', 'Mesin ID', 'Mesin', 'sistem', '', 'Ya', 'Ya', 1],
-    ['Mulai', 'Tipe', 'Tipe maintenance', 'sistem', 'Tipe Maintenance', 'Ya', 'Tidak', 2],
-    ['Mulai', 'Stop line', 'Apakah line berhenti (stop line)?', 'sistem', '', 'Ya', 'Tidak', 2.5],
-    ['Mulai', 'Baterai', 'Baterai', 'sistem', '', 'Ya', 'Tidak', 3],
-    ['Pause', 'Alasan pause', 'Alasan pause', 'pilihan', 'Alasan Pause', 'Tidak', 'Ya', 1],
-    ['Pending', 'Pekerjaan dilakukan', 'Pekerjaan yang sudah dilakukan', 'teks', '', 'Ya', 'Tidak', 1],
-    ['Pending', 'Yang tertunda', 'Yang tertunda', 'pilihan', 'Yang Tertunda', 'Ya', 'Ya', 2],
-    ['Pending', 'Tenggat', 'Tenggat', 'sistem', '', 'Ya', 'Tidak', 3],
-    ['Pending', 'Catatan', 'Catatan', 'teks', '', 'Tidak', 'Tidak', 4],
-    ['Selesai', 'Jenis kerusakan', 'Jenis kerusakan', 'pilihan', 'Jenis Kerusakan', 'Ya', 'Tidak', 0.5],
-    ['Selesai', 'Masalah', 'Fenomena / masalah', 'pilihan', 'Masalah', 'Ya', 'Ya', 1],
-    ['Selesai', 'Detail masalah', 'Detail masalah', 'teks', '', 'Tidak', 'Tidak', 1.5],
-    ['Selesai', 'Penyebab', 'Alasan / penyebab', 'pilihan', 'Penyebab', 'Ya', 'Ya', 2],
-    ['Selesai', 'Detail penyebab', 'Detail penyebab', 'teks', '', 'Tidak', 'Tidak', 2.5],
-    ['Selesai', 'Penanganan', 'Tindakan penanganan', 'pilihan', 'Penanganan', 'Ya', 'Ya', 3],
-    ['Selesai', 'Detail penanganan', 'Detail penanganan', 'teks', '', 'Tidak', 'Tidak', 3.5],
-    ['Selesai', 'Part', 'Sparepart yang diganti', 'sistem', '', 'Ya', 'Ya', 4],
-    ['Selesai', 'Catatan', 'Catatan', 'teks', '', 'Tidak', 'Tidak', 5],
-    ['Cancel', 'Alasan cancel', 'Alasan cancel', 'pilihan', 'Alasan Cancel', 'Ya', 'Ya', 1],
-    ['Cancel', 'Catatan', 'Catatan', 'teks', '', 'Tidak', 'Tidak', 2]
+    ['Mulai', 'Mesin ID', 'Mesin', 'sistem', '', 'Ya', 'Ya', 1, '设备'],
+    ['Mulai', 'Tipe', 'Tipe maintenance', 'sistem', 'Tipe Maintenance', 'Ya', 'Tidak', 2, '维修类型'],
+    ['Mulai', 'Stop line', 'Apakah line berhenti (stop line)?', 'sistem', '', 'Ya', 'Tidak', 2.5, '产线是否停线？'],
+    ['Mulai', 'Baterai', 'Baterai', 'sistem', '', 'Ya', 'Tidak', 3, '电池项目'],
+    ['Pause', 'Alasan pause', 'Alasan pause', 'pilihan', 'Alasan Pause', 'Tidak', 'Ya', 1, '暂停原因'],
+    ['Pending', 'Pekerjaan dilakukan', 'Pekerjaan yang sudah dilakukan', 'teks', '', 'Ya', 'Tidak', 1, '已完成的工作'],
+    ['Pending', 'Yang tertunda', 'Yang tertunda', 'pilihan', 'Yang Tertunda', 'Ya', 'Ya', 2, '待处理事项'],
+    ['Pending', 'Tenggat', 'Tenggat', 'sistem', '', 'Ya', 'Tidak', 3, '期限'],
+    ['Pending', 'Catatan', 'Catatan', 'teks', '', 'Tidak', 'Tidak', 4, '备注'],
+    ['Selesai', 'Jenis kerusakan', 'Jenis kerusakan', 'pilihan', 'Jenis Kerusakan', 'Ya', 'Tidak', 0.5, '故障类型'],
+    ['Selesai', 'Masalah', 'Fenomena / masalah', 'pilihan', 'Masalah', 'Ya', 'Ya', 1, '故障现象'],
+    ['Selesai', 'Detail masalah', 'Detail masalah', 'teks', '', 'Tidak', 'Tidak', 1.5, '现象详情'],
+    ['Selesai', 'Penyebab', 'Alasan / penyebab', 'pilihan', 'Penyebab', 'Ya', 'Ya', 2, '故障原因'],
+    ['Selesai', 'Detail penyebab', 'Detail penyebab', 'teks', '', 'Tidak', 'Tidak', 2.5, '原因详情'],
+    ['Selesai', 'Penanganan', 'Tindakan penanganan', 'pilihan', 'Penanganan', 'Ya', 'Ya', 3, '处理措施'],
+    ['Selesai', 'Detail penanganan', 'Detail penanganan', 'teks', '', 'Tidak', 'Tidak', 3.5, '措施详情'],
+    ['Selesai', 'Part', 'Sparepart yang diganti', 'sistem', '', 'Ya', 'Ya', 4, '更换的备件'],
+    ['Selesai', 'Catatan', 'Catatan', 'teks', '', 'Tidak', 'Tidak', 5, '备注'],
+    ['Cancel', 'Alasan cancel', 'Alasan cancel', 'pilihan', 'Alasan Cancel', 'Ya', 'Ya', 1, '取消原因'],
+    ['Cancel', 'Catatan', 'Catatan', 'teks', '', 'Tidak', 'Tidak', 2, '备注']
   ],
   FORMS: ['Mulai', 'Pause', 'Pending', 'Selesai', 'Cancel'],
   /** Baris Form baru di 2.2: setup() menambahkannya ke sheet Form lama jika belum ada (baris lain tidak disentuh). */

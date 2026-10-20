@@ -14,12 +14,27 @@
  */
 
 var MD_MEMO_ = null;
-var MD_CACHE_KEY_ = 'mttr-md-22a';   // naikkan jika struktur md berubah (cache lama otomatis diabaikan)
+var MD_CACHE_KEY_ = 'mttr-md-25a';   // naikkan jika struktur md berubah (cache lama otomatis diabaikan)
 var MD_CACHE_TTL_ = 600;             // detik
 var MD_CHUNK_ = 24000;               // karakter per potongan (batas CacheService 100 KB per nilai)
 
 /** Lupakan data per-request (memo master & header). Cache bersama TIDAK dihapus. */
-function resetMaster_() { MD_MEMO_ = null; resetHeaders_(); }
+function resetMaster_() { MD_MEMO_ = null; TR_MEMO_ = null; resetHeaders_(); }
+
+/** 'zh' / 'cn' / 'mandarin' / '中文' → 'zh'; selain itu 'id'. */
+function normLang_(v) {
+  var s = String(v || '').trim().toLowerCase();
+  return /^(zh|cn|china|chinese|mandarin|中文|汉语|簡體|简体)/.test(s) ? 'zh' : 'id';
+}
+
+/** Label tampilan per bahasa (nilai yang disimpan tetap kanonik). */
+function addTr_(md, value, zh, en) {
+  value = String(value || '').trim();
+  if (!value) return;
+  zh = String(zh || '').trim(); en = String(en || '').trim();
+  if (zh && !md.tr.zh[value]) md.tr.zh[value] = zh;
+  if (en && !md.tr.en[value]) md.tr.en[value] = en;
+}
 
 function scriptCache_() {
   try { return CacheService.getScriptCache(); } catch (e) { return null; }
@@ -82,7 +97,7 @@ function masterData_() {
 
 function buildMaster_() {
   var warnings = [];
-  var md = { warnings: warnings };
+  var md = { warnings: warnings, tr: { zh: {}, en: {} } };
 
   // ---- Factory ----
   md.factories = readOptional_(APP.SHEETS.FACTORY).filter(function (f) {
@@ -127,13 +142,16 @@ function buildMaster_() {
       grup: normLine_(l['Grup']), area: String(l['Area'] || ''), active: isActiveRow_(l['Aktif']),
       alias: splitList_(l['Alias']).join(', '), proses: String(l['Proses'] || '').trim()
     };
+    addTr_(md, md.lines[id].name, l['Nama (中文)'], '');
   });
 
   // ---- Mesin ----
   md.machines = readOptional_(APP.SHEETS.MESIN).filter(function (m) {
     return isActiveRow_(m['Aktif']) && String(m['Mesin ID'] || '').trim();
   }).map(function (m) {
-    return { id: normLine_(m['Mesin ID']), name: String(m['Nama Mesin'] || m['Mesin ID']), line: normLine_(m['Line ID']) };
+    var name = String(m['Nama Mesin'] || m['Mesin ID']);
+    addTr_(md, name, m['Nama (中文)'], m['Nama (English)']);
+    return { id: normLine_(m['Mesin ID']), name: name, line: normLine_(m['Line ID']) };
   });
 
   // ---- Pilihan ----
@@ -141,6 +159,8 @@ function buildMaster_() {
   readOptional_(APP.SHEETS.OPTIONS).forEach(function (r, i) {
     var jenis = String(r['Jenis'] || '').trim(), nilai = String(r['Nilai'] || '').trim();
     if (!jenis || !nilai || !isActiveRow_(r['Aktif'])) return;
+    var def = APP.OPTION_I18N[nilai] || [];
+    addTr_(md, nilai, r['Nilai (中文)'] || def[0], r['Nilai (English)'] || def[1]);
     if (!opts[jenis]) opts[jenis] = [];
     if (opts[jenis].indexOf(nilai) !== -1) return;
     var u = Number(r['Urutan']);
@@ -158,7 +178,8 @@ function buildMaster_() {
 
   // ---- Users (auth & nama), Config, Sparepart, Format Laporan, Catatan Panduan: ikut cache ----
   md.users = readTable_(APP.SHEETS.USERS).map(function (u) {
-    return { email: String(u['Email']).trim().toLowerCase(), name: String(u['Nama'] || u['Email']), peran: String(u['Peran'] || ''), aktif: u['Aktif'] };
+    return { email: String(u['Email']).trim().toLowerCase(), name: String(u['Nama'] || u['Email']), peran: String(u['Peran'] || ''), aktif: u['Aktif'],
+      lang: normLang_(u['Bahasa']) };
   });
   md.config = {};
   readOptional_(APP.SHEETS.CONFIG).forEach(function (r) {
@@ -167,6 +188,13 @@ function buildMaster_() {
   });
   md.spareparts = readSpareparts_(warnings, opts);
   md.report = readReportFormat_(warnings);
+  md.rencana = readOptional_(APP.SHEETS.RENCANA).filter(function (r) {
+    return isActiveRow_(r['Aktif']) && String(r['Judul'] || '').trim();
+  }).map(function (r) {
+    var u = Number(r['Urutan']);
+    return { judul: String(r['Judul']).trim(), isi: String(r['Isi'] || ''), status: String(r['Status'] || 'Rencana').trim(),
+      target: String(r['Target'] || ''), order: (r['Urutan'] !== '' && isFinite(u)) ? u : 1000 + r._row };
+  }).sort(function (a, b) { return a.order - b.order; });
   md.notes = readOptional_(APP.SHEETS.PANDUAN).filter(function (r) {
     return isActiveRow_(r['Aktif']) && (String(r['Judul'] || '').trim() || String(r['Isi'] || '').trim());
   }).map(function (r, i) {
@@ -232,7 +260,7 @@ function uniq_(list) {
 function defaultFormDef_(d, i) {
   return {
     form: d[0], field: d[1], label: d[2], type: d[3], source: d[4], required: d[5] === 'Ya',
-    other: d[6] === 'Ya', order: Number(d[7]) || i, locked: APP.LOCKED_FIELDS.indexOf(d[0] + '.' + d[1]) !== -1
+    other: d[6] === 'Ya', order: Number(d[7]) || i, locked: APP.LOCKED_FIELDS.indexOf(d[0] + '.' + d[1]) !== -1, labelZh: d[8] || ''
   };
 }
 
@@ -270,6 +298,8 @@ function readForms_(warnings, opts) {
       seen[key] = true;
       forms[form].push({
         form: form, field: field, label: String(r['Label'] || '').trim() || (def ? def.label : field),
+        // Label Indonesia belum diubah admin → label 中文 bawaan boleh dipakai.
+        labelZh: String(r['Label (中文)'] || '').trim() || (def && [def.label, ''].indexOf(String(r['Label'] || '').trim()) !== -1 ? def.labelZh : ''),
         type: type, source: source,
         required: (def && (field === 'Tipe' || field === 'Baterai' || field === 'Tenggat')) ? true : isYes_(r['Wajib']),
         other: r['Lainnya isi sendiri'] === '' && def ? def.other : isYes_(r['Lainnya isi sendiri']),
@@ -433,7 +463,7 @@ function clientMaster_(md) {
   var forms = {};
   Object.keys(md.forms).forEach(function (f) {
     forms[f] = md.forms[f].map(function (d) {
-      return { field: d.field, label: d.label, type: d.type, required: d.required, other: d.other,
+      return { field: d.field, label: d.label, labelZh: d.labelZh || '', type: d.type, required: d.required, other: d.other,
         options: d.type === 'pilihan' || d.field === 'Tipe' ? fieldOptions_(md, d) : [] };
     });
   });
@@ -445,6 +475,8 @@ function clientMaster_(md) {
     forms: forms,
     spareparts: md.spareparts.map(function (p) { return { id: p.id, jenis: p.jenis, nama: p.nama, model: p.model, satuan: p.satuan }; }),
     jenisKerusakan: md.options['Jenis Kerusakan'] || [],
+    trZh: md.tr.zh,
+    rencana: md.rencana,
     appName: String(md.config.NAMA_APLIKASI || APP.NAME),
     version: APP.VERSION
   };

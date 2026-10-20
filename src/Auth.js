@@ -18,7 +18,7 @@ function getCurrentUser_() {
     if (u.email !== email) continue;
     var role = APP.ROLE_ALIASES[u.peran.trim().toLowerCase()];
     if (!isYes_(u.aktif) || !role) return { email: email, authorized: false };
-    return { email: email, authorized: true, name: u.name || email, role: role };
+    return { email: email, authorized: true, name: u.name || email, role: role, lang: u.lang || 'id' };
   }
   return { email: email, authorized: false };
 }

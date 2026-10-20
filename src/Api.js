@@ -131,7 +131,7 @@ function bootstrap_(user, lineId, mesinId, filter) {
     stopLineDefault: splitList_(getConfig_('STOP_LINE_DEFAULT')),
     cekAkun: isYes_(getConfig_('CEK_AKUN')),
     myOpen: mine ? serialize_(mine, c) : null,
-    counts: counts_(rows, user),
+    counts: withSaran_(counts_(rows, user), user),
     stats: stats_(rows, c, filter),
     recent: recent_(rows, c, filter),
     lineView: lineId ? lineView_(lineId, rows, c, user, mesinId) : null
@@ -159,7 +159,7 @@ function apiRefresh(filter, clientVersion) {
   var out = {
     serverNowIso: c.now.toISOString(),
     myOpen: mine ? serialize_(mine, c) : null,
-    counts: counts_(rows, user),
+    counts: withSaran_(counts_(rows, user), user),
     stats: stats_(rows, c, filter),
     recent: recent_(rows, c, filter)
   };
@@ -583,6 +583,80 @@ function apiBuildReports(year) {
   var built = withLock_(function () { return { lap: buildLaporan_(y), rek: buildRekap_(y) }; });   // tidak bentrok dengan sinkron langsung
   var lap = built.lap, rek = built.rek;
   return { year: y, laporan: lap.sheet, rows: lap.rows, rekap: rek.sheet, spreadsheetUrl: SpreadsheetApp.getActive().getUrl() };
+}
+
+// ---------- Saran teknisi → admin ----------
+
+/** Admin: jumlah saran berstatus Baru (badge). Teknisi: tanpa baca sheet. */
+function withSaran_(counts, user) {
+  counts.saran = 0;
+  if (isAdmin_(user) && SpreadsheetApp.getActive().getSheetByName(APP.SHEETS.SARAN)) {
+    counts.saran = readTable_(APP.SHEETS.SARAN).filter(function (r) { return String(r['Status'] || 'Baru') === 'Baru'; }).length;
+  }
+  return counts;
+}
+
+function serializeSaran_(r, user, names) {
+  var by = String(r['Ditanggapi oleh'] || '').toLowerCase();
+  return {
+    id: String(r['ID']), whenIso: iso_(r['Tanggal']), nama: String(r['Nama'] || r['Email']),
+    email: isAdmin_(user) ? String(r['Email'] || '') : '', mine: String(r['Email']).toLowerCase() === user.email,
+    kategori: String(r['Kategori'] || ''), isi: String(r['Isi'] || ''), bahasa: String(r['Bahasa'] || ''),
+    terjemahan: String(r['Terjemahan'] || ''), status: String(r['Status'] || 'Baru'), tanggapan: String(r['Tanggapan'] || ''),
+    oleh: by ? (names[by] || by) : '', padaIso: iso_(r['Ditanggapi pada'])
+  };
+}
+
+/** Teknisi: saran miliknya. Admin: semua saran. Terbaru dulu, maks 200. */
+function apiSaranList() {
+  var user = requireUser_();
+  var names = userNameMap_();
+  var rows = SpreadsheetApp.getActive().getSheetByName(APP.SHEETS.SARAN) ? readTable_(APP.SHEETS.SARAN) : [];
+  var items = rows.filter(function (r) { return isAdmin_(user) || String(r['Email']).toLowerCase() === user.email; })
+    .sort(function (a, b) { return (b['Tanggal'] instanceof Date ? b['Tanggal'].getTime() : 0) - (a['Tanggal'] instanceof Date ? a['Tanggal'].getTime() : 0); })
+    .slice(0, 200).map(function (r) { return serializeSaran_(r, user, names); });
+  return { items: items, kategori: APP.SARAN_KATEGORI, statuses: APP.SARAN_STATUS, isAdmin: isAdmin_(user) };
+}
+
+/** @param {{kategori:string, isi:string}} p */
+function apiSaranKirim(p) {
+  var user = requireUser_();
+  p = p || {};
+  var isi = cleanText_(p.isi, 1000);
+  if (!isi) throw new Error('Tulis saranmu dulu.');
+  var kat = cleanText_(p.kategori, 60);
+  if (APP.SARAN_KATEGORI.indexOf(kat) === -1) kat = 'Lainnya';
+  var lang = textLang_(isi);
+  // Diterjemahkan sebelum lock (Google Translate ±1 dtk) supaya teknisi lain tidak menunggu.
+  var tr = lang === 'zh' ? translate_([isi], 'id', { max: 1 })[0] : '';
+  withLock_(function () {
+    var now = new Date();
+    appendObj_(APP.SHEETS.SARAN, {
+      'ID': 'S' + Utilities.formatDate(now, APP.TZ, 'yyMMddHHmmss') + '-' + Math.floor(Math.random() * 46656).toString(36),
+      'Tanggal': now, 'Email': user.email, 'Nama': user.name, 'Kategori': kat, 'Isi': isi, 'Bahasa': lang,
+      'Terjemahan': tr === isi ? '' : tr, 'Status': 'Baru'
+    });
+  });
+  return apiSaranList();
+}
+
+/** Admin: ubah status & tulis tanggapan. @param {{status:string, tanggapan:string}} p */
+function apiSaranTanggapi(id, p) {
+  var user = requireUser_([APP.ROLES.ADMIN]);
+  p = p || {};
+  var status = cleanText_(p.status, 30);
+  if (APP.SARAN_STATUS.indexOf(status) === -1) throw new Error('Status saran tidak dikenal: ' + status);
+  var tanggapan = cleanText_(p.tanggapan, 1000);
+  withLock_(function () {
+    var r = readTable_(APP.SHEETS.SARAN).filter(function (x) { return String(x['ID']) === String(id); })[0];
+    if (!r) throw new Error('Saran tidak ditemukan.');
+    r['Status'] = status;
+    r['Tanggapan'] = tanggapan;
+    r['Ditanggapi oleh'] = user.email;
+    r['Ditanggapi pada'] = new Date();
+    writeObj_(APP.SHEETS.SARAN, r);
+  });
+  return apiSaranList();
 }
 
 // ---------- QR ----------

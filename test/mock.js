@@ -51,6 +51,9 @@ class Range {
   setWrap() { return this; }
   setFontWeight() { return this; }
   setFontColor() { return this; }
+  setValue(v) { return this.setValues([[v]]); }
+  getRow() { return this.r; }
+  getNumRows() { return this.nr; }
 }
 class Sheet {
   constructor(name) { this.name = name; this.data = []; this.formulas = {}; this.protections = []; }
@@ -100,7 +103,8 @@ const scriptCache = {
   get: (k) => (cache.enabled && k in cache.store ? cache.store[k] : null),
   getAll: (ks) => { const o = {}; ks.forEach(k => { if (cache.enabled && k in cache.store) o[k] = cache.store[k]; }); return o; },
   putAll: (o) => { if (!cache.enabled) return; cache.puts++; Object.assign(cache.store, o); },
-  remove: (k) => { delete cache.store[k]; }
+  remove: (k) => { delete cache.store[k]; },
+  removeAll: (ks) => { ks.forEach(k => { delete cache.store[k]; }); }
 };
 const lock = { held: false };
 
@@ -140,6 +144,8 @@ const ctx = {
     })
   },
   MailApp: { sendEmail: (m) => mails.push(m) },
+  // Google Translate palsu: "[zh-CN] teks" — cukup untuk menguji cache & alur, bukan kualitas terjemahan.
+  LanguageApp: { calls: 0, translate(text, src, tgt) { this.calls++; return '[' + tgt + '] ' + text; } },
   CacheService: { getScriptCache: () => scriptCache },
   Utilities,
   ScriptApp: {

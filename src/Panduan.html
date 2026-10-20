@@ -1,6 +1,7 @@
 <!--
   Teks halaman Panduan (tombol ? di Beranda / Dashboard).
   Ubah teks di sini jika fitur berubah. Catatan khusus per factory → sheet "Catatan Panduan" (tanpa ubah kode).
+  Template "-zh" = versi 中文 (dipakai jika bahasa aplikasi 中文). Ubah keduanya bersamaan.
 -->
 <template id="guide-teknisi">
   <h3>Ingat 4 langkah</h3>
@@ -31,11 +32,19 @@
     <li>Durasi stop line di laporan = jam selesai − jam mulai.</li>
   </ul></div></details>
 
+  <details class="g"><summary>Bahasa, terjemahan & saran</summary><div><ul>
+    <li>Tombol <b>中</b> / <b>ID</b> di kanan atas Beranda = ganti bahasa tampilan (Indonesia / 中文). Tersimpan di HP ini.</li>
+    <li>Teks yang ditulis teknisi lain (catatan, pekerjaan dilakukan, isian "Lainnya") tetap bahasa aslinya → tekan <b>🌐 Terjemahkan</b>.</li>
+    <li>Boleh menulis dalam bahasa apa saja. Laporan tetap menyimpan teks asli.</li>
+    <li><b>💡 Saran</b> di Beranda: usul fitur / pilihan baru ke admin, lalu lihat status & tanggapannya.</li>
+  </ul></div></details>
+
   <details class="g"><summary>Kekurangan yang perlu diketahui</summary><div><ul>
     <li>Butuh internet. Sinyal hilang saat menekan tombol → tunggu, lalu coba lagi.</li>
     <li>Satu teknisi hanya bisa punya <b>satu</b> pekerjaan terbuka.</li>
     <li>Data yang sudah disimpan tidak bisa diedit dari aplikasi. Salah isi → lapor admin.</li>
     <li>Belum bisa melampirkan foto.</li>
+    <li>Terjemahan (tombol <b>🌐 Terjemahkan</b>) memakai Google Translate: istilah teknis kadang kurang tepat. Teks asli tetap tersimpan.</li>
     <li>HP/browser login <b>beberapa akun Google</b> → aplikasi bisa menolak atau muncul "Akun Google tidak cocok" (bug Google). Pakai Incognito, atau satu browser khusus akun kerja.</li>
   </ul></div></details>
 </template>
@@ -45,7 +54,7 @@
   <p class="small">Edit sheet → muat ulang aplikasi → perubahan terlihat. Tidak perlu mengubah kode.</p>
 
   <details class="g" open><summary>Mau ubah apa? → sheet mana</summary><div><ul>
-    <li><b>Users</b>: tambah teknisi (Email, Nama, Peran Teknisi/Admin, Aktif). Nama ini yang tampil di laporan.</li>
+    <li><b>Users</b>: tambah teknisi (Email, Nama, Peran Teknisi/Admin, Aktif, <b>Bahasa</b> id/zh). Nama ini yang tampil di laporan.</li>
     <li><b>Lines</b>: line baru, <b>Alias</b> (nama panggilan, pisah koma) & <b>Proses</b> (grup di atas line). Jangan ganti Line ID yang sudah dipakai.</li>
     <li><b>Mesin</b>: mesin per line (= Station di laporan).</li>
     <li><b>Projects</b>: baterai per factory & target MTTR.</li>
@@ -55,6 +64,15 @@
     <li><b>Format Laporan</b>: judul & urutan kolom tab Laporan.</li>
     <li><b>Catatan Panduan</b>: catatan lokal yang tampil di halaman ini (Untuk: Teknisi / Admin / Semua).</li>
     <li><b>Config</b>: NAMA_APLIKASI, jam peringatan, shift, STOP_LINE_DEFAULT, judul laporan.</li>
+    <li><b>Saran</b>: saran dari teknisi (juga tampil di aplikasi → 💡 Saran). <b>Rencana</b>: daftar rencana update yang tampil di halaman ini.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Bahasa 中文 & terjemahan</summary><div><ul>
+    <li>Teknisi China: Users → kolom <b>Bahasa</b> = <b>zh</b> (bisa juga diganti sendiri lewat tombol 中 / ID).</li>
+    <li>Label pilihan, form, mesin & line dalam 中文 diambil dari kolom <b>Nilai (中文)</b>, <b>Label (中文)</b>, <b>Nama (中文)</b>. Kosong = tampil bahasa Indonesia.
+      Yang disimpan di data tetap nilai Indonesia, jadi laporan & filter tidak pecah.</li>
+    <li>Menu spreadsheet → <b>Isi terjemahan otomatis (中文 / English)…</b> mengisi sel yang masih kosong. Cek istilah teknisnya bersama teknisi China.</li>
+    <li>Sheet <b>Terjemahan</b> = hasil tombol 🌐 (Google Translate). Kolom zh / id / en boleh dikoreksi; koreksi langsung dipakai.</li>
   </ul></div></details>
 
   <details class="g"><summary>Laporan (format Excel)</summary><div><ul>
@@ -99,11 +117,111 @@
 <template id="guide-baru">
   <h3>Apa yang baru di versi <span data-v></span></h3>
   <ul>
-    <li><b>Sparepart</b>: cari, atau pilih Jenis → Nama → Model; banyak part sekaligus; jumlah −/+; tambah manual. Tercatat di sheet Pemakaian Sparepart.</li>
-    <li><b>Jenis kerusakan</b> (Elektrikal / Mekanikal / Pneumatik / Program) + detail opsional untuk masalah, penyebab, penanganan.</li>
-    <li><b>Stop line</b> ditanya saat Mulai.</li>
-    <li><b>Proses</b> & <b>alias</b> line untuk filter dan pencarian.</li>
-    <li><b>Laporan</b> otomatis format Excel (tab Laporan &lt;tahun&gt;), nama teknisi bukan email.</li>
-    <li>Halaman panduan ini. BOM dihapus supaya lebih ringan.</li>
+    <li><b>Bahasa 中文</b>: tombol <b>中</b> / <b>ID</b> di Beranda. Semua menu, tombol & pilihan tampil dalam bahasa Mandarin.</li>
+    <li><b>🌐 Terjemahkan</b> di detail & kartu pekerjaan: teks yang ditulis teknisi lain diterjemahkan (Indonesia ⇄ 中文).</li>
+    <li><b>💡 Saran</b> di Beranda: kirim usul ke admin, lihat status & tanggapannya.</li>
+    <li><b>Rencana update</b> di halaman ini: fitur yang sedang direncanakan.</li>
+  </ul>
+</template>
+
+<!-- ===================== 中文 ===================== -->
+<template id="guide-teknisi-zh">
+  <h3>记住 4 个步骤</h3>
+  <ol>
+    <li><b>扫描</b>产线 / 设备上的二维码。二维码损坏 → <b>搜索产线</b>（可输入别名）。</li>
+    <li><b>开始</b>：选择设备、维修类型和<b>停线</b>（是 = 产线停止生产）。</li>
+    <li>进行维修。暂时离开 → <b>暂停</b>。暂时无法完成 → <b>挂起</b>。</li>
+    <li><b>完成</b>：故障类型 → 现象 → 原因 → 处理措施 → <b>备件</b>。</li>
+  </ol>
+  <p class="small muted">MTTR 只计算<b>有效</b>时间。暂停和挂起的时间不计入。</p>
+
+  <details class="g"><summary>按钮说明</summary><div><ul>
+    <li><b>暂停</b>：休息 / 短暂等待。有效时间停止计时。</li>
+    <li><b>挂起</b>：还没完成（等待备件等）。显示在“挂起”页；其他技术员扫描同一产线的二维码即可继续。</li>
+    <li><b>取消</b>：录入错误 / 问题自行消失。进入管理员审核。</li>
+    <li><b>仍在进行</b>：3 小时后出现。到 4 小时仍未回复 → 已放弃。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>备件（快速方法）</summary><div><ol>
+    <li>没有更换 → <b>无更换</b>。</li>
+    <li>有更换 → <b>有更换备件</b>，然后在<b>搜索框输入</b>（如 “6205”）<i>或</i>依次选择 类别 → 名称 → 型号。</li>
+    <li>用 <b>− / +</b> 调整数量。选错 → <b>×</b>。</li>
+    <li>列表里没有 → <b>手动添加</b>，并告诉管理员加入目录。</li>
+  </ol><p class="small muted">备件类别会自动跟随所选的故障类型。</p></div></details>
+
+  <details class="g"><summary>停线</summary><div><ul>
+    <li><b>是</b> = 维修期间产线停止生产。故障维修默认<b>是</b>，预防性维护默认<b>否</b>；可以修改。</li>
+    <li>报表中的停线时长 = 完成时间 − 开始时间。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>语言、翻译和建议</summary><div><ul>
+    <li>首页右上角 <b>中</b> / <b>ID</b> 按钮 = 切换显示语言（中文 / 印尼语），保存在本手机上。</li>
+    <li>其他技术员写的内容（备注、已完成的工作、“其他”填写）保持原文 → 点 <b>🌐 翻译</b>。</li>
+    <li>可以用中文填写。报表保存原文；印尼同事可以用同一个按钮翻译。</li>
+    <li>首页 <b>💡 建议</b>：向管理员提出功能 / 新选项建议，并查看状态和回复。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>需要了解的限制</summary><div><ul>
+    <li>需要网络。按按钮时信号中断 → 稍等后重试。</li>
+    <li>每位技术员同一时间只能有<b>一项</b>未结束的工作。</li>
+    <li>保存后的数据不能在应用中修改。填错 → 告诉管理员。</li>
+    <li>暂时不能附加照片。</li>
+    <li>翻译使用 Google 翻译，技术术语有时不准确。原文始终保留。</li>
+    <li>手机 / 浏览器登录了<b>多个 Google 账号</b> → 应用可能拒绝操作或显示 “Google 账号不一致”（Google 的缺陷）。请用无痕模式，或只登录工作账号的专用浏览器。</li>
+  </ul></div></details>
+</template>
+
+<template id="guide-admin-zh">
+  <h3>一切都在 Google Sheet 中设置</h3>
+  <p class="small">编辑表格 → 重新加载应用 → 即可看到变化。无需修改代码。表格名称保持印尼语（与 Google Sheet 的标签一致）。</p>
+
+  <details class="g" open><summary>要改什么 → 哪个表</summary><div><ul>
+    <li><b>Users</b>：添加技术员（Email、Nama 姓名、Peran 角色 Teknisi/Admin、Aktif、<b>Bahasa</b> id/zh）。报表显示此姓名。</li>
+    <li><b>Lines</b>：新产线、<b>Alias</b> 别名（逗号分隔）和 <b>Proses</b> 工序。已使用的 Line ID 不要修改。<b>Nama (中文)</b> = 中文名称。</li>
+    <li><b>Mesin</b>：每条产线的设备（= 报表中的 Station）。<b>Nama (中文)</b> / <b>Nama (English)</b>。</li>
+    <li><b>Projects</b>：各工厂的电池项目和 MTTR 目标。</li>
+    <li><b>Sparepart</b>：备件目录 类别 → 名称 → 型号。Aktif = Tidak 即隐藏。</li>
+    <li><b>Pilihan</b>：选项（故障类型、现象、原因、处理措施 …）。<b>Nilai (中文)</b> / <b>Nilai (English)</b> = 显示名称。</li>
+    <li><b>Form</b>：标题、必填 / 选填、顺序、附加字段。<b>Label (中文)</b> = 中文标题。停用问题请设 Aktif = Tidak（不要删除行）。</li>
+    <li><b>Format Laporan</b>：Laporan 页的列标题和顺序。</li>
+    <li><b>Catatan Panduan</b>：显示在本页的本地说明。<b>Saran</b>：技术员的建议。<b>Rencana</b>：更新计划。</li>
+    <li><b>Config</b>：NAMA_APLIKASI、提醒时间、班次、STOP_LINE_DEFAULT、报表标题。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>中文和翻译</summary><div><ul>
+    <li>选项、表单、设备和产线的中文名称来自 <b>(中文)</b> 列；为空则显示印尼语。数据中保存的始终是印尼语原值，报表和筛选不会分裂。</li>
+    <li>表格菜单 → <b>Isi terjemahan otomatis (中文 / English)…</b> 自动填写空白单元格。请与同事一起检查技术术语。</li>
+    <li><b>Terjemahan</b> 表 = 🌐 翻译按钮的结果（Google 翻译）。zh / id / en 列可以直接修改，修改后立即生效。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>报表（Excel 格式）</summary><div><ul>
+    <li><b>Laporan &lt;年份&gt;</b> 页 = 停线表格式。每次 开始 / 暂停 / 完成 / 取消 / 审核 后<b>实时</b>更新。</li>
+    <li>手动编辑 Maintenance 或 Format Laporan 表后 → 看板 → <b>更新 Laporan 和 Rekap</b>（每晚也会自动更新）。</li>
+    <li>不要编辑 Laporan / Rekap 页（会被重写）。请在 Maintenance 表中修正数据。</li>
+    <li>备件原始数据：<b>Pemakaian Sparepart</b> 表（每个备件一行，可做数据透视）。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>更新到新版本</summary><div><ol>
+    <li>按 CHANGELOG 替换代码文件。</li>
+    <li>运行 <b>setup</b>（添加新表 / 新列；旧数据安全）。</li>
+    <li>Deploy → Manage deployments → 编辑 → Version：<b>New version</b>。网址和二维码不变。</li>
+  </ol><p class="small muted">即使有人正在维修也安全。出现问题 → 在 Manage deployments 选择上一个版本。不要使用 <b>New deployment</b>（二维码会失效）。</p></div></details>
+
+  <details class="g"><summary>限制和风险</summary><div><ul>
+    <li>任何拥有表格<b>编辑</b>权限的人都能修改数据。请限制编辑权限。</li>
+    <li>备件只是使用记录，<b>不是库存</b>。</li>
+    <li>每个 Google 表格上限 1000 万个单元格。每年一月归档（菜单 → Arsipkan）。</li>
+    <li>不能离线使用，暂不支持照片。</li>
+    <li>Google 多账号缺陷：应用会检测并停止，解决方法在浏览器端（无痕 / 工作专用浏览器或个人资料）。</li>
+  </ul></div></details>
+</template>
+
+<template id="guide-baru-zh">
+  <h3>版本 <span data-v></span> 新功能</h3>
+  <ul>
+    <li><b>中文界面</b>：首页的 <b>中</b> / <b>ID</b> 按钮。所有菜单、按钮和选项都以中文显示。</li>
+    <li><b>🌐 翻译</b>：在详情和工作卡片中翻译其他技术员写的内容（印尼语 ⇄ 中文）。</li>
+    <li><b>💡 建议</b>：在首页向管理员发送建议，查看状态和回复。</li>
+    <li>本页的<b>更新计划</b>：正在计划的功能。</li>
   </ul>
 </template>

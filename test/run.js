@@ -1116,6 +1116,137 @@ test('multi-akun: apiWhoAmI = akun yang benar-benar dipakai Google untuk panggil
   setRow('Config', (r, h) => r[h.indexOf('Key')] === 'CEK_AKUN', 'Value', 'Ya');
 });
 
+// ---------- 2.5: bahasa China, terjemahan, saran, rencana ----------
+U.appendRow(rowOf('Users', { Email: 'li@gmail.com', Nama: 'Li Wei', Peran: 'Teknisi', Aktif: 'Ya', Bahasa: 'zh' }));
+U.appendRow(rowOf('Users', { Email: 'zhang@gmail.com', Nama: 'Zhang', Peran: 'Teknisi', Aktif: 'Ya', Bahasa: 'Mandarin' }));
+const LA = ctx.LanguageApp;
+
+test('2.5 setup: sheet Terjemahan/Saran/Rencana, label 中文/English bawaan terisi, tidak menimpa koreksi admin', () => {
+  for (const n of ['Terjemahan', 'Saran', 'Rencana']) assert.ok(ss.getSheetByName(n), n);
+  const R = ctx.readTable_('Rencana');
+  assert.ok(R.length >= 4 && R.some(r => /Login tanpa akun Google/.test(r.Judul)) && R.some(r => /Pindah dari Google Apps Script/.test(r.Judul)));
+  const opt = (v) => ctx.readTable_('Pilihan').find(r => r.Nilai === v);
+  assert.strictEqual(opt('Sensor error')['Nilai (中文)'], '传感器故障');
+  assert.strictEqual(opt('Sensor error')['Nilai (English)'], 'Sensor error');
+  const form = (f, k) => ctx.readTable_('Form').find(r => r.Form === f && r.Field === k);
+  assert.strictEqual(form('Selesai', 'Jenis kerusakan')['Label (中文)'], '故障类型');
+  assert.strictEqual(form('Selesai', 'Masalah')['Label (中文)'], '故障现象', 'diisi saat setup pertama; setelah itu milik admin');
+  setRow('Form', (r, h) => r[h.indexOf('Form')] === 'Cancel' && r[h.indexOf('Field')] === 'Catatan', 'Label (中文)', '');
+  setRow('Form', (r, h) => r[h.indexOf('Form')] === 'Cancel' && r[h.indexOf('Field')] === 'Catatan', 'Label', 'Keterangan batal');
+  setRow('Pilihan', (r, h) => r[h.indexOf('Nilai')] === 'Kebocoran', 'Nilai (中文)', '漏气/漏油');
+  const before = ctx.readTable_('Rencana').length;
+  ctx.setup();
+  assert.strictEqual(opt('Kebocoran')['Nilai (中文)'], '漏气/漏油', 'koreksi admin tidak ditimpa');
+  assert.strictEqual(form('Cancel', 'Catatan')['Label (中文)'], '', 'label Indonesia diubah admin → 中文 bawaan tidak dipasang (bisa salah arti)');
+  assert.strictEqual(ctx.readTable_('Rencana').length, before, 'rencana tidak dobel');
+});
+
+test('2.5 bahasa user (Users → Bahasa), label tampilan zh, nilai yang disimpan tetap kanonik', () => {
+  as('li@gmail.com', () => {
+    const b = ctx.apiBootstrap('');
+    assert.strictEqual(b.user.lang, 'zh');
+    assert.strictEqual(b.master.trZh['Sensor error'], '传感器故障');
+    assert.strictEqual(b.master.trZh['Kebocoran'], '漏气/漏油');
+    assert.strictEqual(b.master.forms.Selesai.find(f => f.field === 'Jenis kerusakan').labelZh, '故障类型');
+    assert.ok(b.master.rencana.length >= 4);
+  });
+  as('zhang@gmail.com', () => assert.strictEqual(ctx.apiBootstrap('').user.lang, 'zh', '"Mandarin" = zh'));
+  as('budi@gmail.com', () => assert.strictEqual(ctx.apiBootstrap('').user.lang, 'id', 'kosong = id'));
+  setRow('Mesin', (r) => r[0] === 'M-OVEN', 'Nama (中文)', '烘箱');
+  setRow('Lines', (r) => r[0] === 'L10', 'Nama (中文)', '电芯返修 1');
+  as('li@gmail.com', () => {
+    const tr = ctx.apiBootstrap('').master.trZh;
+    assert.strictEqual(tr['Oven'], '烘箱');
+    assert.strictEqual(tr['Cell Retreatment 1'], '电芯返修 1');
+    const id = ctx.apiStart('L10', { baterai: 'E22H' }).open.id;
+    advance(5);
+    ctx.apiComplete(id, { ...sel('Kebocoran', { tanpaPart: true }), values: { ...sel('Kebocoran').values, Catatan: '气管接头漏气' } });
+    const r = rec(id);
+    assert.strictEqual(r.Masalah, 'Kebocoran', 'disimpan kanonik, bukan label 中文');
+    assert.match(r.Catatan, /\] 气管接头漏气$/, 'teks bebas disimpan apa adanya (dengan cap waktu & nama)');
+  });
+  assert.match(as('asing@gmail.com', () => ctx.doGet({ parameter: {} }).vars.body), /未注册或已停用/, 'Access Denied juga dalam 中文');
+});
+
+test('2.5 terjemahan: Google Translate sekali lalu dari sheet Terjemahan; koreksi admin dipakai; teks berbahasa tujuan tidak dikirim', () => {
+  LA.calls = 0;
+  const out = as('li@gmail.com', () => ctx.apiTranslate(['Ganti selang angin bocor', '气管接头漏气', '', 'Ganti selang angin bocor'], 'zh'));
+  jeq(out, ['[zh-CN] Ganti selang angin bocor', '气管接头漏气', '', '[zh-CN] Ganti selang angin bocor']);
+  assert.strictEqual(LA.calls, 1, 'teks sama dua kali = satu panggilan; teks Han tidak dikirim');
+  const row = ctx.readTable_('Terjemahan').find(r => r.Teks === 'Ganti selang angin bocor');
+  assert.strictEqual(row['Bahasa asal'], 'id');
+  assert.strictEqual(row.zh, '[zh-CN] Ganti selang angin bocor');
+  ctx.resetMaster_();
+  as('li@gmail.com', () => ctx.apiTranslate(['Ganti selang angin bocor'], 'zh'));
+  assert.strictEqual(LA.calls, 1, 'permintaan berikutnya dari sheet, tanpa Google');
+  as('budi@gmail.com', () => assert.strictEqual(ctx.apiTranslate(['Ganti selang angin bocor'], 'en')[0], '[en] Ganti selang angin bocor'));
+  assert.strictEqual(ctx.readTable_('Terjemahan').filter(r => r.Teks === 'Ganti selang angin bocor').length, 1, 'bahasa baru ditulis di baris yang sama');
+  setRow('Terjemahan', (r, h) => r[h.indexOf('Teks')] === 'Ganti selang angin bocor', 'zh', '更换漏气的气管');
+  ctx.onEdit({ range: ss.getSheetByName('Terjemahan').getRange(2, 4) });
+  ctx.resetMaster_();
+  as('li@gmail.com', () => assert.strictEqual(ctx.apiTranslate(['Ganti selang angin bocor'], 'zh')[0], '更换漏气的气管', 'koreksi admin dipakai'));
+  as('budi@gmail.com', () => assert.strictEqual(ctx.apiTranslate(['气管接头漏气'], 'id')[0], '[id] 气管接头漏气'));
+  as('budi@gmail.com', () => assert.strictEqual(ctx.apiTranslate(['Sudah dalam bahasa Indonesia'], 'id')[0], 'Sudah dalam bahasa Indonesia'));
+  as('budi@gmail.com', () => throwsMsg(() => ctx.apiTranslate(new Array(51).fill('x'), 'zh'), /Maksimal 50/));
+  as('asing@gmail.com', () => throwsMsg(() => ctx.apiTranslate(['x'], 'zh'), /ACCESS_DENIED/));
+  const many = Array.from({ length: 40 }, (_, i) => 'teks unik nomor ' + i);
+  LA.calls = 0;
+  const part = as('budi@gmail.com', () => ctx.apiTranslate(many, 'zh'));
+  assert.strictEqual(LA.calls, 30, 'maks 30 teks baru per panggilan');
+  assert.strictEqual(part[35], 'teks unik nomor 35', 'sisanya tetap teks asli (diterjemahkan di panggilan berikutnya)');
+});
+
+test('2.5 isi terjemahan otomatis: mengisi sel kosong Mesin/Lines/Pilihan, tidak menimpa yang sudah ada', () => {
+  LA.calls = 0;
+  ctx.isiTerjemahanMaster_(true);
+  const m = ctx.readTable_('Mesin');
+  assert.strictEqual(m.find(r => r['Mesin ID'] === 'M-OVEN')['Nama (中文)'], '烘箱', 'tidak ditimpa');
+  assert.strictEqual(m.find(r => r['Mesin ID'] === 'M-PRESS')['Nama (中文)'], '[zh-CN] Press');
+  assert.strictEqual(m.find(r => r['Mesin ID'] === 'M-PRESS')['Nama (English)'], '[en] Press');
+  assert.ok(LA.calls > 0);
+  const n = LA.calls;
+  ctx.isiTerjemahanMaster_(true);
+  assert.strictEqual(LA.calls, n, 'jalankan ulang: semua sudah terisi');
+});
+
+test('2.5 saran: teknisi kirim & lihat miliknya, admin lihat semua + badge, tanggapi; saran 中文 diterjemahkan untuk admin', () => {
+  as('budi@gmail.com', () => {
+    throwsMsg(() => ctx.apiSaranKirim({ kategori: 'Fitur aplikasi', isi: '  ' }), /Tulis saranmu/);
+    const l = ctx.apiSaranKirim({ kategori: 'Sparepart', isi: 'Tambahkan bearing 6206 di katalog' });
+    assert.strictEqual(l.items.length, 1);
+    assert.strictEqual(l.items[0].status, 'Baru');
+    assert.strictEqual(l.items[0].email, '', 'teknisi tidak melihat email');
+  });
+  advance(1);
+  as('li@gmail.com', () => {
+    const l = ctx.apiSaranKirim({ kategori: 'Ngawur', isi: '希望增加夜班统计' });
+    assert.strictEqual(l.items.length, 1, 'hanya saran sendiri');
+    assert.strictEqual(l.items[0].kategori, 'Lainnya', 'kategori tak dikenal → Lainnya');
+    assert.strictEqual(l.items[0].bahasa, 'zh');
+    assert.strictEqual(l.items[0].terjemahan, '[id] 希望增加夜班统计');
+  });
+  let sid;
+  as('sari@gmail.com', () => {
+    const b = ctx.apiBootstrap('');
+    assert.strictEqual(b.counts.saran, 2, 'badge admin: 2 saran baru');
+    const l = ctx.apiSaranList();
+    assert.ok(l.isAdmin && l.items.length === 2);
+    assert.strictEqual(l.items[0].nama, 'Li Wei', 'terbaru dulu');
+    sid = l.items[1].id;
+    throwsMsg(() => ctx.apiSaranTanggapi(sid, { status: 'Hore', tanggapan: '' }), /Status saran tidak dikenal/);
+    const after = ctx.apiSaranTanggapi(sid, { status: 'Direncanakan', tanggapan: 'Masuk update minggu depan' });
+    assert.strictEqual(after.items.find(i => i.id === sid).status, 'Direncanakan');
+    assert.strictEqual(ctx.apiRefresh({}).counts.saran, 1);
+  });
+  as('budi@gmail.com', () => {
+    const mine = ctx.apiSaranList().items[0];
+    assert.strictEqual(mine.tanggapan, 'Masuk update minggu depan');
+    assert.strictEqual(mine.oleh, 'Sari');
+    throwsMsg(() => ctx.apiSaranTanggapi(sid, { status: 'Selesai' }), /tidak punya akses/);
+    assert.strictEqual(ctx.apiBootstrap('').counts.saran, 0, 'teknisi tanpa badge admin');
+  });
+});
+
 // ---------- Paling akhir: menghapus data ----------
 test('hapus data testing: sebelum tanggal → pekerjaan + Log + sparepart (juga arsip) terhapus, laporan & rekap dibuat ulang, master utuh', () => {
   throwsMsg(() => ctx.parseTanggalWib_('2027-02-01'), /dd\/mm\/yyyy/);

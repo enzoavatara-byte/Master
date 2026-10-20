@@ -68,15 +68,15 @@
     d.id = 'acct';
     d.className = 'acct-bg';
     d.innerHTML = '<div class="card acct">' + (other && mine
-      ? '<h2>Akun Google tidak cocok</h2><p class="small">Aplikasi dibuka sebagai <b>' + esc(mine) + '</b>, tetapi Google mengirim tombol sebagai <b>' + esc(other) +
-        '</b> (akun utama di browser ini). Ini bug Google saat satu browser login dengan beberapa akun. Aplikasi dihentikan supaya data tidak tercatat atas nama yang salah.</p>'
+      ? '<h2>' + t('Akun Google tidak cocok') + '</h2><p class="small">' + t('Aplikasi dibuka sebagai {a}, tetapi Google mengirim tombol sebagai {b} (akun utama di browser ini). Ini bug Google saat satu browser login dengan beberapa akun. Aplikasi dihentikan supaya data tidak tercatat atas nama yang salah.',
+        { a: '<b>' + esc(mine) + '</b>', b: '<b>' + esc(other) + '</b>' }) + '</p>'
       // Tanpa info akun: bisa juga sesi login habis / sinyal → muat ulang dulu.
-      : '<h2>Tidak terhubung ke akun Google</h2><p class="small">Google menolak permintaan dari browser ini' + (mine ? ' untuk <b>' + esc(mine) + '</b>' : '') +
-        '. Tekan <b>Muat ulang</b> dulu (mungkin sesi login habis). Kalau masih muncul, biasanya karena browser login dengan beberapa akun Google:</p>') +
-      '<ol class="small"><li><b>Cepat:</b> buka link aplikasi di tab <b>Incognito / Private</b>, login hanya dengan akun kerja.</li>' +
-      '<li><b>Permanen di HP:</b> pakai satu browser khusus kerja (mis. Firefox, Edge, Samsung Internet) yang hanya login akun kerja, lalu ⋮ → <b>Tambahkan ke layar utama</b>.</li>' +
-      '<li><b>Permanen di PC:</b> buat <b>profil Chrome</b> khusus akun kerja, atau keluar dari semua akun lalu login akun kerja <b>paling dulu</b> (akun pertama = akun utama).</li></ol>' +
-      '<button class="btn" id="acct-reload">Muat ulang</button></div>';
+      : '<h2>' + t('Tidak terhubung ke akun Google') + '</h2><p class="small">' + t('Google menolak permintaan dari browser ini{u}. Tekan <b>Muat ulang</b> dulu (mungkin sesi login habis). Kalau masih muncul, biasanya karena browser login dengan beberapa akun Google:',
+        { u: mine ? t(' untuk {e}', { e: '<b>' + esc(mine) + '</b>' }) : '' }) + '</p>') +
+      '<ol class="small"><li>' + t('<b>Cepat:</b> buka link aplikasi di tab <b>Incognito / Private</b>, login hanya dengan akun kerja.') + '</li>' +
+      '<li>' + t('<b>Permanen di HP:</b> pakai satu browser khusus kerja (mis. Firefox, Edge, Samsung Internet) yang hanya login akun kerja, lalu ⋮ → <b>Tambahkan ke layar utama</b>.') + '</li>' +
+      '<li>' + t('<b>Permanen di PC:</b> buat <b>profil Chrome</b> khusus akun kerja, atau keluar dari semua akun lalu login akun kerja <b>paling dulu</b> (akun pertama = akun utama).') + '</li></ol>' +
+      '<button class="btn" id="acct-reload">' + t('Muat ulang') + '</button></div>';
     document.body.appendChild(d);
     $('acct-reload').onclick = function () { location.reload(); };
   }
@@ -96,16 +96,16 @@
     return two(Math.floor(s / 3600)) + ':' + two(Math.floor(s % 3600 / 60)) + ':' + two(s % 60);
   }
   function dur(ms) {
-    var m = Math.max(0, Math.floor(ms / 60000));
-    if (m < 60) return m + 'm';
+    var m = Math.max(0, Math.floor(ms / 60000)), zh = LANG === 'zh';
+    if (m < 60) return m + (zh ? '分' : 'm');
     var h = Math.floor(m / 60);
-    if (h < 24) return h + 'j ' + (m % 60) + 'm';
-    return Math.floor(h / 24) + ' hari ' + (h % 24) + 'j';
+    if (h < 24) return h + (zh ? '时 ' : 'j ') + (m % 60) + (zh ? '分' : 'm');
+    return Math.floor(h / 24) + (zh ? '天 ' : ' hari ') + (h % 24) + (zh ? '时' : 'j');
   }
   function ago(iso) {
     var ms = serverNow() - new Date(iso).getTime();
-    if (ms < 60000) return 'baru saja';
-    return dur(ms) + ' lalu';
+    if (ms < 60000) return t('baru saja');
+    return t('{d} lalu', { d: dur(ms) });
   }
   function fmtShort(iso) {
     if (!iso) return '-';
@@ -123,7 +123,7 @@
   function M() { return state.boot.master; }
   function busy(btn, on, label) {
     if (!btn) return;
-    if (on) { btn.dataset.label = btn.innerHTML; btn.innerHTML = label || 'Memproses…'; btn.disabled = true; }
+    if (on) { btn.dataset.label = btn.innerHTML; btn.innerHTML = label || t('Memproses…'); btn.disabled = true; }
     else if (btn.dataset.label) { btn.innerHTML = btn.dataset.label; btn.disabled = false; }
   }
   var toastTimer;
@@ -131,11 +131,114 @@
     clearTimeout(toastTimer);
     $('toast-root').innerHTML = '<div class="toast ' + (kind || '') + '">' + esc(msg) + '</div>';
     toastTimer = setTimeout(function () { $('toast-root').innerHTML = ''; }, kind === 'err' ? 6000 : 3000);
+    // Pesan error dari server berbahasa Indonesia → untuk user 中文 diterjemahkan (Google Translate, di-cache).
+    if (kind === 'err' && LANG === 'zh' && needsTr(msg) && !I18N_DICT[msg]) {
+      translateTexts([msg]).then(function (o) {
+        var el = $('toast-root').querySelector('.toast');
+        if (el && el.textContent === msg) el.textContent = o[0];
+      }).catch(function () { /* tetap tampil bahasa Indonesia */ });
+    }
   }
   function freshQr(line) {
     return state.qr && state.qr.line === String(line).toUpperCase() && Date.now() - state.qr.at < QR_FRESH_MS;
   }
-  function lineTitle(r) { return esc(r.line) + (r.mesin ? ' · ' + esc(r.mesin) : (r.lineName ? ' · ' + esc(r.lineName) : '')); }
+  function who(name) { return name === 'Sistem' ? t('Sistem') : name; }
+  function lineTitle(r) { return esc(r.line) + (r.mesin ? ' · ' + esc(L(r.mesin)) : (r.lineName ? ' · ' + esc(L(r.lineName)) : '')); }
+
+  // ---------- bahasa: id / 中文 (kamus & penerjemah tampilan di I18n.html) ----------
+  var LANG_KEY = 'mttr.bahasa';
+  function savedLang() { try { return localStorage.getItem(LANG_KEY) || ''; } catch (e) { return ''; } }
+  /** Label tampilan untuk nilai dari Google Sheet (pilihan, mesin, line). Nilai yang disimpan tidak berubah. */
+  function L(v) {
+    if (LANG !== 'zh' || !v) return v;
+    var m = /^Lainnya: ([\s\S]*)$/.exec(String(v));
+    return m ? t('Lainnya') + ': ' + m[1] : (I18N_DICT[v] || v);
+  }
+  function lbl(d) { return LANG === 'zh' && d.labelZh ? d.labelZh : d.label; }
+  /** Nilai pilihan; "Lainnya: teks bebas" → label + teks yang bisa diterjemahkan (tombol 翻译). */
+  function valHtml(v) {
+    var m = /^Lainnya: ([\s\S]*)$/.exec(String(v || ''));
+    return m ? esc(t('Lainnya')) + ': <span data-tr>' + esc(m[1]) + '</span>' : esc(L(v));
+  }
+  /**
+   * Detail log dari server (teks Indonesia berpola) → label baku lewat kamus, teks bebas tetap asli di [data-tr] (tombol 翻译).
+   * Mulai: "Corrective, Line L01, mesin X, baterai Y, stop line Ya, …"; lainnya: "Label: nilai · Tenggat … · …".
+   */
+  function logHtml(event, s) {
+    s = String(s || '');
+    if (!s) return '';
+    var byAdmin = / \(oleh Admin\)$/.test(s), sep = event === 'start' ? ', ' : ' · ';
+    if (byAdmin) s = s.replace(/ \(oleh Admin\)$/, '');
+    var val = function (v) { return LANG === 'zh' && (I18N_DICT[v] || /^Lainnya: /.test(v)) ? esc(L(v)) : '<span data-tr>' + esc(v) + '</span>'; };
+    var seg = function (x) {
+      var m;
+      if ((m = /^Line (.+)$/.exec(x))) return esc(t('Line')) + ' ' + esc(m[1]);
+      if ((m = /^mesin (.+)$/.exec(x))) return esc(t('Mesin')) + ' ' + val(m[1]);
+      if ((m = /^baterai (.+)$/.exec(x))) return esc(t('Baterai')) + ' ' + esc(m[1]);
+      if ((m = /^stop line (.+)$/.exec(x))) return esc(t('Stop line')) + ' ' + esc(t(m[1]));
+      if ((m = /^Tenggat (.+)$/.exec(x))) return esc(t('Tenggat {w}', { w: m[1] }));
+      if ((m = /^> (\d+) jam tanpa konfirmasi \((.+)\)$/.exec(x))) return esc(t('> {h} jam tanpa konfirmasi ({s})', { h: m[1], s: t(m[2]) }));
+      if ((m = /^Konfirmasi QR (.+)$/.exec(x))) return esc(t('Konfirmasi QR {l}', { l: m[1] }));
+      if ((m = /^Status (\w+)$/.exec(x))) return esc(t('Status {s}', { s: t(m[1]) }));
+      if (I18N_DICT[x] != null) return esc(t(x));
+      if ((m = /^([^:]{1,80}): ([\s\S]*)$/.exec(x))) return esc(t(m[1])) + (LANG === 'zh' ? '：' : ': ') + val(m[2]);
+      return val(x);
+    };
+    return s.split(sep).map(seg).join(LANG === 'zh' && sep === ', ' ? '，' : sep) + (byAdmin ? esc(t(' (oleh Admin)')) : '');
+  }
+  function masterDict(m) {
+    var d = {};
+    Object.keys(m.trZh || {}).forEach(function (k) { d[k] = m.trZh[k]; });
+    Object.keys(m.forms || {}).forEach(function (f) { m.forms[f].forEach(function (x) { if (x.labelZh) d[x.label] = x.labelZh; }); });
+    return d;
+  }
+  function applyLang(lang) {
+    i18nSet(lang, state.boot ? masterDict(M()) : {});
+    document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'id';
+    var st = document.querySelectorAll('[data-i18n]');
+    for (var i = 0; i < st.length; i++) st[i].textContent = t(st[i].getAttribute('data-i18n'));
+  }
+  function setLang(lang) {
+    try { localStorage.setItem(LANG_KEY, lang); } catch (e) { /* mode privat: hanya sesi ini */ }
+    applyLang(lang);
+    closeSheet();
+    if (state.lineView && state.tab === 'home') { setView('line'); renderLine(); } else showTab(state.tab);
+  }
+  function langBtn() { return '<button class="helpbtn lang" id="btn-lang" aria-label="Bahasa / 语言">' + (LANG === 'zh' ? 'ID' : '中') + '</button>'; }
+
+  // Tombol 翻译 / Terjemahkan untuk teks bebas ([data-tr]): teks Indonesia → 中文 untuk user zh, teks 中文 → Indonesia.
+  var trCache = {};
+  function needsTr(s) { s = String(s || '').trim(); return !!s && (LANG === 'zh' ? !/[\u3400-\u9fff]/.test(s) : /[\u3400-\u9fff]/.test(s)); }
+  function translateTexts(texts) {
+    var lang = LANG, need = [];
+    texts.forEach(function (s) { if (trCache[lang + '|' + s] == null && need.indexOf(s) === -1) need.push(s); });
+    var chunks = [];
+    for (var i = 0; i < need.length; i += 50) chunks.push(need.slice(i, i + 50));   // apiTranslate: maks 50 teks per panggilan
+    var p = Promise.all(chunks.map(function (c) {
+      return call('apiTranslate', c, lang).then(function (out) { c.forEach(function (s, j) { trCache[lang + '|' + s] = out[j]; }); });
+    }));
+    return p.then(function () { return texts.map(function (s) { return trCache[lang + '|' + s]; }); });
+  }
+  function trButton(root) {
+    if (!root) return;
+    var els = Array.prototype.filter.call(root.querySelectorAll('[data-tr]'), function (e) { return needsTr(e.textContent); });
+    if (!els.length) return;
+    var b = document.createElement('button'), shown = false, label = t('🌐 Terjemahkan');
+    b.type = 'button'; b.className = 'link small trbtn'; b.textContent = label;
+    root.appendChild(b);
+    b.onclick = function (ev) {
+      ev.stopPropagation();
+      if (shown) { els.forEach(function (e) { e.textContent = e.getAttribute('data-orig'); }); shown = false; b.textContent = label; return; }
+      var texts = els.map(function (e) { if (!e.hasAttribute('data-orig')) e.setAttribute('data-orig', e.textContent); return e.getAttribute('data-orig'); });
+      busy(b, true, t('Menerjemahkan…'));
+      translateTexts(texts).then(function (out) {
+        busy(b, false);
+        els.forEach(function (e, i) { e.textContent = out[i]; });
+        shown = true;
+        b.textContent = t('Tampilkan teks asli');
+      }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+    };
+  }
 
   // ---------- live timers (tampilan saja; data dari server) ----------
   function liveMs(el) {
@@ -163,7 +266,7 @@
   });
 
   function setView(id) {
-    ['home', 'line', 'history', 'review', 'pending', 'dashboard', 'qr', 'guide'].forEach(function (v) {
+    ['home', 'line', 'history', 'review', 'pending', 'dashboard', 'qr', 'guide', 'saran'].forEach(function (v) {
       $('view-' + v).classList.toggle('hidden', v !== id);
     });
     window.scrollTo(0, 0);
@@ -226,9 +329,9 @@
   function lineChoices(f) {
     var lines = linesFor({ factory: f.factory, proses: f.proses, baterai: f.baterai }), out = [], seen = {};
     lines.forEach(function (l) {
-      if (l.grup && !seen[l.grup]) { seen[l.grup] = 1; out.push({ value: l.grup, label: l.grup + ' (semua sub-line)' }); }
+      if (l.grup && !seen[l.grup]) { seen[l.grup] = 1; out.push({ value: l.grup, label: t('{g} (semua sub-line)', { g: l.grup }) }); }
     });
-    lines.forEach(function (l) { if (!seen[l.id]) { seen[l.id] = 1; out.push({ value: l.id, label: l.id + (l.name ? ' · ' + l.name : '') }); } });
+    lines.forEach(function (l) { if (!seen[l.id]) { seen[l.id] = 1; out.push({ value: l.id, label: l.id + (l.name ? ' · ' + L(l.name) : '') }); } });
     return out;
   }
   function serverFilter(view) {
@@ -299,6 +402,7 @@
   function boot() {
     var hasFilter = !!(state.filter.factory || state.filter.proses || state.filter.baterai || state.filter.line);
     // Data awal sudah ditanam di halaman oleh server (doGet) → langsung tampil tanpa menunggu server lagi.
+    i18nObserve(document.body);   // teks tetap yang masuk ke layar diterjemahkan otomatis (bila bahasa 中文)
     if (window.BOOT) {
       try { applyBoot(window.BOOT); } catch (e) { bootError(e); return; }
       checkAccount();
@@ -315,6 +419,7 @@
 
   function applyBoot(b) {
     state.boot = b;
+    applyLang(savedLang() || b.user.lang || 'id');
     syncClock(b.serverNowIso);
     setBadges(b.counts);
     // filter tersimpan yang sudah tidak valid (factory/line dihapus dari sheet) dibersihkan
@@ -325,7 +430,7 @@
       state.lineView = b.lineView; setView('line'); renderLine();
     } else {
       renderHome();
-      if (INITIAL_MESIN_ID) toast('QR mesin ' + INITIAL_MESIN_ID + ' tidak cocok dengan satu line. Pilih line-nya.', 'err');
+      if (INITIAL_MESIN_ID) toast(t('QR mesin {m} tidak cocok dengan satu line. Pilih line-nya.', { m: INITIAL_MESIN_ID }), 'err');
     }
   }
 
@@ -352,8 +457,8 @@
     var d = document.createElement('div');
     d.id = 'upd';
     d.className = 'updbar';
-    d.innerHTML = '<span class="grow">Versi baru (' + esc(version) + ') sudah terpasang. Simpan isian yang sedang dibuka, lalu muat ulang.</span>' +
-      (url ? '<a class="btn" href="' + esc(url) + '" target="_top">Muat ulang</a>' : '<b>Tutup & buka lagi aplikasinya.</b>');
+    d.innerHTML = '<span class="grow">' + t('Versi baru ({v}) sudah terpasang. Simpan isian yang sedang dibuka, lalu muat ulang.', { v: esc(version) }) + '</span>' +
+      (url ? '<a class="btn" href="' + esc(url) + '" target="_top">' + t('Muat ulang') + '</a>' : '<b>' + t('Tutup & buka lagi aplikasinya.') + '</b>');
     document.body.appendChild(d);
   }
   document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
@@ -376,11 +481,11 @@
 
   function renderHome() {
     var b = state.boot, u = b.user, warn = b.myOpen && b.myOpen.warnedIso;
-    var html = '<div class="hello"><div><div class="appname">' + esc(M().appName) + '</div><div class="hi">Halo, ' + esc(u.name.split(' ')[0]) + ',</div><h1>' +
-      (b.myOpen ? 'Semangat kerjanya!' : 'Selamat bekerja!') + '</h1></div><div class="row">' + helpBtn() +
+    var html = '<div class="hello"><div><div class="appname">' + esc(M().appName) + '</div><div class="hi">' + t('Halo, {n},', { n: esc(u.name.split(' ')[0]) }) + '</div><h1>' +
+      (b.myOpen ? 'Semangat kerjanya!' : 'Selamat bekerja!') + '</h1></div><div class="row">' + langBtn() + helpBtn() +
       '<div class="avatar">' + esc(initials(u.name)) + (warn || b.counts.review ? '<span class="dot"></span>' : '') + '</div></div></div>';
     if (isNewVersion()) {
-      html += '<button class="newver" data-help><b>Versi ' + esc(M().version) + '</b> · ada yang baru. Lihat panduan singkat ›</button>';
+      html += '<button class="newver" data-help>' + t('<b>Versi {v}</b> · ada yang baru. Lihat panduan singkat ›', { v: esc(M().version) }) + '</button>';
     }
 
     if (b.myOpen) {
@@ -391,8 +496,12 @@
         '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="vertical-align:-5px;margin-right:8px"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>SCAN QR</button>' +
         '<button class="btn ghost" id="btn-find-line" style="margin-top:10px">Cari line (jika QR rusak)</button></div>';
     }
+    html += '<button class="saranbar" id="btn-saran"><span class="grow">' + (isAdmin() ? t('💡 Saran dari teknisi') : t('💡 Punya saran untuk aplikasi? Kirim ke admin')) + '</span>' +
+      (isAdmin() && b.counts.saran ? '<span class="badge">' + b.counts.saran + '</span>' : '') + ' ›</button>';
     html += filterBar(null) + weekCard(b.stats) + feedCard(b.recent);
     $('view-home').innerHTML = html;
+    $('btn-lang').onclick = function () { setLang(LANG === 'zh' ? 'id' : 'zh'); };
+    $('btn-saran').onclick = openSaran;
 
     if ($('btn-scan')) $('btn-scan').onclick = scanAny;
     if ($('btn-find-line')) $('btn-find-line').onclick = linePicker;
@@ -409,9 +518,9 @@
   function weekCard(st) {
     var max = Math.max(1, Math.max.apply(null, st.days.map(function (d) { return d.count; })));
     var total = st.days.reduce(function (s, d) { return s + d.count; }, 0);
-    return '<div class="card"><div class="caps">Maintenance selesai 7 hari (' + total + ')</div>' +
+    return '<div class="card"><div class="caps">' + t('Maintenance selesai 7 hari ({n})', { n: total }) + '</div>' +
       '<div class="bars">' + st.days.map(function (d) {
-        return '<div class="bar" title="' + esc(d.label + ': ' + d.count + ' selesai') + '"><span class="n">' + (d.count || '') + '</span><div class="track"><div class="fill" style="height:' +
+        return '<div class="bar" title="' + esc(t('{d}: {n} selesai', { d: t(d.label), n: d.count })) + '"><span class="n">' + (d.count || '') + '</span><div class="track"><div class="fill" style="height:' +
           Math.round(d.count / max * 100) + '%"></div></div><span class="lbl">' + esc(d.label) + '</span></div>';
       }).join('') + '</div>' +
       '<div class="kpis"><div class="kpi"><span class="tiny muted">MTTR 7 hari (Corrective)</span><b>' +
@@ -421,11 +530,11 @@
   }
 
   function feedCard(list) {
-    return '<div class="card"><div class="caps">Aktivitas terbaru</div>' + (list.length ? '<ul class="feed">' + list.map(function (e) {
+    return '<div class="card" data-trbox><div class="caps">Aktivitas terbaru</div>' + (list.length ? '<ul class="feed">' + list.map(function (e) {
       return '<li><div class="avatar sm">' + esc(initials(e.userName)) + '</div><div class="grow">' +
-        '<div class="row between small"><span class="muted">' + esc(e.userName) + '</span><span class="muted js-ago" data-iso="' + esc(e.whenIso) + '">' + esc(ago(e.whenIso)) + '</span></div>' +
-        '<div class="title">' + esc((e.line ? e.line + (e.mesin ? ' · ' + e.mesin : '') + ' · ' : '') + (EVENT_LABEL[e.event] || e.event)) + '</div>' +
-        '<div class="small muted clamp">' + esc(e.detail || e.id) + '</div></div></li>';
+        '<div class="row between small"><span class="muted">' + esc(who(e.userName)) + '</span><span class="muted js-ago" data-iso="' + esc(e.whenIso) + '">' + esc(ago(e.whenIso)) + '</span></div>' +
+        '<div class="title">' + esc((e.line ? e.line + (e.mesin ? ' · ' + L(e.mesin) : '') + ' · ' : '') + t(EVENT_LABEL[e.event] || e.event)) + '</div>' +
+        '<div class="small muted clamp">' + (e.detail ? logHtml(e.event, e.detail) : esc(e.id)) + '</div></div></li>';
     }).join('') + '</ul>' : '<div class="empty small">Belum ada aktivitas.</div>') + '</div>';
   }
 
@@ -444,10 +553,10 @@
     function drawList() {
       var list = linesFor({ factory: draft.factory, baterai: draft.baterai }, draft.q).slice(0, 150);
       $('lp-list').innerHTML = list.length ? list.map(function (l) {
-        return '<button class="item" data-pick="' + esc(l.id) + '"><div class="row between"><span class="t">' + esc(l.id) + (l.name ? ' · ' + esc(l.name) : '') + '</span>' +
+        return '<button class="item" data-pick="' + esc(l.id) + '"><div class="row between"><span class="t">' + esc(l.id) + (l.name ? ' · ' + esc(L(l.name)) : '') + '</span>' +
           (l.grup ? '<span class="tag-lite">' + esc(l.grup) + '</span>' : '') + '</div><div class="small muted">' + esc(factoryName(l.factory) || '-') +
-          (l.proses ? ' · ' + esc(l.proses) : '') + (l.area ? ' · ' + esc(l.area) : '') + ' · ' + esc(l.batteries.join(', ')) + '</div>' +
-          (l.alias ? '<div class="tiny muted">Alias: ' + esc(l.alias) + '</div>' : '') + '</button>';
+          (l.proses ? ' · ' + esc(L(l.proses)) : '') + (l.area ? ' · ' + esc(l.area) : '') + ' · ' + esc(l.batteries.join(', ')) + '</div>' +
+          (l.alias ? '<div class="tiny muted">' + t('Alias: {a}', { a: esc(l.alias) }) + '</div>' : '') + '</button>';
       }).join('') : '<div class="empty">Tidak ada line yang cocok.</div>';
       var bs = $('lp-list').querySelectorAll('[data-pick]');
       for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { var id = this.getAttribute('data-pick'); closeSheet(); openLine(id, null); };
@@ -460,11 +569,11 @@
   function workCard(r) {
     var paused = r.status === 'Pause';
     var html = '<div class="card dark work"><div class="top"><div>' + pill(r.status) + (r.tipe ? ' <span class="pill">' + esc(r.tipe) + '</span>' : '') +
-      '<h2>' + esc(r.line) + (r.mesin ? ' · ' + esc(r.mesin) : (r.lineName ? ' · ' + esc(r.lineName) : '')) + '</h2>' +
-      '<div class="small muted">' + esc(r.id) + ' · Baterai ' + esc(r.battery) + '</div></div></div>';
+      '<h2>' + lineTitle(r) + '</h2>' +
+      '<div class="small muted">' + esc(r.id) + ' · ' + t('Baterai {b}', { b: esc(r.battery) }) + '</div></div></div>';
     if (r.warnedIso) {
-      html += '<div class="alert warn" style="margin:16px 0 0"><b>Sudah lebih dari ' + esc(state.boot.limits.warnHours) +
-        ' jam.</b> Masih dikerjakan? Jika tidak dijawab sampai ' + esc(state.boot.limits.abandonHours) + ' jam, status jadi Abandoned.' +
+      html += '<div class="alert warn" style="margin:16px 0 0">' + t('<b>Sudah lebih dari {h} jam.</b> Masih dikerjakan? Jika tidak dijawab sampai {a} jam, status jadi Abandoned.',
+        { h: esc(state.boot.limits.warnHours), a: esc(state.boot.limits.abandonHours) }) +
         '<div class="btn-row" style="margin-top:12px"><button class="btn ok" data-act="confirm">Masih lanjut</button>' +
         '<button class="btn navy" data-act="pending">Pending</button><button class="btn danger-ghost" data-act="cancel">Cancel</button></div></div>';
     }
@@ -482,13 +591,15 @@
         '<button class="btn ghost" data-act="pending">Pending</button><button class="btn ghost" data-act="cancel">Cancel</button></div>';
     }
     if (r.dikerjakan) {
-      html += '<details style="margin-top:14px"><summary class="small muted">Pekerjaan sebelumnya</summary>' +
-        '<div class="small" style="white-space:pre-line;margin-top:8px">' + esc(r.dikerjakan) + '</div></details>';
+      html += '<details style="margin-top:14px" data-trbox><summary class="small muted">Pekerjaan sebelumnya</summary>' +
+        '<div class="small" style="white-space:pre-line;margin-top:8px" data-tr>' + esc(r.dikerjakan) + '</div></details>';
     }
     return html + '</div>';
   }
 
   function bindWork(r, root) {
+    var boxes = root.querySelectorAll('[data-trbox]');
+    for (var k = 0; k < boxes.length; k++) trButton(boxes[k]);
     if (!r) return;
     var btns = root.querySelectorAll('[data-act]');
     for (var i = 0; i < btns.length; i++) {
@@ -574,14 +685,14 @@
     if (d.type === 'teks' && !d.required && /^Detail /.test(d.field)) {
       // Detail opsional di bawah pilihan: tertutup dulu supaya form tetap pendek.
       return '<div data-field="' + esc(d.field) + '" data-type="teks" class="detail-field"><button type="button" class="link small" data-open-detail><span class="plus">+ </span>' +
-        esc(d.label) + ' <span class="muted">(opsional)</span></button><input type="text" data-input class="hidden" maxlength="300" placeholder="' + esc(d.label) + '…"></div>';
+        '<span>' + esc(lbl(d)) + '</span> <span class="muted">(opsional)</span></button><input type="text" data-input class="hidden" maxlength="300" placeholder="' + esc(lbl(d)) + '…"></div>';
     }
-    var label = '<label class="lbl">' + esc(d.label) + (d.required ? ' *' : ' <span class="muted">(opsional)</span>') + '</label>';
+    var label = '<label class="lbl"><span>' + esc(lbl(d)) + '</span>' + (d.required ? ' *' : ' <span class="muted">(opsional)</span>') + '</label>';
     var body;
     if (d.type === 'pilihan') {
       body = d.options.length <= 8 ? chips('f', d.options) :
-        '<select data-input><option value="">Pilih…</option>' + d.options.map(function (o) { return '<option>' + esc(o) + '</option>'; }).join('') + '</select>';
-      if (d.other) body += '<input type="text" data-other class="hidden" style="margin-top:8px" placeholder="Tulis ' + esc(d.label.toLowerCase()) + '…">';
+        '<select data-input><option value="">Pilih…</option>' + d.options.map(function (o) { return '<option value="' + esc(o) + '">' + esc(L(o)) + '</option>'; }).join('') + '</select>';
+      if (d.other) body += '<input type="text" data-other class="hidden" style="margin-top:8px" placeholder="' + esc(t('Tulis {x}…', { x: lbl(d).toLowerCase() })) + '">';
     } else if (d.type === 'angka') {
       body = '<input type="number" data-input inputmode="decimal">';
     } else {
@@ -636,7 +747,7 @@
       var d = defs[0];
       var vals = d.options.slice();
       if (!d.required) vals.push({ value: '', label: 'Tanpa alasan' });
-      var s = openSheet('<h2>Pause</h2><p class="small muted">Pilih ' + esc(d.label.toLowerCase()) + ' — langsung tersimpan. Timer aktif berhenti, timer pause berjalan.</p>' +
+      var s = openSheet('<h2>Pause</h2><p class="small muted">' + t('Pilih {x} — langsung tersimpan. Timer aktif berhenti, timer pause berjalan.', { x: esc(lbl(d).toLowerCase()) }) + '</p>' +
         '<div data-field="' + esc(d.field) + '">' + chips('f', vals, { big: true }) +
         (d.other ? '<input type="text" data-other class="hidden" style="margin-top:10px" placeholder="Tulis alasan…">' +
           '<button class="btn hidden" id="pz-save" style="margin-top:10px">Pause</button>' : '') + '</div>');
@@ -654,7 +765,7 @@
   }
 
   function tenggatHtml(d) {
-    return '<div data-sys="tenggat"><label class="lbl">' + esc(d.label) + ' *</label>' + chips('tenggat', [
+    return '<div data-sys="tenggat"><label class="lbl"><span>' + esc(lbl(d)) + '</span> *</label>' + chips('tenggat', [
       { value: 'HARI_INI', label: 'Hari ini' }, { value: 'SHIFT', label: 'Shift berikutnya' },
       { value: 'BESOK', label: 'Besok' }, { value: 'TANGGAL', label: 'Pilih tanggal' }]) +
       '<input type="date" id="p-date" class="hidden" style="margin-top:8px"></div>';
@@ -688,9 +799,9 @@
     jenisCat.forEach(function (j) { if (jenisManual.indexOf(j) === -1) jenisManual.push(j); });
     var pk = { parts: [], jenis: jenisCat[0] || '', jenisTouched: false, nama: '', q: '' };
 
-    var s = openSheet('<h2>Selesai</h2><p class="small muted">' + esc(r.line) + (r.mesin ? ' · ' + esc(r.mesin) : '') + ' · waktu selesai dicatat server saat disimpan.</p><div class="stack">' +
+    var s = openSheet('<h2>Selesai</h2><p class="small muted">' + esc(r.line) + (r.mesin ? ' · ' + esc(L(r.mesin)) : '') + ' · ' + t('waktu selesai dicatat server saat disimpan.') + '</p><div class="stack">' +
       formHtml('Selesai', { 'Part': function (d) {
-        return '<div data-sys="part"><label class="lbl">' + esc(d.label) + ' *</label>' +
+        return '<div data-sys="part"><label class="lbl"><span>' + esc(lbl(d)) + '</span> *</label>' +
           chips('part', [{ value: 'NONE', label: NO_PART }, { value: 'SOME', label: 'Ada part' }], { big: true }) +
           '<div id="pk" class="picker hidden"><div id="pk-used"></div>' +
           (cat.length ? '<input type="search" id="pk-q" class="search" placeholder="Cari sparepart (nama / model)…" style="margin-top:12px"><div id="pk-browse"></div>'
@@ -709,13 +820,13 @@
       var ex = pk.parts.filter(function (p) { return !p.manual && p.id === item.id; })[0];
       if (ex) ex.qty = Math.min(999, ex.qty + 1);
       else pk.parts.push({ id: item.id, jenis: item.jenis, nama: item.nama, model: item.model, satuan: item.satuan, qty: 1 });
-      toast('Ditambahkan: ' + partLabel(item) + (ex ? ' (×' + ex.qty + ')' : ''), 'ok');
+      toast(t('Ditambahkan: {p}', { p: partLabel(item) + (ex ? ' (×' + ex.qty + ')' : '') }), 'ok');
       drawUsed(); drawBrowse();
     }
     function drawUsed() {
-      $('pk-used').innerHTML = pk.parts.length ? '<div class="caps" style="margin-top:12px">Part dipakai (' + pk.parts.length + ')</div>' + pk.parts.map(function (p, i) {
+      $('pk-used').innerHTML = pk.parts.length ? '<div class="caps" style="margin-top:12px">' + t('Part dipakai ({n})', { n: pk.parts.length }) + '</div>' + pk.parts.map(function (p, i) {
         return '<div class="used"><div class="grow"><b>' + esc(p.nama) + '</b>' + (p.model ? ' <span class="small">' + esc(p.model) + '</span>' : '') +
-          '<div class="tiny muted">' + esc(p.jenis) + (p.manual ? ' · manual' : '') + (p.satuan ? ' · ' + esc(p.satuan) : '') + '</div></div>' +
+          '<div class="tiny muted">' + esc([L(p.jenis), p.manual ? t('manual') : '', p.satuan].filter(String).join(' · ')) + '</div></div>' +
           '<div class="qty"><button type="button" data-dec="' + i + '" aria-label="Kurangi">−</button><input type="number" min="1" max="999" inputmode="numeric" data-qty="' + i + '" value="' + p.qty + '">' +
           '<button type="button" data-inc="' + i + '" aria-label="Tambah">+</button></div><button type="button" class="rm" data-rm="' + i + '" aria-label="Hapus">×</button></div>';
       }).join('') : '<p class="small muted" style="margin:12px 0 0">Belum ada part. Cari, atau pilih jenis → nama → model di bawah.</p>';
@@ -730,7 +841,7 @@
     function itemBtn(p, showJenis) {
       var q = usedQty(p.id);
       return '<button type="button" class="pitem' + (q ? ' on' : '') + '" data-add="' + esc(p.id) + '"><span class="grow"><b>' + esc(showJenis ? p.nama : (p.model || p.nama)) + '</b>' +
-        (showJenis && p.model ? ' ' + esc(p.model) : '') + '<span class="tiny muted"> ' + esc([showJenis ? p.jenis : '', p.satuan].filter(String).join(' · ')) + '</span></span>' +
+        (showJenis && p.model ? ' ' + esc(p.model) : '') + '<span class="tiny muted"> ' + esc([showJenis ? L(p.jenis) : '', p.satuan].filter(String).join(' · ')) + '</span></span>' +
         '<span class="add">' + (q ? '✓ ×' + q : '+') + '</span></button>';
     }
     function drawBrowse() {
@@ -747,19 +858,19 @@
           return words.every(function (w) { return hay.indexOf(w) !== -1; });
         }).slice(0, 50);
         html = hits.length ? '<div class="plist scroll-y" id="pk-hits">' + hits.map(function (p) { return itemBtn(p, true); }).join('') + '</div>'
-          : '<p class="small muted" style="margin:10px 0 0">Tidak ditemukan di katalog. Pakai <b>Tambah manual</b> di bawah.</p>';
+          : '<p class="small muted" style="margin:10px 0 0">' + t('Tidak ditemukan di katalog. Pakai <b>Tambah manual</b> di bawah.') + '</p>';
       } else {
         var names = [];
         cat.forEach(function (p) { if (p.jenis === pk.jenis && names.indexOf(p.nama) === -1) names.push(p.nama); });
         var models = cat.filter(function (p) { return p.jenis === pk.jenis && p.nama === pk.nama; });
         // Jenis = satu baris geser; Nama & Model = dua kolom tinggi tetap, masing-masing scroll sendiri.
         html = '<div class="scroll-x" style="margin-top:12px">' + chips('pjenis', jenisCat, { selected: pk.jenis }) + '</div>' +
-          '<div class="cascade"><div class="cascade-head"><span>Nama sparepart (' + names.length + ')</span><span>Model' + (pk.nama ? ' · ' + esc(pk.nama) : '') + '</span></div>' +
+          '<div class="cascade"><div class="cascade-head"><span>' + t('Nama sparepart ({n})', { n: names.length }) + '</span><span>' + t('Model') + (pk.nama ? ' · ' + esc(pk.nama) : '') + '</span></div>' +
           '<div class="cascade-body"><div class="ccol" id="pk-names">' + names.map(function (n) {
             var c = cat.filter(function (p) { return p.jenis === pk.jenis && p.nama === n; });
             var q = c.reduce(function (sum, p) { return sum + usedQty(p.id); }, 0);
             return '<button type="button" class="nitem' + (n === pk.nama ? ' on' : '') + '" data-nama="' + esc(n) + '"><span class="grow">' + esc(n) + '</span>' +
-              (q ? '<span class="tiny used-n">✓' + q + '</span>' : (c.length > 1 ? '<span class="tiny muted">' + c.length + ' model</span>' : '')) + '</button>';
+              (q ? '<span class="tiny used-n">✓' + q + '</span>' : (c.length > 1 ? '<span class="tiny muted">' + t('{n} model', { n: c.length }) + '</span>' : '')) + '</button>';
           }).join('') + '</div>' +
           '<div class="ccol models" id="pk-models">' + (pk.nama ? models.map(function (p) { return itemBtn(p, false); }).join('')
             : '<p class="tiny muted" style="margin:0;padding:12px">← Pilih nama sparepart</p>') + '</div></div></div>';
@@ -812,13 +923,13 @@
       if (!(qty >= 1 && qty <= 999)) { toast('Jumlah harus 1–999.', 'err'); return; }
       pk.parts.push({ manual: true, jenis: jenis, nama: nama, model: model, qty: qty });
       $('pk-m-nama').value = ''; $('pk-m-model').value = ''; $('pk-m-qty').value = 1;
-      toast('Ditambahkan (manual): ' + nama, 'ok');
+      toast(t('Ditambahkan (manual): {p}', { p: nama }), 'ok');
       drawUsed();
     };
     $('c-save').onclick = function () {
       var mode = chipVal(s, 'part');
-      if (!mode) { toast('Sparepart: pilih "' + NO_PART + '" atau "Ada part".', 'err'); return; }
-      if (mode === 'SOME' && !pk.parts.length) { toast('Tambahkan minimal satu part, atau pilih "' + NO_PART + '".', 'err'); return; }
+      if (!mode) { toast(t('Sparepart: pilih "{a}" atau "{b}".', { a: t(NO_PART), b: t('Ada part') }), 'err'); return; }
+      if (mode === 'SOME' && !pk.parts.length) { toast(t('Tambahkan minimal satu part, atau pilih "{a}".', { a: t(NO_PART) }), 'err'); return; }
       var input = collectForm(s);
       input.tanpaPart = mode === 'NONE';
       input.parts = mode === 'NONE' ? [] : pk.parts.map(function (p) {
@@ -839,7 +950,7 @@
 
   // ---------- HALAMAN LINE ----------
   function openLine(lineId, btn, mesinId) {
-    busy(btn, true, 'Membuka…');
+    busy(btn, true, t('Membuka…'));
     call('apiGetLine', lineId, mesinId || '').then(function (v) {
       busy(btn, false);
       syncClock(v.serverNowIso);
@@ -863,18 +974,18 @@
         if (!v.machines.length && !d.other) return;
         if (!v.machines.length) return; // line tanpa daftar mesin: pekerjaan untuk seluruh line
         var sel = v.preselectMesin || (freeMachines.length === 1 ? freeMachines[0].id : '');
-        var vals = v.machines.map(function (m) { return { value: m.id, label: m.name, sub: m.busyBy ? 'dikerjakan ' + m.busyBy : '', disabled: !!m.busyBy }; });
+        var vals = v.machines.map(function (m) { return { value: m.id, label: L(m.name), sub: m.busyBy ? t('dikerjakan {n}', { n: m.busyBy }) : '', disabled: !!m.busyBy }; });
         if (d.other) vals.push({ value: OTHER, label: 'Lainnya' });
-        html += '<div data-sys="mesin"><label class="lbl">' + esc(d.label) + (d.required ? ' *' : '') + '</label>' + chips('mesin', vals, { big: vals.length <= 4, selected: sel }) +
+        html += '<div data-sys="mesin"><label class="lbl"><span>' + esc(lbl(d)) + '</span>' + (d.required ? ' *' : '') + '</label>' + chips('mesin', vals, { big: vals.length <= 4, selected: sel }) +
           '<input type="text" id="s-mesin-lain" class="hidden" style="margin-top:8px" placeholder="Tulis nama mesin/alat…"></div>';
       } else if (d.field === 'Tipe') {
-        html += '<div><label class="lbl">' + esc(d.label) + '</label>' + chips('tipe', d.options, { big: true, selected: d.options[0] }) + '</div>';
+        html += '<div><label class="lbl">' + esc(lbl(d)) + '</label>' + chips('tipe', d.options, { big: true, selected: d.options[0] }) + '</div>';
       } else if (d.field === 'Stop line') {
-        html += '<div data-sys="stop"><label class="lbl">' + esc(d.label) + '</label>' + chips('stop', [{ value: 'Ya', label: 'Ya, line berhenti' }, { value: 'Tidak', label: 'Tidak' }],
+        html += '<div data-sys="stop"><label class="lbl">' + esc(lbl(d)) + '</label>' + chips('stop', [{ value: 'Ya', label: 'Ya, line berhenti' }, { value: 'Tidak', label: 'Tidak' }],
           { big: true, selected: stopDefault(tipeDef && tipeDef.options[0]) }) + '</div>';
       } else if (d.field === 'Baterai') {
-        if (l.batteries.length > 1) html += '<div><label class="lbl">' + esc(d.label) + '</label>' + chips('battery', l.batteries, { big: true, selected: v.lastBattery }) + '</div>';
-        else html += '<p class="small muted" style="margin:0">' + esc(d.label) + ': <b>' + esc(l.batteries[0] || '-') + '</b></p>';
+        if (l.batteries.length > 1) html += '<div><label class="lbl">' + esc(lbl(d)) + '</label>' + chips('battery', l.batteries, { big: true, selected: v.lastBattery }) + '</div>';
+        else html += '<p class="small muted" style="margin:0"><span>' + esc(lbl(d)) + '</span>: <b>' + esc(l.batteries[0] || '-') + '</b></p>';
       } else if (d.type !== 'sistem') {
         html += fieldHtml(d);
       }
@@ -886,17 +997,17 @@
     var v = state.lineView;
     var html = '<button class="back no-print" id="btn-back">← Beranda</button>';
     if (!v.found) {
-      $('view-line').innerHTML = html + '<div class="card center"><h2>Line tidak ditemukan</h2><p class="muted">Line <b>' + esc(v.lineId) +
-        '</b> tidak terdaftar. QR mungkin salah atau line sudah dihapus. Hubungi Admin.</p><button class="btn ghost" id="btn-find2">Cari line</button></div>';
+      $('view-line').innerHTML = html + '<div class="card center"><h2>Line tidak ditemukan</h2><p class="muted">' +
+        t('Line <b>{l}</b> tidak terdaftar. QR mungkin salah atau line sudah dihapus. Hubungi Admin.', { l: esc(v.lineId) }) + '</p><button class="btn ghost" id="btn-find2">Cari line</button></div>';
       $('btn-back').onclick = function () { showTab('home'); };
       $('btn-find2').onclick = linePicker;
       return;
     }
     var l = v.line;
-    html += '<div class="hello" style="margin-top:0"><div><div class="hi">' + esc([l.factoryName, l.proses, l.area].filter(String).join(' · ') || 'Line') + '</div><h1>' + esc(l.id) +
-      (l.name ? ' · ' + esc(l.name) : '') + '</h1>' + (l.grup ? '<span class="tag-lite">Grup ' + esc(l.grup) + '</span> ' : '') +
-      (l.alias ? '<span class="tiny muted">Alias: ' + esc(l.alias) + '</span>' : '') + '</div></div>';
-    if (v.unknownMesin) html += '<div class="alert warn">Mesin <b>' + esc(v.unknownMesin) + '</b> dari QR tidak terdaftar di line ini. Pilih mesin di bawah.</div>';
+    html += '<div class="hello" style="margin-top:0"><div><div class="hi">' + esc([l.factoryName, L(l.proses), l.area].filter(String).join(' · ') || t('Line')) + '</div><h1>' + esc(l.id) +
+      (l.name ? ' · ' + esc(L(l.name)) : '') + '</h1>' + (l.grup ? '<span class="tag-lite">' + t('Grup {g}', { g: esc(l.grup) }) + '</span> ' : '') +
+      (l.alias ? '<span class="tiny muted">' + t('Alias: {a}', { a: esc(l.alias) }) + '</span>' : '') + '</div></div>';
+    if (v.unknownMesin) html += '<div class="alert warn">' + t('Mesin <b>{m}</b> dari QR tidak terdaftar di line ini. Pilih mesin di bawah.', { m: esc(v.unknownMesin) }) + '</div>';
 
     if (!l.active) {
       html += '<div class="alert warn">Line ini nonaktif. Maintenance tidak bisa dimulai.</div>';
@@ -904,18 +1015,18 @@
       if (v.open && v.openIsMine) html += workCard(v.open);
       if (v.others.length) {
         html += '<div class="card"><div class="caps">Sedang dikerjakan di line ini</div>' + v.others.map(function (o) {
-          return '<div class="row" style="margin-top:12px"><div class="avatar sm">' + esc(initials(o.techLastName)) + '</div><div class="grow"><b>' + esc(o.mesin || 'Seluruh line') + '</b>' +
-            '<div class="small muted">' + esc(o.techLastName) + ' · sejak ' + esc(fmtShort(o.startIso)) + ' · ' + esc(o.id) + '</div></div>' + pill(o.status) +
+          return '<div class="row" style="margin-top:12px"><div class="avatar sm">' + esc(initials(o.techLastName)) + '</div><div class="grow"><b>' + esc(o.mesin ? L(o.mesin) : t('Seluruh line')) + '</b>' +
+            '<div class="small muted">' + esc(t('{n} · sejak {w} · {id}', { n: o.techLastName, w: fmtShort(o.startIso), id: o.id })) + '</div></div>' + pill(o.status) +
             (isAdmin() ? '<button class="link" data-admin-cancel="' + esc(o.id) + '" style="margin-left:8px">Cancel</button>' : '') + '</div>';
         }).join('') + '</div>';
       }
       if (!(v.open && v.openIsMine)) {
         if (v.myOpenElsewhere) {
-          html += '<div class="alert warn">Anda masih punya pekerjaan <b>' + esc(v.myOpenElsewhere.status) + '</b> di ' +
-            esc(v.myOpenElsewhere.line) + '. Selesaikan, pending, atau cancel dulu. <button class="link" id="btn-go-mine">Buka ›</button></div>';
+          html += '<div class="alert warn">' + t('Anda masih punya pekerjaan <b>{s}</b> di {l}. Selesaikan, pending, atau cancel dulu.', { s: esc(t(v.myOpenElsewhere.status)), l: esc(v.myOpenElsewhere.line) }) +
+            ' <button class="link" id="btn-go-mine">Buka ›</button></div>';
         }
         v.pendings.forEach(function (p, i) {
-          html += '<div class="darkpage" style="margin:0 0 16px">' + pendingCardInner(p) +
+          html += '<div class="darkpage" style="margin:0 0 16px" data-trbox>' + pendingCardInner(p) +
             '<div class="btn-row two" style="margin-top:12px"><button class="btn" data-continue="' + i + '"' + (v.myOpenElsewhere ? ' disabled' : '') + '>▶ Lanjutkan</button>' +
             '<button class="btn ghost" data-detail="' + esc(p.id) + '">Detail</button></div></div>';
         });
@@ -962,16 +1073,18 @@
       (function (b) { b.onclick = function () { continuePending(v.pendings[Number(b.getAttribute('data-continue'))], b); }; })(cs[i]);
     }
     bindDetailLinks($('view-line'));
+    var tb = $('view-line').querySelectorAll('.darkpage[data-trbox]');
+    for (var k = 0; k < tb.length; k++) trButton(tb[k]);
     tick();
   }
 
   // ---------- PENDING ----------
   function pendingCardInner(p) {
-    return '<div class="row between"><span class="k small" style="color:var(--navy-muted)">' + esc(p.tertunda || 'Pending') + '</span><span class="tag">' + esc(p.battery) + '</span></div>' +
+    return '<div class="row between"><span class="k small" style="color:var(--navy-muted)">' + (p.tertunda ? valHtml(p.tertunda) : t('Pending')) + '</span><span class="tag">' + esc(p.battery) + '</span></div>' +
       '<div style="font-weight:800;font-size:17px;margin:2px 0 6px">' + lineTitle(p) + '</div>' +
-      '<div class="small" style="color:#dfe7f0">' + esc(p.id) + ' · ' + esc(p.techLastName) + ' · pending <b class="js-dur"' + timerAttrs(p.pendingMin, p.sinceIso, true) + '></b></div>' +
-      '<div class="small ' + (p.overdue ? 'over' : '') + '" style="margin-top:4px' + (p.overdue ? '' : ';color:var(--navy-muted)') + '">Tenggat ' + esc(fmtShort(p.tenggatIso)) +
-      (p.overdue ? ' · LEWAT' : '') + '</div>';
+      '<div class="small" style="color:#dfe7f0">' + esc(p.id) + ' · ' + esc(p.techLastName) + ' · ' + t('pending') + ' <b class="js-dur"' + timerAttrs(p.pendingMin, p.sinceIso, true) + '></b></div>' +
+      '<div class="small ' + (p.overdue ? 'over' : '') + '" style="margin-top:4px' + (p.overdue ? '' : ';color:var(--navy-muted)') + '">' + t('Tenggat {w}', { w: esc(fmtShort(p.tenggatIso)) }) +
+      (p.overdue ? ' · ' + t('LEWAT') : '') + '</div>';
   }
 
   function loadPending(keepInput) {
@@ -1035,27 +1148,29 @@
       syncClock(d.serverNowIso);
       var r = d.record;
       var kv = function (k, v, style) { return v ? '<dt>' + esc(k) + '</dt><dd' + (style || '') + '>' + esc(v) + '</dd>' : ''; };
-      var withDetail = function (a, b) { return a && b ? a + ' – ' + b : (a || b); };
+      var kvh = function (k, html) { return html ? '<dt>' + esc(k) + '</dt><dd>' + html + '</dd>' : ''; };
+      var free = function (v) { return v ? '<span data-tr>' + esc(v) + '</span>' : ''; };
+      var withDetail = function (a, b) { return (a ? valHtml(a) : '') + (a && b ? ' – ' : '') + free(b); };
       var html = '<div class="row between"><h2>' + lineTitle(r) + '</h2>' + pill(r.status) + '</div>' +
-        '<p class="small muted" style="margin:0 0 14px">' + esc(r.id) + (r.tipe ? ' · ' + esc(r.tipe) : '') + '</p><dl class="kv">' +
-        kv('Factory', r.factoryName) + kv('Proses', r.proses) + kv('Baterai', r.battery) + kv('Mesin', r.mesin) + kv('Stop line', r.stopLine) +
+        '<p class="small muted" style="margin:0 0 14px">' + esc(r.id) + (r.tipe ? ' · ' + esc(L(r.tipe)) : '') + '</p><dl class="kv">' +
+        kv('Factory', r.factoryName) + kv('Proses', r.proses) + kv('Baterai', r.battery) + kv('Mesin', L(r.mesin)) + kv('Stop line', r.stopLine) +
         kv('Teknisi', r.techFirstName + (r.techLast !== r.techFirst ? ' → ' + r.techLastName : '')) +
         kv('Mulai', r.startText) + kv('Selesai', r.finishText) +
-        '<dt>Aktif</dt><dd class="js-dur"' + timerAttrs(r.activeMin, r.sinceIso, r.status === 'Aktif') + '></dd>' +
+        '<dt>Waktu aktif</dt><dd class="js-dur"' + timerAttrs(r.activeMin, r.sinceIso, r.status === 'Aktif') + '></dd>' +
         '<dt>Pause</dt><dd class="js-dur"' + timerAttrs(r.pauseMin, r.sinceIso, r.status === 'Pause') + '></dd>' +
         '<dt>Pending</dt><dd class="js-dur"' + timerAttrs(r.pendingMin, r.sinceIso, r.status === 'Pending') + '></dd>' +
-        kv('Tertunda', r.tertunda) +
-        (r.tenggatIso ? '<dt>Tenggat</dt><dd' + (r.overdue ? ' style="color:var(--danger)"' : '') + '>' + esc(r.tenggatText) + (r.overdue ? ' · LEWAT' : '') + '</dd>' : '') +
-        kv('Jenis kerusakan', r.jenisKerusakan) + kv('Masalah', withDetail(r.masalah, r.detailMasalah)) +
-        kv('Penyebab', withDetail(r.penyebab, r.detailPenyebab)) + kv('Penanganan', withDetail(r.penanganan, r.detailPenanganan)) +
+        kvh('Tertunda', r.tertunda ? valHtml(r.tertunda) : '') +
+        (r.tenggatIso ? '<dt>Tenggat</dt><dd' + (r.overdue ? ' style="color:var(--danger)"' : '') + '>' + esc(r.tenggatText) + (r.overdue ? ' · ' + t('LEWAT') : '') + '</dd>' : '') +
+        kv('Jenis kerusakan', L(r.jenisKerusakan)) + kvh('Masalah', withDetail(r.masalah, r.detailMasalah)) +
+        kvh('Penyebab', withDetail(r.penyebab, r.detailPenyebab)) + kvh('Penanganan', withDetail(r.penanganan, r.detailPenanganan)) +
         kv('Sparepart', r.parts.join('\n')) +
-        r.extra.map(function (e) { return kv(e.label, e.value); }).join('') +
-        kv('Alasan cancel', r.cancelReason) + kv('Dikerjakan', r.dikerjakan) + kv('Catatan', r.catatan) + kv('Masuk MTTR', r.mttr) +
-        (r.reviewedByName ? kv('Review', r.reviewedByName + ' · ' + r.reviewedText + (r.reviewNote ? '\n' + r.reviewNote : '')) : '') +
+        r.extra.map(function (e) { return kvh(e.label, free(e.value)); }).join('') +
+        kvh('Alasan cancel', r.cancelReason ? valHtml(r.cancelReason) : '') + kvh('Dikerjakan', free(r.dikerjakan)) + kvh('Catatan', free(r.catatan)) + kv('Masuk MTTR', r.mttr) +
+        (r.reviewedByName ? kvh('Review', esc(r.reviewedByName + ' · ' + r.reviewedText) + (r.reviewNote ? '<br>' + free(r.reviewNote) : '')) : '') +
         '</dl><div class="caps" style="margin:20px 0 10px">Riwayat kejadian</div><ul class="timeline">' +
         d.events.map(function (e) {
-          return '<li><b>' + esc(EVENT_LABEL[e.event] || e.event) + '</b> <span class="small muted">· ' + esc(e.userName) + ' · ' + esc(fmtShort(e.whenIso)) + '</span>' +
-            (e.detail ? '<div class="small muted">' + esc(e.detail) + '</div>' : '') + '</li>';
+          return '<li><b>' + esc(t(EVENT_LABEL[e.event] || e.event)) + '</b> <span class="small muted">· ' + esc(who(e.userName)) + ' · ' + esc(fmtShort(e.whenIso)) + '</span>' +
+            (e.detail ? '<div class="small muted">' + logHtml(e.event, e.detail) + '</div>' : '') + '</li>';
         }).join('') + '</ul>';
       if (r.status === 'Pending') {
         html += '<button class="btn xl" id="d-continue" style="margin-top:8px">▶ Lanjutkan' + (freshQr(r.line) ? '' : ' (scan QR)') + '</button>';
@@ -1064,6 +1179,7 @@
         html += '<button class="btn ghost" id="d-check" style="margin-top:10px">Tandai sudah dicek</button>';
       }
       s.innerHTML = '<div class="grab"></div>' + html;
+      trButton(s);
       tick();
       if ($('d-continue')) $('d-continue').onclick = function () { continuePending(r, this); };
       if ($('d-check')) $('d-check').onclick = function () {
@@ -1078,7 +1194,7 @@
   // ---------- Lanjutkan pending: konfirmasi QR ----------
   function continuePending(p, btn) {
     function go(lineId, b) {
-      busy(b, true, 'Melanjutkan…');
+      busy(b, true, t('Melanjutkan…'));
       return call('apiContinue', p.id, lineId).then(function (v) {
         closeSheet();
         syncClock(v.serverNowIso);
@@ -1121,9 +1237,9 @@
    */
   function openScanner(o) {
     var stream = null, stopped = false, timer = null;
-    var title = o.expectLine ? 'Scan QR line ' + o.expectLine : 'Scan QR line / mesin';
+    var title = o.expectLine ? t('Scan QR line {l}', { l: o.expectLine }) : t('Scan QR line / mesin');
     var s = openSheet('<h2>' + esc(title) + '</h2>' +
-      '<p class="small muted">' + (o.expectLine ? 'Konfirmasi Anda benar-benar di mesin. ' : '') + 'Arahkan kamera ke QR yang ditempel di line/mesin.</p>' +
+      '<p class="small muted">' + (o.expectLine ? esc(t('Konfirmasi Anda benar-benar di mesin.')) + ' ' : '') + esc(t('Arahkan kamera ke QR yang ditempel di line/mesin.')) + '</p>' +
       '<div class="scan-box" id="scan-box"><video id="scan-video" playsinline muted></video><div class="frame"></div></div>' +
       '<p class="small center" id="scan-status" style="margin-top:12px">Membuka kamera…</p>' +
       (o.expectLine ? '' : '<button class="btn ghost" id="scan-manual">Cari line manual</button>'), function () {
@@ -1136,17 +1252,17 @@
     function fallback(reason) {
       if (stopped) return;
       $('scan-box').classList.add('hidden');
-      $('scan-status').innerHTML = '<div class="alert warn" style="text-align:left"><b>Kamera tidak bisa dibuka di dalam aplikasi</b> (' + esc(reason) + ').<br>' +
+      $('scan-status').innerHTML = '<div class="alert warn" style="text-align:left">' + t('<b>Kamera tidak bisa dibuka di dalam aplikasi</b> ({r}).', { r: esc(t(reason)) }) + '<br>' +
         (o.expectLine
-          ? 'Tutup layar ini, lalu scan QR line <b>' + esc(o.expectLine) + '</b> dengan aplikasi kamera HP. Halaman line akan terbuka dengan tombol <b>Lanjutkan</b> tanpa scan ulang.'
-          : 'Scan QR dengan aplikasi kamera HP (halaman line terbuka otomatis), atau pakai <b>Cari line manual</b>.') + '</div>';
+          ? t('Tutup layar ini, lalu scan QR line <b>{l}</b> dengan aplikasi kamera HP. Halaman line akan terbuka dengan tombol <b>Lanjutkan</b> tanpa scan ulang.', { l: esc(o.expectLine) })
+          : t('Scan QR dengan aplikasi kamera HP (halaman line terbuka otomatis), atau pakai <b>Cari line manual</b>.')) + '</div>';
     }
     function found(text) {
       var q = parseQr(text);
       if (!q.line && !q.mesin) { $('scan-status').textContent = 'QR tidak dikenali, coba lagi…'; return false; }
-      if (o.expectLine && q.line !== String(o.expectLine).toUpperCase()) { $('scan-status').textContent = 'Ini QR ' + (q.line || q.mesin) + ', bukan line ' + o.expectLine + '.'; return false; }
+      if (o.expectLine && q.line !== String(o.expectLine).toUpperCase()) { $('scan-status').textContent = t('Ini QR {q}, bukan line {l}.', { q: q.line || q.mesin, l: o.expectLine }); return false; }
       if (!q.line) { $('scan-status').textContent = 'QR mesin lama tanpa line. Cetak ulang QR dari Dashboard → QR.'; return false; }
-      $('scan-status').textContent = 'QR ' + q.line + (q.mesin ? ' · ' + q.mesin : '') + ' terbaca ✓';
+      $('scan-status').textContent = t('QR {q} terbaca ✓', { q: q.line + (q.mesin ? ' · ' + q.mesin : '') });
       stopped = true;
       if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
       o.onResult(q.line, q.mesin);
@@ -1231,16 +1347,16 @@
     call('apiHistory', f).then(function (res) {
       syncClock(res.serverNowIso);
       h.data = res.items;
-      $('h-list').innerHTML = '<p class="small muted" style="margin:0 4px 10px">' + res.total + ' pekerjaan' + (res.truncated ? ' (ditampilkan ' + res.items.length + ' terbaru)' : '') +
+      $('h-list').innerHTML = '<p class="small muted" style="margin:0 4px 10px">' + t('{n} pekerjaan', { n: res.total }) + (res.truncated ? ' ' + t('(ditampilkan {n} terbaru)', { n: res.items.length }) : '') +
         (res.spreadsheetUrl ? ' · <a href="' + esc(res.spreadsheetUrl) + '" target="_blank" style="color:var(--accent)">Buka Google Sheet</a>' : '') + '</p>' +
         (res.items.length ? res.items.map(function (r) {
           return '<button class="item" data-detail="' + esc(r.id) + '"><div class="row between"><span class="small muted">' + esc(r.id) + '</span><span>' + pill(r.status) + tipeTag(r.tipe) + '</span></div>' +
             '<div class="t">' + lineTitle(r) + ' · ' + esc(r.battery) + '</div>' +
-            '<div class="small muted">' + esc(fmtShort(r.startIso)) + ' · aktif ' + esc(dur(r.activeMin * 60000)) +
+            '<div class="small muted">' + esc(t('{w} · aktif {d}', { w: fmtShort(r.startIso), d: dur(r.activeMin * 60000) })) +
             (h.scope === 'all' ? ' · ' + esc(r.techLastName) : '') + '</div>' +
-            (r.masalah ? '<div class="small clamp">' + esc((r.jenisKerusakan ? r.jenisKerusakan + ' · ' : '') + r.masalah + ' → ' + r.penanganan +
-              (r.parts.length && r.part !== NO_PART && r.part !== 'Tidak ada' ? ' · ' + r.parts.length + ' part' : '')) + '</div>' : '') +
-            (r.tertunda && r.status === 'Pending' ? '<div class="small clamp">' + esc(r.tertunda) + '</div>' : '') + '</button>';
+            (r.masalah ? '<div class="small clamp">' + esc((r.jenisKerusakan ? L(r.jenisKerusakan) + ' · ' : '') + L(r.masalah) + ' → ' + L(r.penanganan) +
+              (r.parts.length && r.part !== NO_PART && r.part !== 'Tidak ada' ? ' · ' + t('{n} part', { n: r.parts.length }) : '')) + '</div>' : '') +
+            (r.tertunda && r.status === 'Pending' ? '<div class="small clamp">' + esc(L(r.tertunda)) + '</div>' : '') + '</button>';
         }).join('') : '<div class="empty">Belum ada data.</div>');
       bindDetailLinks($('h-list'));
     }).catch(function (e) { $('h-list').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
@@ -1282,20 +1398,20 @@
     syncClock(res.serverNowIso);
     var html = '';
     if (res.warnings.length) {
-      html += '<div class="caps" style="margin:0 4px 8px">Peringatan > ' + esc(state.boot.limits.warnHours) + ' jam (menunggu jawaban teknisi)</div>' +
+      html += '<div class="caps" style="margin:0 4px 8px">' + t('Peringatan > {h} jam (menunggu jawaban teknisi)', { h: esc(state.boot.limits.warnHours) }) + '</div>' +
         res.warnings.map(function (r) {
           return '<div class="item" style="cursor:default;border-left:5px solid var(--warn)"><div class="row between"><span class="t">' + lineTitle(r) + ' · ' + esc(r.techLastName) + '</span>' + pill(r.status) + '</div>' +
-            '<div class="small muted">' + esc(r.id) + ' · diperingatkan ' + esc(fmtShort(r.warnedIso)) + ' · Abandoned otomatis jika tidak dijawab</div></div>';
+            '<div class="small muted">' + esc(t('{id} · diperingatkan {w} · Abandoned otomatis jika tidak dijawab', { id: r.id, w: fmtShort(r.warnedIso) })) + '</div></div>';
         }).join('');
     }
     if (!res.items.length && !res.warnings.length) {
-      html += '<div class="card center"><h2>Semua beres</h2><p class="muted">Tidak ada item yang perlu direview' + (filterSummary().length || state.q.review ? ' untuk filter ini' : '') + '.</p></div>';
+      html += '<div class="card center"><h2>Semua beres</h2><p class="muted">' + (filterSummary().length || state.q.review ? 'Tidak ada item yang perlu direview untuk filter ini.' : 'Tidak ada item yang perlu direview.') + '</p></div>';
     }
     html += res.items.map(function (r) {
       var info = '';
-      if (r.status === 'Pending') info = esc(r.tertunda) + ' · tenggat ' + esc(fmtShort(r.tenggatIso)) + (r.overdue ? ' <b style="color:var(--danger)">LEWAT</b>' : '');
-      if (r.status === 'Cancelled') info = 'Alasan: ' + esc(r.cancelReason);
-      if (r.status === 'Abandoned') info = 'Tercatat aktif ' + esc(dur(r.activeMin * 60000)) + ', pause ' + esc(dur(r.pauseMin * 60000)) + ' · Abandoned ' + esc(fmtShort(r.sinceIso));
+      if (r.status === 'Pending') info = valHtml(r.tertunda) + ' · ' + t('tenggat {w}', { w: esc(fmtShort(r.tenggatIso)) }) + (r.overdue ? ' <b style="color:var(--danger)">' + t('LEWAT') + '</b>' : '');
+      if (r.status === 'Cancelled') info = t('Alasan: {a}', { a: valHtml(r.cancelReason) });
+      if (r.status === 'Abandoned') info = esc(t('Tercatat aktif {a}, pause {p} · Abandoned {w}', { a: dur(r.activeMin * 60000), p: dur(r.pauseMin * 60000), w: fmtShort(r.sinceIso) }));
       var form = '';
       if (!r.canDecide) {
         form = '<p class="small muted" style="margin:10px 0 0">Menunggu review Admin.</p>';
@@ -1331,7 +1447,7 @@
       bs[i].onclick = function () {
         var b = this, card = b.closest('[data-id]');
         var note = card.querySelector('[data-f="note"]'), min = card.querySelector('[data-f="min"]');
-        busy(b, true, 'Menyimpan…');
+        busy(b, true, t('Menyimpan…'));
         call('apiReview', card.getAttribute('data-id'), {
           action: b.getAttribute('data-review'), note: note ? note.value : '', activeMin: min ? Number(min.value) : null
         }, serverFilter('review')).then(function (r) { renderReview(r, true); toast('Keputusan review tersimpan.', 'ok'); refresh(); })
@@ -1368,6 +1484,8 @@
   }
 
   /** Bar horizontal satu warna (satu seri → tanpa legend), nilai di ujung bar. */
+  /** "Stacking · L01", "Masalah → teks bebas": tiap bagian lewat kamus (teks bebas tetap). */
+  function keyLabel(k) { return String(k).split(/( · | → )/).map(function (p, i) { return i % 2 ? p : L(p); }).join(''); }
   function rankList(title, items, opts) {
     opts = opts || {};
     if (!items.length) return '<div class="card"><div class="caps">' + esc(title) + '</div><div class="empty small">Belum ada data di periode ini.</div></div>';
@@ -1375,7 +1493,7 @@
     return '<div class="card"><div class="caps">' + esc(title) + '</div>' + (opts.note ? '<p class="tiny muted" style="margin:4px 0 0">' + opts.note + '</p>' : '') +
       '<div class="rank">' + items.map(function (i) {
         var sub = opts.sub ? opts.sub(i) : '';
-        return '<div class="rank-row" title="' + esc(i.key + ': ' + i.count + '×' + (sub ? ' · ' + sub : '')) + '"><div class="row between small"><span class="grow clamp1">' + esc(i.key) + '</span>' +
+        return '<div class="rank-row" title="' + esc(keyLabel(i.key) + ': ' + i.count + '×' + (sub ? ' · ' + sub : '')) + '"><div class="row between small"><span class="grow clamp1">' + esc(keyLabel(i.key)) + '</span>' +
           '<b>' + i.count + '×</b></div><div class="htrack"><div class="hfill" style="width:' + Math.max(2, Math.round(i.count / max * 100)) + '%"></div></div>' +
           (sub ? '<div class="tiny muted">' + esc(sub) + '</div>' : '') + '</div>';
       }).join('') + '</div></div>';
@@ -1385,10 +1503,10 @@
     syncClock(d.serverNowIso);
     var k = d.kpi;
     var html = '<div class="kpis four">' +
-      tile('MTTR (' + d.mttrTypes + ')', mnt(k.mttr), k.mttr == null ? '' : 'mnt', k.mttrN + ' pekerjaan dihitung') +
-      tile('Corrective selesai', k.corrective, '', esc(dur(k.activeMin * 60000)) + ' total aktif') +
-      tile('Preventive selesai', k.preventive, '', 'tidak masuk MTTR') +
-      tile('Sedang berjalan', k.openNow, '', k.pendingNow + ' pending' + (k.overdueNow ? ' · <span style="color:var(--danger);font-weight:800">' + k.overdueNow + ' lewat tenggat</span>' : '')) +
+      tile(t('MTTR ({x})', { x: L(d.mttrTypes) }), mnt(k.mttr), k.mttr == null ? '' : 'mnt', esc(t('{n} pekerjaan dihitung', { n: k.mttrN }))) +
+      tile('Corrective selesai', k.corrective, '', esc(t('{d} total aktif', { d: dur(k.activeMin * 60000) }))) +
+      tile('Preventive selesai', k.preventive, '', esc(t('tidak masuk MTTR'))) +
+      tile('Sedang berjalan', k.openNow, '', esc(t('{n} pending', { n: k.pendingNow })) + (k.overdueNow ? ' · <span style="color:var(--danger);font-weight:800">' + esc(t('{n} lewat tenggat', { n: k.overdueNow })) + '</span>' : '')) +
       '</div>';
 
     // Project
@@ -1398,9 +1516,9 @@
         return '<div class="card proj"><div class="row between"><b style="font-size:17px">' + esc(p.battery) + '</b><span class="tag-lite">' + esc(p.fase || 'Fase belum diisi') + '</span></div>' +
           '<div class="tiny muted">' + esc(p.factoryName || '') + (p.catatan ? ' · ' + esc(p.catatan) : '') + '</div>' +
           '<div class="row between" style="margin-top:10px"><div><span class="tiny muted">MTTR</span><div><b style="font-size:22px">' + mnt(p.mttr) + '</b><span class="small"> mnt</span></div></div>' +
-          '<div style="text-align:right"><span class="tiny muted">Target</span><div><b>' + (p.target ? esc(p.target) + ' mnt' : '–') + '</b></div></div></div>' +
+          '<div style="text-align:right"><span class="tiny muted">Target</span><div><b>' + (p.target ? esc(t('{n} mnt', { n: p.target })) : '–') + '</b></div></div></div>' +
           (health ? '<div style="margin-top:6px">' + health + '</div>' : '') +
-          '<div class="tiny muted" style="margin-top:6px">' + p.n + ' dihitung · ' + p.openNow + ' berjalan · ' + p.pendingNow + ' pending' + (p.overdueNow ? ' · ' + p.overdueNow + ' lewat' : '') + '</div></div>';
+          '<div class="tiny muted" style="margin-top:6px">' + esc(t('{a} dihitung · {b} berjalan · {c} pending', { a: p.n, b: p.openNow, c: p.pendingNow }) + (p.overdueNow ? ' · ' + t('{n} lewat', { n: p.overdueNow }) : '')) + '</div></div>';
       }).join('') + '</div>';
     }
 
@@ -1410,56 +1528,50 @@
     html += '<div class="card"><div class="caps">Maintenance selesai per minggu (12 minggu)</div>' +
       '<div class="cols" id="d-cols">' + d.weeks.map(function (w, i) {
         var isMax = w.count === wmax && w.count > 0, isLast = i === d.weeks.length - 1;
-        return '<button type="button" class="col" data-i="' + i + '" title="' + esc('Minggu ' + w.label + ': ' + w.count + ' selesai · MTTR ' + mnt(w.mttr) + ' mnt') + '">' +
+        return '<button type="button" class="col" data-i="' + i + '" title="' + esc(t('Minggu {w}: {n} selesai · MTTR {m} mnt', { w: w.label, n: w.count, m: mnt(w.mttr) })) + '">' +
           '<span class="n">' + ((isMax || isLast) && w.count ? w.count : '') + '</span><span class="ctrack"><span class="cfill" style="height:' + Math.round(w.count / wmax * 100) + '%"></span></span>' +
           '<span class="lbl">' + (i % 3 === 2 || isLast ? esc(w.label) : '') + '</span></button>';
-      }).join('') + '</div><p class="small muted" id="d-cols-cap" style="margin:8px 0 0">Minggu ' + esc(last.label) + ': <b>' + last.count + '</b> selesai · MTTR ' + mnt(last.mttr) + ' mnt. Tap batang untuk detail.</p></div>';
+      }).join('') + '</div><p class="small muted" id="d-cols-cap" style="margin:8px 0 0">' + t('Minggu {w}: <b>{n}</b> selesai · MTTR {m} mnt. Tap batang untuk detail.', { w: esc(last.label), n: last.count, m: mnt(last.mttr) }) + '</p></div>';
 
+    var mttrSub = function (i) { return i.mttr != null ? t('MTTR {m} mnt', { m: Math.round(i.mttr) }) : ''; };
+    var actSub = function (i) { return t('{n} mnt aktif', { n: Math.round(i.minutes) }) + (i.mttr != null ? ' · ' + mttrSub(i) : ''); };
     html += rankList('Mesin paling sering bermasalah', d.machines, {
-      note: 'Semua pekerjaan non-cancel di periode ini, termasuk preventive & yang masih berjalan.',
-      sub: function (i) { return Math.round(i.minutes) + ' mnt aktif' + (i.mttr != null ? ' · MTTR ' + Math.round(i.mttr) + ' mnt' : ''); }
+      note: t('Semua pekerjaan non-cancel di periode ini, termasuk preventive & yang masih berjalan.'), sub: actSub
     });
-    html += rankList('Line paling sering di-maintenance', d.lines, {
-      sub: function (i) { return Math.round(i.minutes) + ' mnt aktif' + (i.mttr != null ? ' · MTTR ' + Math.round(i.mttr) + ' mnt' : ''); }
-    });
-    html += rankList('Masalah terbanyak', d.problems, {
-      sub: function (i) { return i.mttr != null ? 'MTTR ' + Math.round(i.mttr) + ' mnt' : ''; }
-    });
-    html += rankList('Jenis kerusakan', d.jenis || [], {
-      note: 'Pekerjaan selesai di periode ini.',
-      sub: function (i) { return i.mttr != null ? 'MTTR ' + Math.round(i.mttr) + ' mnt' : ''; }
-    });
+    html += rankList('Line paling sering di-maintenance', d.lines, { sub: actSub });
+    html += rankList('Masalah terbanyak', d.problems, { sub: mttrSub });
+    html += rankList('Jenis kerusakan', d.jenis || [], { note: t('Pekerjaan selesai di periode ini.'), sub: mttrSub });
     html += rankList('Sparepart paling sering dipakai', d.parts || [], {
-      note: 'Berapa kali dipakai (jumlah pekerjaan). Data dari sheet <b>Pemakaian Sparepart</b>.',
-      sub: function (i) { return 'total ' + i.qty + ' · ' + i.jenis; }
+      note: t('Berapa kali dipakai (jumlah pekerjaan). Data dari sheet <b>Pemakaian Sparepart</b>.'),
+      sub: function (i) { return t('total {n}', { n: i.qty }) + ' · ' + L(i.jenis); }
     });
 
     html += '<div class="card"><div class="caps">Teknisi</div>' + (d.techs.length ? '<div class="table-wrap"><table class="tbl"><thead><tr><th>Teknisi</th><th>Selesai</th><th>MTTR</th><th>Total aktif</th></tr></thead><tbody>' +
-      d.techs.map(function (t) {
-        return '<tr><td>' + esc(t.key) + '</td><td>' + t.count + '</td><td>' + mnt(t.mttr) + (t.mttr != null ? ' mnt' : '') + '</td><td>' + esc(dur(t.minutes * 60000)) + '</td></tr>';
+      d.techs.map(function (x) {
+        return '<tr><td>' + esc(x.key) + '</td><td>' + x.count + '</td><td>' + (x.mttr != null ? esc(t('{n} mnt', { n: mnt(x.mttr) })) : '–') + '</td><td>' + esc(dur(x.minutes * 60000)) + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<div class="empty small">Belum ada data di periode ini.</div>') + '</div>';
 
     if (d.others.length) {
       html += rankList('Isian "Lainnya" terbanyak', d.others, {
-        note: 'Yang sering muncul sebaiknya dijadikan pilihan tetap di sheet <b>Pilihan</b> (atau <b>Mesin</b>) supaya teknisi cukup tap.'
+        note: t('Yang sering muncul sebaiknya dijadikan pilihan tetap di sheet <b>Pilihan</b> (atau <b>Mesin</b>) supaya teknisi cukup tap.')
       });
     }
     if (isAdmin()) {
-      html += '<div class="card"><div class="caps">Laporan format Excel</div><p class="small muted" style="margin:6px 0 12px">Tab <b>Laporan ' + new Date(serverNow()).getFullYear() +
-        '</b> & <b>Rekap</b> di Google Sheet diperbarui langsung setiap aksi. Tekan tombol ini setelah mengedit sheet Maintenance atau Format Laporan secara manual.</p>' +
+      html += '<div class="card"><div class="caps">Laporan format Excel</div><p class="small muted" style="margin:6px 0 12px">' +
+        t('Tab <b>Laporan {y}</b> & <b>Rekap</b> di Google Sheet diperbarui langsung setiap aksi. Tekan tombol ini setelah mengedit sheet Maintenance atau Format Laporan secara manual.', { y: new Date(serverNow()).getFullYear() }) + '</p>' +
         '<button class="btn ghost" id="d-report">Perbarui Laporan & Rekap</button><div id="d-report-out"></div></div>';
     }
     if (d.warnings.length) {
-      html += '<div class="card"><div class="caps" style="color:var(--warn)">Perlu dicek di Google Sheet (' + d.warnings.length + ')</div><ul class="small" style="margin:10px 0 0;padding-left:18px">' +
+      html += '<div class="card"><div class="caps" style="color:var(--warn)">' + t('Perlu dicek di Google Sheet ({n})', { n: d.warnings.length }) + '</div><ul class="small" style="margin:10px 0 0;padding-left:18px">' +
         d.warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul></div>';
     }
     $('d-body').innerHTML = html;
     if ($('d-report')) $('d-report').onclick = function () {
       var b = this;
-      busy(b, true, 'Membuat laporan…');
+      busy(b, true, t('Membuat laporan…'));
       call('apiBuildReports').then(function (res) {
         busy(b, false);
-        $('d-report-out').innerHTML = '<p class="small" style="margin:10px 0 0">✓ ' + esc(res.laporan) + ' (' + res.rows + ' baris) & ' + esc(res.rekap) + ' diperbarui. ' +
+        $('d-report-out').innerHTML = '<p class="small" style="margin:10px 0 0">' + esc(t('✓ {l} ({n} baris) & {r} diperbarui.', { l: res.laporan, n: res.rows, r: res.rekap })) + ' ' +
           '<a href="' + esc(res.spreadsheetUrl) + '" target="_blank" style="color:var(--accent)">Buka Google Sheet</a></p>';
       }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
     };
@@ -1468,7 +1580,7 @@
       cols[i].onclick = function () {
         var w = d.weeks[Number(this.getAttribute('data-i'))];
         for (var j = 0; j < cols.length; j++) cols[j].classList.toggle('sel', cols[j] === this);
-        $('d-cols-cap').innerHTML = 'Minggu ' + esc(w.label) + ': <b>' + w.count + '</b> selesai · MTTR ' + mnt(w.mttr) + ' mnt';
+        $('d-cols-cap').innerHTML = t('Minggu {w}: <b>{n}</b> selesai · MTTR {m} mnt', { w: esc(w.label), n: w.count, m: mnt(w.mttr) });
       };
     }
   }
@@ -1481,24 +1593,90 @@
     renderGuide();
   }
   function renderGuide() {
-    var tpl = function (id) { var t = document.getElementById(id); return t ? t.innerHTML : ''; };
+    var tpl = function (id) { var el = (LANG === 'zh' && document.getElementById(id + '-zh')) || document.getElementById(id); return el ? el.innerHTML : ''; };
     var sec = isAdmin() ? (state.guideSec || 'teknisi') : 'teknisi';
     var notes = (state.boot.notes || []).filter(function (n) { return sec === 'admin' ? n.untuk !== 'Teknisi' : n.untuk !== 'Admin'; });
-    var html = '<button class="back" id="g-back">← Kembali</button><div class="hello"><div><div class="hi">' + esc(M().appName) + ' · versi ' + esc(M().version) +
+    var rencana = M().rencana || [];
+    var html = '<button class="back" id="g-back">← Kembali</button><div class="hello"><div><div class="hi">' + esc(t('{a} · versi {v}', { a: M().appName, v: M().version })) +
       '</div><h1>Panduan</h1></div></div>' +
       (isAdmin() ? '<div style="margin:0 0 14px">' + chips('gsec', [{ value: 'teknisi', label: 'Untuk teknisi' }, { value: 'admin', label: 'Untuk admin' }], { selected: sec, big: true }) + '</div>' : '') +
       '<div class="card guide">' + tpl(sec === 'admin' ? 'guide-admin' : 'guide-teknisi') + '</div>' +
-      (notes.length ? '<div class="card guide"><div class="caps">Catatan lokal (dari admin)</div>' + notes.map(function (n) {
-        return '<details class="g"><summary>' + esc(n.judul || 'Catatan') + '</summary><div class="small" style="white-space:pre-line">' + esc(n.isi) + '</div></details>';
+      (notes.length ? '<div class="card guide" data-trbox><div class="caps">Catatan lokal (dari admin)</div>' + notes.map(function (n) {
+        return '<details class="g"><summary data-tr>' + esc(n.judul || 'Catatan') + '</summary><div class="small" style="white-space:pre-line" data-tr>' + esc(n.isi) + '</div></details>';
       }).join('') + '</div>' : '') +
+      (rencana.length ? '<div class="card guide" data-trbox><div class="caps">Rencana update</div>' + rencana.map(function (r) {
+        return '<details class="g"><summary><span data-tr>' + esc(r.judul) + '</span><span class="tag-lite"><span>' + esc(r.status) + '</span>' + (r.target ? ' · <span data-tr>' + esc(r.target) + '</span>' : '') + '</span></summary>' +
+          '<div class="small" style="white-space:pre-line" data-tr>' + esc(r.isi) + '</div></details>';
+      }).join('') + '<p class="tiny muted" style="margin:10px 0 0">' + t('Punya ide? Kirim lewat <b>💡 Saran</b> di Beranda.') + '</p></div>' : '') +
       '<div class="card guide">' + tpl('guide-baru') + '</div>';
     $('view-guide').innerHTML = html;
+    var tbs = $('view-guide').querySelectorAll('[data-trbox]');
+    for (var k = 0; k < tbs.length; k++) trButton(tbs[k]);
     var vs = $('view-guide').querySelectorAll('[data-v]');
     for (var i = 0; i < vs.length; i++) vs[i].textContent = M().version;
     bindChips($('view-guide'), function (n, v) { state.guideSec = v; renderGuide(); });
     $('g-back').onclick = function () {
       if (state.lineView && state.tab === 'home') { setView('line'); renderLine(); } else showTab(state.tab);
     };
+  }
+
+  // ---------- SARAN (teknisi → admin) ----------
+  function openSaran() {
+    closeSheet();
+    setView('saran');
+    $('view-saran').innerHTML = '<div class="loading">Memuat…</div>';
+    call('apiSaranList').then(renderSaran).catch(function (e) { $('view-saran').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
+  }
+  function saranCard(s, isAdm) {
+    var showTr = isAdm && s.terjemahan;
+    return '<div class="card saran" data-sid="' + esc(s.id) + '" data-trbox><div class="row between"><span class="tag-lite">' + esc(s.kategori) + '</span>' +
+      '<span class="pill sr-' + esc(s.status) + '">' + esc(s.status) + '</span></div>' +
+      '<div class="small muted" style="margin:6px 0">' + esc(s.nama) + ' · ' + esc(fmtShort(s.whenIso)) + '</div>' +
+      '<div style="white-space:pre-line"' + (showTr ? '' : ' data-tr') + '>' + esc(s.isi) + '</div>' +
+      (showTr ? '<div class="small muted" style="margin-top:6px;white-space:pre-line">' + t('Terjemahan: {x}', { x: esc(s.terjemahan) }) + '</div>' : '') +
+      (s.tanggapan ? '<div class="reply"><b>' + esc(s.oleh || 'Admin') + ':</b> <span data-tr>' + esc(s.tanggapan) + '</span></div>' : '') +
+      (isAdm ? '<div class="stack" style="margin-top:12px">' + chips('sst', state.saran.statuses, { selected: s.status }) +
+        '<textarea data-f="tanggapan" maxlength="1000" placeholder="Tanggapan untuk teknisi (opsional)">' + esc(s.tanggapan) + '</textarea>' +
+        '<button class="btn ghost" data-sr-save>Simpan tanggapan</button></div>' : '') + '</div>';
+  }
+  function renderSaran(res) {
+    state.saran = res;
+    var kat = state.saranKat && res.kategori.indexOf(state.saranKat) !== -1 ? state.saranKat : res.kategori[0];
+    var html = '<button class="back" id="sr-back">← Beranda</button><div class="hello"><div><div class="hi">' + (res.isAdmin ? 'Semua saran teknisi' : 'Untuk admin') +
+      '</div><h1>Saran</h1></div></div>' +
+      '<div class="card stack" id="sr-form"><div class="caps">Kirim saran</div><p class="small muted" style="margin:4px 0 0">Apa yang perlu ditambah atau diperbaiki di aplikasi? Boleh pakai bahasa apa saja.</p>' +
+      chips('skat', res.kategori, { selected: kat }) +
+      '<textarea id="sr-isi" maxlength="1000" placeholder="Tulis saran…"></textarea><button class="btn" id="sr-send">Kirim saran</button></div>' +
+      '<div class="caps" style="margin:4px 4px 8px">' + t(res.isAdmin ? 'Semua saran ({n})' : 'Saran saya ({n})', { n: res.items.length }) + '</div>' +
+      (res.items.length ? res.items.map(function (s) { return saranCard(s, res.isAdmin); }).join('') : '<div class="empty">Belum ada saran.</div>');
+    $('view-saran').innerHTML = html;
+    $('sr-back').onclick = function () { showTab('home'); };
+    bindChips($('sr-form'), function (n, v) { state.saranKat = v; });
+    $('sr-send').onclick = function () {
+      var b = this, isi = $('sr-isi').value.trim();
+      if (!isi) { toast('Tulis saranmu dulu.', 'err'); $('sr-isi').focus(); return; }
+      busy(b, true, t('Mengirim…'));
+      call('apiSaranKirim', { kategori: chipVal($('sr-form'), 'skat'), isi: isi }).then(function (r) {
+        toast('Terima kasih! Saran terkirim ke admin.', 'ok');
+        renderSaran(r);
+        refresh();
+      }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+    };
+    var cards = $('view-saran').querySelectorAll('.card.saran');
+    for (var i = 0; i < cards.length; i++) {
+      (function (card) {
+        bindChips(card);
+        trButton(card);
+        var save = card.querySelector('[data-sr-save]');
+        if (save) save.onclick = function () {
+          var b = this;
+          busy(b, true, t('Menyimpan…'));
+          call('apiSaranTanggapi', card.getAttribute('data-sid'), { status: chipVal(card, 'sst'), tanggapan: card.querySelector('[data-f="tanggapan"]').value })
+            .then(function (r) { toast('Tanggapan tersimpan.', 'ok'); renderSaran(r); refresh(); })
+            .catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+        };
+      })(cards[i]);
+    }
   }
 
   // ---------- QR (Admin) ----------
@@ -1526,17 +1704,17 @@
       var qrs = [];
       var html = '<button class="back no-print" id="qr-back">← Dashboard</button><div class="hello no-print"><div><div class="hi">Admin</div><h1>QR Line & Mesin</h1></div>' +
         '<button class="btn" style="width:auto" onclick="window.print()">Cetak</button></div>' + devWarn +
-        '<p class="small muted no-print" style="margin:0 4px 14px">Line dari sheet <b>Lines</b>, mesin dari sheet <b>Mesin</b>. QR mesin langsung memilih mesinnya saat di-scan (1 tap lebih cepat).</p>' +
+        '<p class="small muted no-print" style="margin:0 4px 14px">' + t('Line dari sheet <b>Lines</b>, mesin dari sheet <b>Mesin</b>. QR mesin langsung memilih mesinnya saat di-scan (1 tap lebih cepat).') + '</p>' +
         '<div class="qr-grid">';
       res.lines.forEach(function (l) {
         qrs.push({ url: base + '?line=' + encodeURIComponent(l.id) });
         html += '<div class="qr-card"><b style="font-size:18px">' + esc(l.id) + '</b><div class="small">' + esc(l.name) + '</div>' +
           '<div class="qr" id="qr-' + (qrs.length - 1) + '"></div><div class="small muted">' + esc([l.factoryName, l.proses, l.area].filter(String).join(' · ')) + '</div>' +
-          '<div class="tiny muted">Scan: status & mulai kerja</div>' + (l.active ? '' : '<div class="small" style="color:var(--danger)">NONAKTIF</div>') + '</div>';
+          '<div class="tiny muted notr">Scan: status & mulai kerja<br>扫码：查看状态 / 开始维修</div>' + (l.active ? '' : '<div class="small notr" style="color:var(--danger)">NONAKTIF · 已停用</div>') + '</div>';
         l.machines.forEach(function (m) {
           qrs.push({ url: base + '?line=' + encodeURIComponent(l.id) + '&mesin=' + encodeURIComponent(m.id) });
           html += '<div class="qr-card mesin"><b>' + esc(m.name) + '</b><div class="small">' + esc(l.id) + ' · ' + esc(m.id) + '</div>' +
-            '<div class="qr" id="qr-' + (qrs.length - 1) + '"></div><div class="tiny muted">QR mesin</div></div>';
+            '<div class="qr" id="qr-' + (qrs.length - 1) + '"></div><div class="tiny muted notr">QR mesin · 设备二维码</div></div>';
         });
       });
       html += '</div>';

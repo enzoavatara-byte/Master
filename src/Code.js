@@ -13,7 +13,7 @@ function doGet(e) {
   if (!user.authorized) {
     return renderMessage_('Access Denied',
       'Email <b>' + escapeHtml_(user.email || '(tidak terdeteksi)') + '</b> tidak terdaftar atau nonaktif. ' +
-      'Hubungi Admin untuk didaftarkan.');
+      'Hubungi Admin untuk didaftarkan.<br><br>该邮箱未注册或已停用，请联系管理员登记。');
   }
   var t = HtmlService.createTemplateFromFile('Index');
   // Whitelist karakter: nilai ini ditanam ke <script> di Index.html.
@@ -72,6 +72,8 @@ function onOpen() {
     .addItem('Arsipkan data tahun lalu…', 'menuArsipkanTahun')
     .addItem('Hapus data testing…', 'menuHapusDataTesting')
     .addSeparator()
+    .addItem('Isi terjemahan otomatis (中文 / English)…', 'menuIsiTerjemahan')
+    .addSeparator()
     .addItem('Muat ulang data master (jika perubahan sheet belum muncul)', 'menuMuatUlangMaster')
     .addItem('Tentang (versi ' + APP.VERSION + ')', 'menuTentang')
     .addToUi();
@@ -86,7 +88,14 @@ function menuTentang() {
 function onEdit(e) {
   var name = '';
   try { name = e && e.range ? e.range.getSheet().getName() : ''; } catch (err) { /* abaikan */ }
-  if (name === APP.SHEETS.MAINT || name === APP.SHEETS.LOG) return; // bukan master
+  if (name === APP.SHEETS.TERJEMAHAN) {   // admin mengoreksi terjemahan → cache teks itu dibuang
+    try {
+      var sh = e.range.getSheet(), h = headers_(sh), c = h.indexOf('Teks') + 1;
+      if (c > 0) sh.getRange(e.range.getRow(), c, e.range.getNumRows(), 1).getValues().forEach(function (r) { forgetTranslation_(r[0]); });
+    } catch (err) { /* abaikan */ }
+    return;
+  }
+  if ([APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN, APP.SHEETS.SARAN].indexOf(name) !== -1) return; // bukan master
   invalidateMaster_();
 }
 
@@ -116,9 +125,9 @@ function menuMuatUlangMaster() {
 function cekFile() {
   var missing = [];
   var scripts = { Config: typeof APP, Db: typeof readTable_, Auth: typeof currentEmail_, Master: typeof masterData_,
-    Maintenance: typeof apiStart, Api: typeof apiBootstrap, Rekap: typeof buildLaporan_ };
+    Maintenance: typeof apiStart, Api: typeof apiBootstrap, Rekap: typeof buildLaporan_, Translate: typeof translate_ };
   Object.keys(scripts).forEach(function (f) { if (scripts[f] === 'undefined') missing.push(f + ' (script)'); });
-  ['Index', 'App', 'Styles', 'Message', 'Panduan'].forEach(function (f) {
+  ['Index', 'App', 'Styles', 'Message', 'Panduan', 'I18n'].forEach(function (f) {
     try { HtmlService.createHtmlOutputFromFile(f); } catch (e) { missing.push(f + ' (HTML)'); }
   });
   if (missing.length) {
@@ -164,7 +173,7 @@ function setup() {
 
   // Log & Maintenance hanya boleh ditulis kode. Proteksi "warning only": editor manual
   // mendapat peringatan (user tetap perlu akses Editor karena web app berjalan sebagai user).
-  [APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN].forEach(function (name) {
+  [APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN, APP.SHEETS.SARAN].forEach(function (name) {
     var sh = ss.getSheetByName(name);
     if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) {
       sh.protect().setDescription('Ditulis oleh aplikasi MTTR. Jangan diedit manual.').setWarningOnly(true);
@@ -219,6 +228,13 @@ function setup() {
       appendObj_(APP.SHEETS.FORMAT, { 'Kolom': d[0], 'Sumber': d[1], 'Urutan': i + 1, 'Aktif': d[2] });
     });
   }
+  if (readTable_(APP.SHEETS.RENCANA).length === 0) {
+    APP.RENCANA_DEFAULTS.forEach(function (r, i) {
+      appendObj_(APP.SHEETS.RENCANA, { 'Judul': r[0], 'Isi': r[1], 'Status': r[2], 'Target': r[3], 'Urutan': i + 1, 'Aktif': 'Ya' });
+    });
+  }
+  isiTerjemahanMaster_(false);   // label 中文/English bawaan untuk isi awal (tanpa Google Translate)
+
   if (readTable_(APP.SHEETS.PANDUAN).length === 0) {
     appendObj_(APP.SHEETS.PANDUAN, { 'Untuk': 'Teknisi', 'Judul': 'Contoh catatan', 'Urutan': 1, 'Aktif': 'Tidak',
       'Isi': 'Ubah Aktif menjadi Ya untuk menampilkan catatan ini di Panduan aplikasi. Contoh: masalah PLC hubungi Bang X (ext 123).' });
