@@ -41,6 +41,9 @@ Gabungan revisi uji lapangan (`Improvement_2.6.md`) dan seluruh rencana 2.5.3 (s
 
 **Diuji**: 85 test server (KPI dibanding hitungan manual: hari libur, Minggu, `KPI_MULAI`, bulan berjalan, batas zona waktu WIB, line multi-project & nonaktif; tutup / tutup ulang; statistik = KPI; download & akses; ganti nama tab; migrasi dari 2.5.2; locale Indonesia). Preview Playwright (HP 390 px, id + 中文): KPI & tutup bulan, Statistik (Pareto, MTBF, per hari, sparepart, tap batang → Detail), Download .xlsx dibaca ulang dengan openpyxl, cadangan CSV saat CDN diblokir; tanpa error JavaScript.
 
+**Diuji di Google Sheets asli** (spreadsheet uji, locale Indonesia): data contoh 2.6 + tab `KPI 2026` + semua rumus Ringkasan dari kode. Downtime bulan ini (43,5 jam), MTBF Plant dari tab KPI (78,1), MTBF per project, kolom Hasil, kedua Top 5 dan daftar pekerjaan terbuka cocok dengan hitungan terpisah; bulan di tab KPI tetap teks.
+- Temuan & perbaikan: QUERY Top 5 ditolak Google (`order by sum(Col3)` padahal kolom SELECT `sum(Col3)/60`, error COL_IN_ORDER_MUST_BE_IN_SELECT) sehingga kedua tabel tampil "–". Tidak terlihat di test karena mock tidak menjalankan QUERY. Sudah diperbaiki + test baru yang memeriksa setiap ORDER BY ada di SELECT.
+
 **Batasan**
 - MTTR dimulai saat teknisi menekan Mulai: waktu respon (mesin rusak → teknisi datang) tidak tercatat.
 - MTBF sebaik jam operasi di Config; line yang melayani dua project dihitung penuh di keduanya (MTBF project > MTBF Plant).
