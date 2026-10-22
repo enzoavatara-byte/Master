@@ -4,18 +4,83 @@
  */
 
 function sheet_(name) {
-  var sh = SpreadsheetApp.getActive().getSheetByName(name);
+  var sh = findSheet_(name);
   if (!sh) throw new Error('Sheet "' + name + '" tidak ditemukan. Admin perlu menjalankan setup().');
   return sh;
 }
 
-/** Header per sheet diingat selama satu request (hemat 2 panggilan Sheets per tulis). */
+/*
+ * 2.6: tab pengaturan (APP.MASTER_SHEETS) boleh diganti nama langsung di Google Sheet. Kode selalu memakai nama bawaan
+ * (nama logis, mis. 'Lines'); sheetId tiap tab dicatat di DocumentProperties (setup, atau saat pertama ditemukan).
+ * Urutan cari: nama terakhir yang dicatat (sheetId dicek) → sheetId di semua tab (nama baru dicatat) → nama bawaan.
+ * Tab buatan aplikasi (Maintenance, Log, Laporan, Rekap, TPM, KPI, …) tetap bernama tetap.
+ */
+var SHEET_IDS_KEY_ = 'MTTR_SHEET_IDS';
+var SHEET_IDS_ = null;   // {nama logis: [sheetId, nama terakhir]} — dibaca sekali per eksekusi
+function sheetIds_() {
+  if (!SHEET_IDS_) {
+    try { SHEET_IDS_ = JSON.parse(PropertiesService.getDocumentProperties().getProperty(SHEET_IDS_KEY_) || '{}') || {}; } catch (e) { SHEET_IDS_ = {}; }
+  }
+  return SHEET_IDS_;
+}
+function saveSheetIds_() {
+  try { PropertiesService.getDocumentProperties().setProperty(SHEET_IDS_KEY_, JSON.stringify(SHEET_IDS_ || {})); } catch (e) { /* dicatat lagi lain kali */ }
+}
+function isMasterSheet_(name) { return APP.MASTER_SHEETS.indexOf(name) !== -1; }
+
+/** Sheet berdasarkan nama logis; null jika tidak ada. Sheet non-pengaturan: getSheetByName biasa (1 panggilan). */
+function findSheet_(name, ss) {
+  ss = ss || SpreadsheetApp.getActive();
+  if (!isMasterSheet_(name)) return ss.getSheetByName(name);
+  var ids = sheetIds_(), rec = ids[name], sh = null;
+  if (rec) {
+    sh = ss.getSheetByName(rec[1]);
+    if (sh && sh.getSheetId() !== rec[0]) sh = null;
+    if (!sh) {
+      sh = ss.getSheets().filter(function (x) { return x.getSheetId() === rec[0]; })[0] || null;
+      if (sh) { rec[1] = sh.getName(); saveSheetIds_(); }
+    }
+  }
+  if (!sh) {
+    sh = ss.getSheetByName(name);
+    if (sh) {
+      var id = sh.getSheetId();
+      // tab bernama bawaan ini ternyata tab pengaturan lain yang sudah diganti nama (mis. Lines → "Mesin")
+      if (Object.keys(ids).some(function (k) { return k !== name && ids[k][0] === id; })) return null;
+      ids[name] = [id, name];
+      saveSheetIds_();
+    }
+  }
+  return sh;
+}
+
+/** Nama logis tab pengaturan untuk sebuah sheet (onEdit, Tampilan); '' jika bukan tab pengaturan. */
+function masterNameOf_(sh) {
+  var name = sh.getName();
+  if (isMasterSheet_(name)) return name;
+  var ids = sheetIds_(), id = sh.getSheetId();
+  return Object.keys(ids).filter(function (k) { return ids[k][0] === id; })[0] || '';
+}
+
+/** Setup: catat sheetId semua tab pengaturan yang ada (dipanggil setelah tab dibuat). */
+function registerMasterSheets_(ss) {
+  APP.MASTER_SHEETS.forEach(function (n) { findSheet_(n, ss); });
+}
+
+/** Nama tab sebenarnya (bisa sudah diganti admin), untuk teks petunjuk. */
+function sheetLabel_(name) {
+  var sh = findSheet_(name);
+  return sh ? sh.getName() : name;
+}
+
+/** Header per sheet diingat selama satu request (hemat 2 panggilan Sheets per tulis). Kunci = nama logis. */
 var HEAD_MEMO_ = {};
-function resetHeaders_() { HEAD_MEMO_ = {}; }
+function resetHeaders_() { HEAD_MEMO_ = {}; SHEET_IDS_ = null; }
 function forgetHeaders_(name) { delete HEAD_MEMO_[name]; }
 
-function headers_(sh) {
-  var name = sh.getName();
+/** @param {string=} key nama logis (bawaan: nama tab) */
+function headers_(sh, key) {
+  var name = key || sh.getName();
   if (HEAD_MEMO_[name]) return HEAD_MEMO_[name];
   var lastCol = sh.getLastColumn();
   if (lastCol === 0) return [];
@@ -56,7 +121,7 @@ function readTail_(name, n) {
   var sh = sheet_(name);
   var last = sh.getLastRow();
   if (last < 2) return [];
-  var headers = headers_(sh);
+  var headers = headers_(sh, name);
   var first = Math.max(2, last - n + 1);
   return rowsToObjs_(headers, sh.getRange(first, 1, last - first + 1, headers.length).getValues(), first);
 }
@@ -67,13 +132,13 @@ function objToRow_(headers, obj) {
 
 function appendObj_(name, obj) {
   var sh = sheet_(name);
-  sh.appendRow(objToRow_(headers_(sh), obj));
+  sh.appendRow(objToRow_(headers_(sh, name), obj));
 }
 
 /** Menulis ulang satu baris penuh (satu panggilan API, bukan per sel). */
 function writeObj_(name, obj) {
   var sh = sheet_(name);
-  var headers = headers_(sh);
+  var headers = headers_(sh, name);
   sh.getRange(obj._row, 1, 1, headers.length).setValues([objToRow_(headers, obj)]);
 }
 

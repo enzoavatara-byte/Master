@@ -88,7 +88,7 @@ function rapikanTampilan_(opts) {
   var safe = function (label, fn) { try { fn(); } catch (e) { problems.push(label + ': ' + (e && e.message || e)); console.warn('Tampilan ' + label + ': ' + e); } };
   var specs = tableSpecs_();
   Object.keys(specs).forEach(function (name) {
-    var sh = ss.getSheetByName(name);
+    var sh = findSheet_(name, ss);   // nama logis: tab pengaturan boleh sudah diganti nama
     if (sh) safe(name, function () { styleTable_(sh, specs[name], opts.full); });
   });
   safe(APP.SHEETS.PENDING, function () { stylePendingWork_(ss, opts.full); });
@@ -117,7 +117,10 @@ function menuTampilkanSemuaTab() {
 /** @return {Array<[string,string,boolean]>} [nama tab, kelompok warna, disembunyikan], urutan = urutan tampil */
 function tabPlan_(ss) {
   var S = APP.SHEETS, y = yearOf_(new Date()), plan = [], seen = {};
-  var add = function (name, grp, hide) { if (!seen[name] && ss.getSheetByName(name)) { seen[name] = true; plan.push([name, grp, !!hide]); } };
+  var add = function (name, grp, hide) {   // nama logis → nama tab sebenarnya (tab pengaturan boleh diganti nama)
+    var sh = findSheet_(name, ss), real = sh && sh.getName();
+    if (real && !seen[real]) { seen[real] = true; plan.push([real, grp, !!hide]); }
+  };
   add(RINGKASAN_, 'baca'); add(BACA_, 'baca');
   add(laporanName_(y), 'laporan'); add(rekapName_(y), 'laporan');
   ss.getSheets().map(function (sh) { return sh.getName(); }).filter(function (n) { return n.indexOf(TPM_PREFIX_) === 0; }).sort()
@@ -633,6 +636,7 @@ function buildBacaSaya_(ss) {
   sh.setHiddenGridlines(true);
   var y = yearOf_(new Date()), app = appName_();
   var T = TEMA_.tab;
+  var N = function (n) { var x = findSheet_(n, ss); return x ? x.getName() : n; };   // tab pengaturan: nama sebenarnya (boleh diganti)
   var tabs = [
     [T.baca, RINGKASAN_, 'Angka hari ini, sekarang, dan bulan ini + grafik. Ganti tanggal di sel kuning.\n今天、现在和本月的数据与图表。在黄色单元格中更改日期。', 'Hanya sel tanggal (kuning)\n只改黄色日期格'],
     [T.baca, BACA_, 'Penjelasan ini.\n本说明。', 'Tidak\n否'],
@@ -644,15 +648,15 @@ function buildBacaSaya_(ss) {
     [T.laporan, APP.SHEETS.SARAN, 'Saran dari teknisi. Tanggapi lewat aplikasi (💡 Saran).\n技术员的建议。请在应用中回复。', 'Status & Tanggapan boleh\n可改状态和回复'],
     [T.app, APP.SHEETS.MAINT, 'Semua data pekerjaan (data asli aplikasi). Kolom email & waktu sistem disembunyikan.\n所有维修原始数据。邮箱和系统时间列已隐藏。', 'Hanya admin, untuk memperbaiki salah isi\n仅管理员修正错误'],
     [T.app, APP.SHEETS.PEMAKAIAN, 'Satu baris = satu sparepart yang dipakai. Bisa difilter.\n每行 = 一个使用的备件。可以筛选。', 'Tidak\n否'],
-    [T.atur, APP.SHEETS.USERS, 'Teknisi & admin. Nama di sini yang tampil di laporan. Bahasa: zh = aplikasi 中文.\n技术员和管理员。Bahasa 填 zh = 中文界面。', 'Ya (admin)\n可以（管理员）'],
-    [T.atur, APP.SHEETS.LINES, 'Daftar line / unit kerja. Satu baris = satu QR (nama mesin cukup ditulis di Nama Line).\n产线 / 工位列表。一行 = 一个二维码。', 'Ya (admin)\n可以（管理员）'],
-    [T.atur, APP.SHEETS.SPAREPART, 'Katalog sparepart: Jenis → Nama → Model.\n备件目录：类别 → 名称 → 型号。', 'Ya (admin)\n可以（管理员）'],
-    [T.atur, APP.SHEETS.OPTIONS, 'Isi pilihan di form (masalah, penyebab, …) + nama 中文 / English + Discipline TPM per jenis kerusakan.\n表单选项（现象、原因 …）、中英文名称及 TPM 范围。', 'Ya (admin)\n可以（管理员）']
+    [T.atur, N(APP.SHEETS.USERS), 'Teknisi & admin. Nama di sini yang tampil di laporan. Bahasa: zh = aplikasi 中文.\n技术员和管理员。Bahasa 填 zh = 中文界面。', 'Ya (admin)\n可以（管理员）'],
+    [T.atur, N(APP.SHEETS.LINES), 'Daftar line / unit kerja. Satu baris = satu QR (nama mesin cukup ditulis di Nama Line).\n产线 / 工位列表。一行 = 一个二维码。', 'Ya (admin)\n可以（管理员）'],
+    [T.atur, N(APP.SHEETS.SPAREPART), 'Katalog sparepart: Jenis → Nama → Model.\n备件目录：类别 → 名称 → 型号。', 'Ya (admin)\n可以（管理员）'],
+    [T.atur, N(APP.SHEETS.OPTIONS), 'Isi pilihan di form (masalah, penyebab, …) + nama 中文 / English + Discipline TPM per jenis kerusakan.\n表单选项（现象、原因 …）、中英文名称及 TPM 范围。', 'Ya (admin)\n可以（管理员）']
   ];
   var hidden = [
-    [T.atur, APP.SHEETS.PROJECTS + ', ' + APP.SHEETS.FACTORY, 'Project baterai & target MTTR; daftar factory.\n电池项目和 MTTR 目标；工厂列表。'],
-    [T.atur, APP.SHEETS.FORM + ', ' + APP.SHEETS.FORMAT, 'Pertanyaan form aplikasi; kolom tab Laporan.\n应用表单问题；报表列。'],
-    [T.atur, APP.SHEETS.CONFIG + ', ' + APP.SHEETS.PANDUAN + ', ' + APP.SHEETS.RENCANA, 'Aturan (jam peringatan, nama aplikasi…); catatan & rencana di Panduan aplikasi.\n规则；应用指南中的说明和计划。'],
+    [T.atur, N(APP.SHEETS.PROJECTS) + ', ' + N(APP.SHEETS.FACTORY), 'Project baterai & target MTTR; daftar factory.\n电池项目和 MTTR 目标；工厂列表。'],
+    [T.atur, N(APP.SHEETS.FORM) + ', ' + N(APP.SHEETS.FORMAT), 'Pertanyaan form aplikasi; kolom tab Laporan.\n应用表单问题；报表列。'],
+    [T.atur, N(APP.SHEETS.CONFIG) + ', ' + N(APP.SHEETS.PANDUAN) + ', ' + N(APP.SHEETS.RENCANA), 'Aturan (jam peringatan, nama aplikasi…); catatan & rencana di Panduan aplikasi.\n规则；应用指南中的说明和计划。'],
     [T.app, APP.SHEETS.LOG + ', ' + APP.SHEETS.TERJEMAHAN, 'Riwayat setiap tombol; hasil terjemahan (boleh dikoreksi).\n每次操作记录；翻译结果（可修改）。'],
     [T.app, APP.SHEETS.MAINT + ' <baterai>', 'Data Maintenance per baterai (otomatis).\n按电池项目的维修数据（自动）。'],
     [T.arsip, 'Arsip <tahun>, Laporan/Rekap tahun lalu', 'Data tahun sebelumnya.\n往年数据。']
@@ -667,7 +671,7 @@ function buildBacaSaya_(ss) {
   var legend = [
     [T.baca, 'Tab hijau: mulai dari sini (dibaca) · 绿色：从这里开始'],
     [T.laporan, 'Tab kuning: laporan untuk dibaca / dikirim · 黄色：报表'],
-    [T.atur, 'Tab biru: pengaturan, boleh diedit admin · 蓝色：设置，管理员可编辑'],
+    [T.atur, 'Tab biru: pengaturan, boleh diedit admin (nama tab juga boleh diganti) · 蓝色：设置，管理员可编辑（可改标签名）'],
     [T.app, 'Tab abu-abu: ditulis aplikasi, jangan diedit · 灰色：应用写入，请勿编辑']
   ];
   rows.legend = g.length + 1;

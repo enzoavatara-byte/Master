@@ -91,7 +91,8 @@ function menuTentang() {
 /** Simple trigger: setiap edit manual di spreadsheet → cache master dihapus (perubahan langsung terlihat). */
 function onEdit(e) {
   var name = '';
-  try { name = e && e.range ? e.range.getSheet().getName() : ''; } catch (err) { /* abaikan */ }
+  var sheet = null;
+  try { sheet = e && e.range ? e.range.getSheet() : null; name = sheet ? sheet.getName() : ''; } catch (err) { /* abaikan */ }
   if (name === APP.SHEETS.TERJEMAHAN) {   // admin mengoreksi terjemahan → cache teks itu dibuang
     try {
       var sh = e.range.getSheet(), h = headers_(sh), c = h.indexOf('Teks') + 1;
@@ -100,8 +101,13 @@ function onEdit(e) {
     return;
   }
   // Hanya sheet pengaturan yang ada di cache master. Edit lain (Maintenance, Ringkasan, Laporan, …) tidak menghapus cache,
-  // supaya buka app berikutnya tetap cepat. Nama tidak terbaca → hapus cache (aman).
-  if (name && APP.MASTER_SHEETS.indexOf(name) === -1) return;
+  // supaya buka app berikutnya tetap cepat. Tab pengaturan yang sudah diganti nama dikenali lewat sheetId (2.6).
+  // Nama / sheetId tidak terbaca → hapus cache (aman).
+  if (name && APP.MASTER_SHEETS.indexOf(name) === -1) {
+    var master = true;
+    try { master = !!masterNameOf_(sheet); } catch (err) { /* aman: hapus cache */ }
+    if (!master) return;
+  }
   invalidateMaster_();
 }
 
@@ -160,9 +166,9 @@ function setup() {
   ss.setSpreadsheetTimeZone(APP.TZ);
 
   Object.keys(APP.HEADERS).forEach(function (name) {
-    var sh = ss.getSheetByName(name) || ss.insertSheet(name);
+    var sh = findSheet_(name, ss) || ss.insertSheet(name);   // tab pengaturan yang diganti nama tetap dipakai (2.6)
     var want = APP.HEADERS[name];
-    var have = headers_(sh);
+    var have = headers_(sh, name);
     if (have.length === 0) {
       sh.getRange(1, 1, 1, want.length).setValues([want]);
     } else {
@@ -173,6 +179,7 @@ function setup() {
     sh.setFrozenRows(1);
     sh.getRange(1, 1, 1, sh.getLastColumn()).setFontWeight('bold');
   });
+  registerMasterSheets_(ss);   // catat sheetId: setelah ini admin bebas mengganti nama tab pengaturan
 
   Object.keys(APP.DATE_COLUMNS).forEach(function (name) {
     var sh = ss.getSheetByName(name);
@@ -321,7 +328,7 @@ function migrate26_(ss) {
       if (r['Status'] === APP.STATUS.PENDING && r['Status review'] === APP.REVIEW.NEEDED) msh.getRange(r._row, cr).setValue('');
     });
   }
-  var mesin = ss.getSheetByName(APP.SHEETS.MESIN);
+  var mesin = findSheet_(APP.SHEETS.MESIN, ss);
   if (mesin && mesin.getLastRow() > 1) {
     notes.push('Sheet Mesin (' + (mesin.getLastRow() - 1) + ' baris) tidak dipakai lagi: sejak 2.6 satu baris Lines = satu unit = satu QR. ' +
       'Jika sebuah mesin perlu dicatat sendiri, tambahkan barisnya di Lines (mis. "Line Pack 1 - EOL Test") lalu cetak QR-nya.');

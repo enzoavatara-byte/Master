@@ -81,7 +81,7 @@ function invalidateMaster_() {
 }
 
 function readOptional_(name) {
-  return SpreadsheetApp.getActive().getSheetByName(name) ? readTable_(name, true) : [];
+  return findSheet_(name) ? readTable_(name, true) : [];
 }
 
 function masterData_() {

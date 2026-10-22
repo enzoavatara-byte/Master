@@ -89,13 +89,20 @@ function recorder(kind) {
   const p = new Proxy({}, { get: (_, k) => k === 'build' ? () => spec : (...a) => { spec.calls[k] = a.length <= 1 ? a[0] : a; spec.log.push([k, a]); return p; } });
   return p;
 }
+let SHEET_ID_ = 1000;
 class Sheet {
   constructor(name) {
+    this.id = SHEET_ID_++;   // seperti Sheets asli: tetap walau nama tab diganti
     this.name = name; this.data = []; this.formulas = {}; this.protections = [];
     this.fmt = []; this.bandings = []; this.filter = null; this.validations = []; this.cfRules = []; this.charts = [];
     this.tabColor = null; this.isHidden = false; this.widths = {};
   }
   getName() { return this.name; }
+  getSheetId() { return this.id; }
+  setName(n) {
+    if (this.ss && this.ss.sheets.some(x => x !== this && x.name === n)) throw new Error('Nama tab "' + n + '" sudah dipakai');
+    this.name = n; return this;
+  }
   getLastRow() {
     let n = this.data.length;
     while (n > 0 && this.data[n - 1].every(v => v === '' || v === undefined || v === null)) n--;

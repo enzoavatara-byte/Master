@@ -40,7 +40,7 @@ function migrateDiscipline_() {
   (APP.OPTION_MIGRATE[J] || []).forEach(function (v) {
     if (have.indexOf(v) === -1) appendObj_(APP.SHEETS.OPTIONS, { 'Jenis': J, 'Nilai': v, 'Urutan': ++top, 'Aktif': 'Ya' });
   });
-  var sh = SpreadsheetApp.getActive().getSheetByName(APP.SHEETS.OPTIONS);
+  var sh = sheet_(APP.SHEETS.OPTIONS);
   var vals = sh.getDataRange().getValues(), h = vals[0].map(function (x) { return String(x).trim(); });
   var cj = h.indexOf('Jenis'), cn = h.indexOf('Nilai'), cd = h.indexOf('Discipline');
   if (cd < 0 || vals.length < 2) return;

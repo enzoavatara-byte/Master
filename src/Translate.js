@@ -183,11 +183,10 @@ function isiTerjemahanMaster_(useGoogle) {
       var d = forms[String(r['Form']).trim() + '.' + String(r['Field']).trim()];
       return d && String(r['Label']).trim() === d[2] ? d[8] : '';
     }]]],
-    [APP.SHEETS.MESIN, 'Nama Mesin', [['Nama (中文)', 'zh', null], ['Nama (English)', 'en', null]]],
     [APP.SHEETS.LINES, 'Nama Line', [['Nama (中文)', 'zh', null], ['Nama (English)', 'en', null]]]
   ];
   jobs.forEach(function (job) {
-    var sh = ss.getSheetByName(job[0]);
+    var sh = findSheet_(job[0], ss);
     if (!sh || sh.getLastRow() < 2) return;
     var vals = sh.getDataRange().getValues(), h = vals[0].map(function (x) { return String(x).trim(); });
     var srcCol = h.indexOf(job[1]);

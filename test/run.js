@@ -1476,6 +1476,59 @@ test('2.5.1 cache master: edit Ringkasan / Laporan tidak menghapus cache; sheet 
   } finally { cache.enabled = false; }
 });
 
+test('2.6 tab pengaturan boleh diganti nama: aplikasi, setup, cache, Tampilan & Baca Saya mengikuti sheetId; tab baru bernama lama diabaikan', () => {
+  const store = require('./mock').docProps.store;
+  ctx.setup();
+  const ids = JSON.parse(store.MTTR_SHEET_IDS);
+  for (const n of ['Users', 'Lines', 'Pilihan', 'Form', 'Config', 'Projects', 'Sparepart']) assert.strictEqual(ids[n][0], ss.getSheetByName(n).getSheetId(), n + ' dicatat');
+  assert.ok(!ids.Maintenance, 'tab buatan aplikasi tidak dicatat (nama tetap)');
+  const lines = ss.getSheetByName('Lines'), users = ss.getSheetByName('Users'), nLines = lines.data.length;
+  lines.setName('Daftar Line 产线'); users.setName('Pengguna');
+  cache.enabled = true; cache.store = {};
+  try {
+    as('budi@gmail.com', () => {
+      const b = ctx.apiBootstrap('L02', '', {});
+      assert.strictEqual(b.user.name, 'Budi', 'Users dibaca dari tab "Pengguna"');
+      assert.strictEqual(b.lineView.line.id, 'L02', 'Lines dibaca dari tab "Daftar Line 产线"');
+    });
+    assert.strictEqual(JSON.parse(store.MTTR_SHEET_IDS).Lines[1], 'Daftar Line 产线', 'nama baru dicatat (pencarian berikutnya 1 langkah)');
+    const has = () => Object.keys(cache.store).some(k => /:n$/.test(k));
+    assert.ok(has());
+    ctx.onEdit({ range: lines.getRange(2, 2) });
+    assert.ok(!has(), 'edit tab yang sudah diganti nama tetap menghapus cache');
+    as('budi@gmail.com', () => ctx.apiBootstrap('', '', {}));
+    ctx.onEdit({ range: ring().getRange(4, 3) });
+    assert.ok(has(), 'Ringkasan tetap tidak menghapus cache');
+  } finally { cache.enabled = false; }
+  ctx.setup();
+  assert.ok(!ss.getSheetByName('Lines') && !ss.getSheetByName('Users'), 'setup tidak membuat tab Lines / Users baru');
+  assert.strictEqual(lines.data.length, nLines, 'data tidak berubah');
+  const names = ss.getSheets().map(x => x.getName());
+  assert.ok(names.indexOf('Pengguna') < names.indexOf('Daftar Line 产线') && !ss.getSheetByName('Pengguna').isSheetHidden(), 'urutan & tampil seperti sebelumnya');
+  assert.strictEqual(lines.tabColor, ctx.TEMA_.tab.atur);
+  assert.ok(lines.validations.length, 'dropdown Aktif tetap dipasang');
+  assert.ok(findCell(ss.getSheetByName('Baca Saya'), /^Daftar Line 产线$/), 'Baca Saya menyebut nama tab yang baru');
+  // admin membuat tab baru bernama "Lines" (mis. salinan): aplikasi tetap memakai tab yang tercatat
+  const fake = ss.insertSheet('Lines');
+  fake.data = [['Line ID', 'Nama Line', 'Aktif'], ['ZZ', 'Palsu', 'Ya']];
+  ctx.invalidateMaster_();
+  as('budi@gmail.com', () => assert.ok(ctx.apiBootstrap('L02', '', {}).lineView, 'tetap tab asli'));
+  assert.ok(!ctx.masterData_().lines.ZZ);
+  ss.deleteSheet(fake);
+  // tab pengaturan ganti nama menjadi nama bawaan tab pengaturan lain → tidak tertukar
+  const spare = ss.getSheetByName('Sparepart');
+  spare.setName('Katalog');
+  ctx.resetMaster_();
+  lines.setName('Sparepart');
+  ctx.resetMaster_();
+  assert.strictEqual(ctx.findSheet_('Sparepart'), spare, 'Sparepart = tab yang tercatat, walau tab lain sekarang bernama "Sparepart"');
+  assert.strictEqual(ctx.findSheet_('Lines'), lines);
+  lines.setName('Lines'); users.setName('Users'); spare.setName('Sparepart');
+  ctx.resetMaster_(); ctx.invalidateMaster_();
+  assert.strictEqual(ctx.findSheet_('Lines'), lines);
+  ctx.rapikanTampilan_({ full: true });
+});
+
 test('2.5.1 tampilan gagal tidak menggagalkan setup (pesan menyebut bagian yang gagal)', () => {
   const orig = ctx.buildBacaSaya_;
   ctx.buildBacaSaya_ = () => { throw new Error('uji gagal'); };
