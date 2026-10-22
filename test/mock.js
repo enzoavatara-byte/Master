@@ -19,6 +19,7 @@ const advance = (min) => { clock.now += min * 60000; };
 // ---------- Mock Sheets ----------
 class Range {
   constructor(sh, r, c, nr, nc) { Object.assign(this, { sh, r, c, nr, nc }); }
+  getDisplayValues() { return this.getValues().map(r => r.map(v => (v instanceof Date ? v.toISOString() : String(v == null ? '' : v)))); }
   getValues() {
     const out = [];
     for (let i = 0; i < this.nr; i++) {
@@ -123,6 +124,8 @@ class Sheet {
   setFrozenRows(n) { this.frozenRows = n; }
   setFrozenColumns(n) { this.frozenCols = n; }
   clear() { this.data = []; this.formulas = {}; this.fmt = []; }
+  clearContents() { this.data = this.data.length ? [] : this.data; this.formulas = {}; return this; }
+  insertColumnsAfter() { return this; }
   getProtections() { return this.protections; }
   protect() {
     const p = { unprotected: [], setDescription() { return p; }, setWarningOnly() { return p; },
@@ -157,6 +160,7 @@ class Spreadsheet {
   getActiveSheet() { return this.active || this.sheets[0]; }
   moveActiveSheet(pos) { const s = this.getActiveSheet(); this.sheets = this.sheets.filter(x => x !== s); this.sheets.splice(pos - 1, 0, s); }
   getSheets() { return this.sheets; }
+  getSpreadsheetLocale() { return this.locale; }
   deleteSheet(s) { this.sheets = this.sheets.filter(x => x !== s); }
   setSpreadsheetTimeZone(tz) { this.tz = tz; }
   setRecalculationInterval() {}
