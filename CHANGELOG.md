@@ -3,6 +3,52 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.0 — revisi uji lapangan + KPI MTTR & MTBF bulanan
+Gabungan revisi uji lapangan (`Improvement_2.6.md`) dan seluruh rencana 2.5.3 (statistik & download): cukup satu kali salin file.
+
+**Teknisi: lebih sedikit tap**
+- **Line = unit kerja**: satu baris `Lines` = satu QR. Scan QR → **MULAI**, tanpa pilih mesin. Mesin penting dijadikan baris `Lines` sendiri (mis. `L01-W` "Assy Cell 1 - Welding"). Satu pekerjaan terbuka per line.
+- Pertanyaan **Tipe** hilang: Preventive dihapus, dan field pilihan yang hanya punya satu opsi aktif terisi otomatis.
+- **PIC tambahan** saat Selesai: tap nama teknisi lain yang ikut (dari `Users`, boleh >1, bisa dicari). Masuk `Teknisi terlibat`, Laporan (PIC), TPM (Responsibility), Dashboard per teknisi, Log.
+- Halaman QR (admin) hanya kartu line. QR mesin lama tetap membuka line-nya.
+
+**Dihapus**
+- **Cek** (review Pending): Pending tidak masuk Review; tab Review hanya untuk admin (Cancelled & Abandoned).
+- **Preventive** (data lama tetap; kolom Preventive di Rekap, Ringkasan & Dashboard dihapus).
+- **Alias** & **Grup** di Lines (kolom lama disembunyikan, boleh dihapus admin). Sheet **Mesin** tidak dipakai lagi (disembunyikan, tidak dihapus).
+
+**KPI bulanan (baru)**
+- Tab **`KPI <tahun>`**: per bulan, per **Plant / Project / Line**: Kerusakan, MTTR (menit), Target MTTR, Downtime (jam), Jam operasi, MTBF (jam), Target MTBF, Tercapai (✓ / ✗ MTTR / ✗ MTBF), Status.
+- Rumus: Kerusakan = pekerjaan yang masuk MTTR, bulan = bulan selesai (sama dengan Rekap). MTTR = rata-rata waktu aktif. Downtime = Mulai → Selesai pekerjaan stop line. Jam operasi = hari operasi × `JAM_OPERASI_PER_HARI` × jumlah line. **MTBF = (jam operasi − downtime) ÷ kerusakan.**
+- Config baru: `JAM_OPERASI_PER_HARI` (24), `HARI_OPERASI` (`Sen-Min`), `TANGGAL_LIBUR`, `KPI_MULAI`. Projects: kolom baru **`Target MTBF (jam)`**.
+- **Tutup bulan** (admin): Dashboard mengingatkan bulan lalu yang belum ditutup + jumlah pekerjaan yang masih menunggu review → tombol **Tutup bulan**. Juga menu → **Tutup bulan KPI…**. Angka dikunci di sheet tersembunyi `KPI data`; edit data lama tidak mengubahnya. Tutup ulang = angka diganti, lama & baru dicatat di Log.
+- Dashboard: kartu **KPI bulan ini** (Plant: MTTR, MTBF, kerusakan, downtime; per project dengan target & ✓/✗), tile **Downtime stop line**.
+- Ringkasan: kotak bulan ini = Selesai, MTTR, **Downtime**, **MTBF**; tabel per project + MTBF & target MTBF.
+
+**Statistik & download (dari rencana 2.5.3)**
+- Dashboard → **Ringkasan | Statistik**. Periode hari ini / tanggal / bulan / tahun / rentang + filter. **Lihat per** line, proses, project, teknisi (semua PIC), jenis kerusakan, discipline, masalah, sparepart, hari, bulan. Ukuran: **Jumlah + Pareto** (biru = ±80% total), MTTR, Downtime, MTBF (line/proses/project). Tap batang → daftar pekerjaan → Detail. Angka = definisi KPI.
+- Riwayat → **⬇ Download**: file **.xlsx** (kolom tab Laporan, tanggal asli, sparepart ke bawah, judul dibekukan, filter), untuk hari / tanggal / bulan / tahun / rentang + filter Riwayat. Teknisi = pekerjaannya, admin "Semua" = semua; maks 5000 baris. Library ExcelJS 4.4.0 dimuat dari CDN (jsdelivr, cadangan cdnjs, dicek SRI) hanya saat Download; gagal → CSV otomatis.
+
+**Lainnya**
+- **Top 5 dua daftar** per line: tersering rusak (jumlah) & terlama diperbaiki (total waktu aktif), di Dashboard & Ringkasan.
+- Dashboard per teknisi menghitung **setiap** teknisi terlibat, bukan hanya teknisi terakhir.
+- **Nama tab pengaturan boleh diganti** (Users, Lines, Pilihan, …): dikenali lewat ID tab (dicatat `setup`). onEdit, cache, Tampilan & Baca Saya ikut.
+- TPM: Machine = nama line (`Lines` → Nama 中文 / English); Responsibility termasuk PIC tambahan.
+- Hapus data testing: KPI ikut dibangun ulang; bulan tertutup yang berisi data terhapus dibuka lagi.
+- Data contoh preview/perf: line = unit, PIC tambahan, target KPI.
+
+**Kecepatan**: aksi teknisi sama dengan 2.5.2 (Mulai 16, Selesai 23 panggilan). Dashboard admin 11 (daftar bulan tertutup di DocumentProperties). Statistik 6–13, Download 13. Buka app dengan cache kosong 80 → 75.
+
+**Diuji**: 85 test server (KPI dibanding hitungan manual: hari libur, Minggu, `KPI_MULAI`, bulan berjalan, batas zona waktu WIB, line multi-project & nonaktif; tutup / tutup ulang; statistik = KPI; download & akses; ganti nama tab; migrasi dari 2.5.2; locale Indonesia). Preview Playwright (HP 390 px, id + 中文): KPI & tutup bulan, Statistik (Pareto, MTBF, per hari, sparepart, tap batang → Detail), Download .xlsx dibaca ulang dengan openpyxl, cadangan CSV saat CDN diblokir; tanpa error JavaScript.
+
+**Batasan**
+- MTTR dimulai saat teknisi menekan Mulai: waktu respon (mesin rusak → teknisi datang) tidak tercatat.
+- MTBF sebaik jam operasi di Config; line yang melayani dua project dihitung penuh di keduanya (MTBF project > MTBF Plant).
+- Line = unit: line fisik dengan beberapa mesin penting butuh beberapa baris Lines & QR.
+- Download .xlsx butuh akses ke CDN; cek sekali dari HP di jaringan pabrik.
+
+**File**: baru `Kpi` (Script). Berubah: `Config`, `Db`, `Master`, `Maintenance`, `Api`, `Rekap`, `Code`, `Tampilan`, `Translate`, `Tpm` (Script), `App`, `I18n`, `Styles`, `Panduan` (HTML). Tidak berubah: `Auth`, `Index`, `Message`, `appsscript.json`. **Wajib Run `setup`** (mematikan field mesin & Preventive sekali, membuat KPI, mencatat ID tab), lalu New version. Tidak ada izin baru.
+
 ## 2.5.2 — Excel TPM untuk manager
 **Baru**
 - Tab **`TPM <project>`** (satu per project) dengan format Excel TPM manager ("Statistical Analysis of Issues Reported from Production"): kotak **Status Overview** per Discipline, Total tasks, nama project, judul kolom baris 8 persis contoh (`No.序号 · Machine · Issue Description 问题描述 · Root Cause 原因分析 · Solution 解决方案 · End Time 解决时间 · Discipline 范围 · Responsibility处理人 · Date · Notes`), data mulai **B9**, lebar kolom & warna sama, baris 1–8 dibekukan, dropdown Discipline.

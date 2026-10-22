@@ -1953,6 +1953,11 @@ test('2.6 KPI tab + tutup bulan: angka = Rekap, Dashboard, tutup → terkunci wa
     assert.strictEqual(res.reclosed, false);
     assert.strictEqual(res.plant.kerusakan, P0[3]);
     assert.ok(ctx.apiDashboard({}).kpiMonth.prev.closedIso, 'sudah ditutup');
+    const store = require('./mock').docProps.store;
+    assert.ok(JSON.parse(store.MTTR_KPI_CLOSED)[ym], 'daftar bulan tertutup di DocumentProperties (Dashboard tanpa baca sheet KPI data)');
+    delete store.MTTR_KPI_CLOSED;
+    assert.ok(ctx.apiDashboard({}).kpiMonth.prev.closedIso, 'daftar hilang → dibangun ulang dari sheet KPI data');
+    assert.ok(store.MTTR_KPI_CLOSED);
   });
   const Ky = ss.getSheetByName('KPI ' + y), P1 = Ky.data.find(r => r[0] === ym && r[1] === 'Plant');
   assert.match(P1[11], /^Ditutup \d\d\/\d\d\/\d{4} oleh owner$/);

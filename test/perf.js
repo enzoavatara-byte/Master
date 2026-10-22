@@ -38,7 +38,7 @@ cache.enabled = true; // seperti di server asli: master disimpan di CacheService
 measure('Buka app, cache kosong (pertama / habis edit sheet)', () => as(T, () => { const p = ctx.doGet({ parameter: {} }); return p.vars.boot ? null : ctx.apiBootstrap('', '', {}); }));
 measure('Buka app (halaman + data awal)', () => as(T, () => { const p = ctx.doGet({ parameter: {} }); return p.vars.boot ? null : ctx.apiBootstrap('', '', {}); }));
 measure('Scan QR line', () => as(T, () => { const p = ctx.doGet({ parameter: { line: 'L02' } }); return p.vars.boot ? null : ctx.apiBootstrap('L02', '', {}); }));
-const v = measure('Mulai', () => as(T, () => ctx.apiStart('L02', { mesin: 'M-HPR', baterai: 'VF7' })));
+const v = measure('Mulai', () => as(T, () => ctx.apiStart('L02', { baterai: 'VF7' })));
 const id = v.open.id;
 measure('Pause', () => as(T, () => ctx.apiPause(id, { values: { 'Alasan pause': 'Istirahat' } })));
 measure('Resume', () => as(T, () => ctx.apiResume(id)));
@@ -46,6 +46,10 @@ measure('Selesai (3 sparepart)', () => as(T, () => ctx.apiComplete(id, { values:
   parts: [{ id: ctx.partId_('Mekanikal', 'Bearing', '6205-2RS'), qty: 2 }, { id: ctx.partId_('Elektrikal', 'Fuse', '10A'), qty: 1 }, { manual: true, jenis: 'Pneumatik', nama: 'Fitting L', qty: 4 }] })));
 measure('Tab Pending', () => as(T, () => ctx.apiListPending({})));
 measure('Dashboard', () => as('owner@gmail.com', () => ctx.apiDashboard({ periode: 30 })));
+const today = ctx.ymdOf_(new Date()), month = { from: today.slice(0, 8) + '01', to: today };
+measure('Statistik (per line, bulan ini)', () => as(T, () => ctx.apiStats({ ...month, by: 'line', measure: 'frek' })));
+measure('Statistik per sparepart', () => as(T, () => ctx.apiStats({ ...month, by: 'sparepart' })));
+measure('Download Riwayat (bulan ini, admin semua)', () => as('owner@gmail.com', () => ctx.apiExport({ ...month, scope: 'all' })));
 measure('Refresh otomatis (tiap 60 dtk)', () => as(T, () => ctx.apiRefresh({})));
 // Tombol 🌐: 15 teks baru (kartu Aktivitas penuh). Kolom terakhir = panggilan Google Translate.
 const LA = ctx.LanguageApp, texts = Array.from({ length: 15 }, (_, i) => 'Cek konektor sensor nomor ' + i);

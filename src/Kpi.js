@@ -190,6 +190,21 @@ function kpiClosed_() {
   return out;
 }
 
+/*
+ * Daftar bulan tertutup juga disimpan ringkas di DocumentProperties ({'2026-09': [ISO, email]}), supaya Dashboard admin tidak
+ * membaca sheet KPI data setiap kali dibuka. Sumber kebenaran tetap sheet; daftar ini disegarkan saat tutup bulan,
+ * hapus data testing, dan setiap pembangunan tab KPI (tiap malam).
+ */
+var KPI_CLOSED_KEY_ = 'MTTR_KPI_CLOSED';
+function kpiClosedIndex_() {
+  try { return JSON.parse(PropertiesService.getDocumentProperties().getProperty(KPI_CLOSED_KEY_) || 'null'); } catch (e) { return null; }
+}
+function saveKpiClosedIndex_(closed) {
+  var idx = {};
+  Object.keys(closed).forEach(function (k) { var c = closed[k]; idx[k] = [c.at instanceof Date ? c.at.toISOString() : String(c.at || ''), c.by]; });
+  try { PropertiesService.getDocumentProperties().setProperty(KPI_CLOSED_KEY_, JSON.stringify(idx)); } catch (e) { /* disegarkan lagi malam ini */ }
+}
+
 /** Ganti salinan satu bulan di sheet KPI data (dipanggil di dalam lock). */
 function writeKpiSnapshot_(key, list, now, email) {
   var name = APP.SHEETS.KPI_DATA, sh = sheet_(name), h = headers_(sh, name), w = h.length;
@@ -220,6 +235,8 @@ function kpiReopen_(cutoff) {
     if (drop) gone[b] = true;
     return !drop;
   });
+  resetHeaders_();
+  saveKpiClosedIndex_(kpiClosed_());
   return Object.keys(gone).sort();
 }
 
@@ -261,6 +278,7 @@ function buildKpi_(year) {
   var now = new Date();
   year = checkYear_(year || yearOf_(now));
   var md = masterData_(), s = kpiSettings_(), rows = rekapRows_(year), closed = kpiClosed_(), names = userNameMap_();
+  saveKpiClosedIndex_(closed);
   var cur = ymOf_(now), months = kpiMonths_(year, rows, s, now, closed), data = [];
   var nz = function (v) { return v == null ? '' : v; };
   months.forEach(function (m) {
@@ -313,9 +331,11 @@ function apiTutupBulan(ym) {
   if (key >= ymOf_(now)) throw new Error(ymLabel_(key) + ' belum berakhir. Yang bisa ditutup hanya bulan yang sudah lewat.');
   var md = masterData_(), s = kpiSettings_();
   var res = withLock_(function () {
-    var before = kpiClosed_()[key], rows = rekapRows_(year);
+    var closed = kpiClosed_(), before = closed[key], rows = rekapRows_(year);
     var list = computeKpi_(year, month, rows, md, s, now);
     writeKpiSnapshot_(key, list, now, user.email);
+    closed[key] = { rows: list, at: now, by: user.email };
+    saveKpiClosedIndex_(closed);
     var plantOf = function (l) { return l.filter(function (x) { return x.level === KPI_LEVEL_.PLANT; })[0]; };
     var plant = plantOf(list);
     log_(now, 'KPI ' + key, APP.EVENTS.TUTUP_BULAN, user.email, ymLabel_(key) + ': ' + kpiBrief_(plant) +
@@ -334,11 +354,12 @@ function kpiDashboard_(user, rows, md, now, names) {
     hours: s.hours, warn: s.warn };
   if (isAdmin_(user)) {
     var pk = m === 1 ? ymKey_(y - 1, 12) : ymKey_(y, m - 1);
-    var c = kpiClosed_()[pk];
+    var idx = kpiClosedIndex_();
+    if (!idx) { idx = {}; var all = kpiClosed_(); saveKpiClosedIndex_(all); Object.keys(all).forEach(function (k) { idx[k] = [all[k].at instanceof Date ? all[k].at.toISOString() : '', all[k].by]; }); }
+    var c = idx[pk];
     var hasData = rows.some(function (r) { var d = finalDate_(r); return !!d && ymOf_(d) === pk; });
     if (c || (hasData && !(s.mulai && s.mulai.slice(0, 7) > pk))) {
-      out.prev = { bulan: pk, label: ymLabel_(pk), closedIso: c && c.at instanceof Date ? c.at.toISOString() : '',
-        closedBy: c ? (names[c.by] || c.by) : '', reviews: kpiReviewsOpen_(rows, pk) };
+      out.prev = { bulan: pk, label: ymLabel_(pk), closedIso: c ? c[0] : '', closedBy: c ? (names[c[1]] || c[1]) : '', reviews: kpiReviewsOpen_(rows, pk) };
     }
   }
   return out;
