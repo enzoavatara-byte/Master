@@ -172,6 +172,11 @@ const scriptCache = {
   removeAll: (ks) => { ks.forEach(k => { delete cache.store[k]; }); }
 };
 const lock = { held: false };
+// PropertiesService.getDocumentProperties() tiruan (penanda migrasi, sheetId tab pengaturan).
+const docProps = { store: {},
+  getProperty(k) { return k in this.store ? this.store[k] : null; }, setProperty(k, v) { this.store[k] = String(v); return this; },
+  getProperties() { return Object.assign({}, this.store); }, setProperties(o) { Object.keys(o).forEach(k => { this.store[k] = String(o[k]); }); return this; },
+  deleteProperty(k) { delete this.store[k]; return this; } };
 
 const pad = (n) => String(n).padStart(2, '0');
 const Utilities = {
@@ -223,6 +228,7 @@ const ctx = {
     return String(text).split('\n').map(l => '[' + tgt + '] ' + l).join(this.joinLines ? ' ' : '\n');
   } },
   CacheService: { getScriptCache: () => scriptCache },
+  PropertiesService: { getDocumentProperties: () => docProps },
   Charts: { ChartType: { BAR: 'BAR', COLUMN: 'COLUMN', PIE: 'PIE' }, ChartHiddenDimensionStrategy: { SHOW_BOTH: 'SHOW_BOTH' } },
   Utilities,
   ScriptApp: {
@@ -262,4 +268,4 @@ fs.readdirSync(srcDir).filter(f => f.endsWith('.js')).sort().reverse() // urutan
   .forEach(f => vm.runInContext(fs.readFileSync(path.join(srcDir, f), 'utf8'), ctx, { filename: f }));
 
 
-module.exports = { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache, ui };
+module.exports = { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache, ui, docProps };

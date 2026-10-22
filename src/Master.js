@@ -139,19 +139,15 @@ function buildMaster_() {
     if (factory && !md.factoryMap[factory]) warnings.push('Lines: Factory "' + factory + '" di line ' + id + ' tidak ada di sheet Factory.');
     md.lines[id] = {
       id: id, name: String(l['Nama Line'] || ''), factory: factory, batteries: uniq_(batteries),
-      grup: normLine_(l['Grup']), area: String(l['Area'] || ''), active: isActiveRow_(l['Aktif']),
-      alias: splitList_(l['Alias']).join(', '), proses: String(l['Proses'] || '').trim()
+      area: String(l['Area'] || ''), active: isActiveRow_(l['Aktif']), proses: String(l['Proses'] || '').trim()
     };
-    addTr_(md, md.lines[id].name, l['Nama (中文)'], '');
+    addTr_(md, md.lines[id].name, l['Nama (中文)'], l['Nama (English)']);
   });
 
-  // ---- Mesin ----
-  md.machines = readOptional_(APP.SHEETS.MESIN).filter(function (m) {
-    return isActiveRow_(m['Aktif']) && String(m['Mesin ID'] || '').trim();
-  }).map(function (m) {
-    var name = String(m['Nama Mesin'] || m['Mesin ID']);
-    addTr_(md, name, m['Nama (中文)'], m['Nama (English)']);
-    return { id: normLine_(m['Mesin ID']), name: name, line: normLine_(m['Line ID']) };
+  // ---- Mesin (2.6: tidak dipilih lagi; line = unit). Sheet lama hanya dibaca untuk label 中文/English data lama. ----
+  md.machines = [];
+  readOptional_(APP.SHEETS.MESIN).forEach(function (m) {
+    addTr_(md, String(m['Nama Mesin'] || ''), m['Nama (中文)'], m['Nama (English)']);
   });
 
   // ---- Pilihan ----
@@ -416,16 +412,6 @@ function lineOf_(md, lineId) {
   return md.lines[normLine_(lineId)] || null;
 }
 
-function machinesForLine_(md, line) {
-  if (!line) return [];
-  return md.machines.filter(function (m) { return m.line === line.id || (line.grup && m.line === line.grup); });
-}
-
-function findMachine_(md, line, mesinId) {
-  var id = normLine_(mesinId);
-  return machinesForLine_(md, line).filter(function (m) { return m.id === id; })[0] || null;
-}
-
 /** Factory sebuah record: kolom Factory (2.1) atau factory line-nya (data 2.0). */
 function factoryOfRecord_(md, r) {
   if (r['Factory']) return normLine_(r['Factory']);
@@ -442,21 +428,18 @@ function prosesOfRecord_(md, r) {
 
 /**
  * Filter umum (Beranda, Pending, Review, Riwayat, Dashboard).
- * @param {{factory?:string, baterai?:string, proses?:string, line?:string, q?:string}} f  line boleh Line ID atau Grup.
+ * @param {{factory?:string, baterai?:string, proses?:string, line?:string, q?:string}} f
  */
 function matchFilter_(md, r, f, names) {
   if (!f) return true;
   if (f.factory && factoryOfRecord_(md, r) !== normLine_(f.factory)) return false;
   if (f.baterai && String(r['Baterai']) !== String(f.baterai)) return false;
-  if (f.line) {
-    var key = normLine_(f.line), l = lineOf_(md, r['Line']);
-    if (normLine_(r['Line']) !== key && !(l && l.grup === key)) return false;
-  }
+  if (f.line && normLine_(r['Line']) !== normLine_(f.line)) return false;
   if (f.proses && prosesOfRecord_(md, r) !== String(f.proses)) return false;
   if (f.q) {
     var q = String(f.q).toLowerCase();
     var l2 = lineOf_(md, r['Line']);
-    var hay = [r['Maintenance ID'], r['Line'], l2 ? l2.name : '', l2 ? l2.alias : '', prosesOfRecord_(md, r), r['Nama Mesin'], r['Mesin ID'],
+    var hay = [r['Maintenance ID'], r['Line'], l2 ? l2.name : '', prosesOfRecord_(md, r), r['Nama Mesin'],
       r['Masalah'], r['Penyebab'], r['Jenis kerusakan'], r['Yang tertunda'], r['Part'],
       names ? names[String(r['Teknisi terakhir']).toLowerCase()] : '', r['Teknisi terakhir']].join(' ').toLowerCase();
     if (hay.indexOf(q) === -1) return false;
@@ -481,6 +464,9 @@ function clientMaster_(md) {
     forms: forms,
     spareparts: md.spareparts.map(function (p) { return { id: p.id, jenis: p.jenis, nama: p.nama, model: p.model, satuan: p.satuan }; }),
     jenisKerusakan: md.options['Jenis Kerusakan'] || [],
+    // PIC tambahan saat Selesai (2.6): user aktif, urut nama
+    people: md.users.filter(function (u) { return u.email && isActiveRow_(u.aktif); })
+      .map(function (u) { return { email: u.email, name: u.name }; }).sort(function (a, b) { return a.name.localeCompare(b.name); }),
     trZh: md.tr.zh,
     rencana: md.rencana,
     appName: String(md.config.NAMA_APLIKASI || APP.NAME),

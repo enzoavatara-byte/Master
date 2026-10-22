@@ -34,9 +34,11 @@ console.log('MTTR 2.2 server logic');
 
 test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempotent)', () => {
   ctx.setup(); ctx.setup();
-  for (const n of ['Users', 'Factory', 'Projects', 'Lines', 'Mesin', 'Sparepart', 'Pemakaian Sparepart', 'Format Laporan', 'Catatan Panduan', 'Pilihan', 'Form', 'Config', 'Maintenance', 'Log', 'Maintenance VF7', 'Maintenance Limo7', 'Maintenance E22H', 'Maintenance E245', 'Pending Work', 'Rekap 2026', 'Laporan 2026']) assert.ok(ss.getSheetByName(n), n);
+  for (const n of ['Users', 'Factory', 'Projects', 'Lines', 'Sparepart', 'Pemakaian Sparepart', 'Format Laporan', 'Catatan Panduan', 'Pilihan', 'Form', 'Config', 'Maintenance', 'Log', 'Maintenance VF7', 'Maintenance Limo7', 'Maintenance E22H', 'Maintenance E245', 'Pending Work', 'Rekap 2026', 'Laporan 2026']) assert.ok(ss.getSheetByName(n), n);
   assert.ok(!ss.getSheetByName('Sheet1'));
   assert.ok(!ss.getSheetByName('BOM'), 'BOM tidak dibuat lagi');
+  assert.ok(!ss.getSheetByName('Mesin'), '2.6: sheet Mesin tidak dibuat (line = unit)');
+  jeq(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Tipe Maintenance').map(r => r.Nilai), ['Corrective'], '2.6: Preventive dihapus');
   jeq(triggers.map(t => t.getHandlerFunction()).sort(), ['checkTimeouts', 'onMasterChange', 'refreshRekap'], 'trigger tidak dobel');
   assert.strictEqual(triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every, 'hari:1@1', 'bangun ulang penuh tiap malam');
   assert.strictEqual(ctx.readTable_('Config').length, 14);
@@ -146,7 +148,7 @@ test('baterai default = baterai terakhir di line', () => {
 });
 
 let B;
-test('pending: satu form → Pending, perlu review, tampil di tab Pending & halaman line', () => {
+test('pending: satu form → Pending (2.6: tanpa review/Cek), tampil di tab Pending & halaman line', () => {
   as('budi@gmail.com', () => { B = ctx.apiStart('L02', 'E22H').open.id; });
   advance(15);
   as('budi@gmail.com', () => {
@@ -157,7 +159,7 @@ test('pending: satu form → Pending, perlu review, tampil di tab Pending & hala
   });
   const r = rec(B);
   assert.strictEqual(r.Status, 'Pending');
-  assert.strictEqual(r['Status review'], 'Perlu review');
+  assert.strictEqual(r['Status review'], '', '2.6: Pending tidak masuk antrean review');
   near(r['Total aktif (menit)'], 15);
   assert.strictEqual(ctx.fmtDate_(r.Tenggat), '2026-10-01 23:59:59');
   as('andi@gmail.com', () => {
@@ -270,28 +272,24 @@ test('EMAIL_PERINGATAN = Tidak → cukup banner, tanpa email', () => {
   as('budi@gmail.com', () => ctx.apiCancel(F, 'Masalah hilang sendiri'));
 });
 
-test('review: teknisi hanya lihat miliknya & hanya boleh cek Pending; Admin putuskan Cancelled/Abandoned', () => {
+test('review (2.6): hanya admin; Pending tidak masuk review (Cek dihapus); Admin putuskan Cancelled/Abandoned', () => {
   let P;
   as('andi@gmail.com', () => {
     P = ctx.apiStart('L03', 'E22H').open.id;
     ctx.apiPending(P, pend('Bongkar cover', 'Butuh teknisi lain', 'HARI_INI'));
   });
   as('budi@gmail.com', () => {
-    const ids = ctx.apiListReview().items.map(i => i.id);
-    assert.ok(!ids.includes(P), 'pending milik Andi tidak terlihat Budi');
-    const mine = ctx.apiListReview().items.find(i => i.status === 'Abandoned');
-    assert.strictEqual(mine.canDecide, false);
+    assert.strictEqual(ctx.apiListReview().items.length, 0, 'teknisi tidak punya antrean review');
+    assert.strictEqual(ctx.apiBootstrap('').counts.review, 0);
     throwsMsg(() => ctx.apiReview(D, { action: 'KELUARKAN', note: 'x' }), /tidak berwenang/);
   });
-  as('andi@gmail.com', () => {
-    throwsMsg(() => ctx.apiReview(P, { action: 'SETUJU' }), /tidak valid/);
-    ctx.apiReview(P, { action: 'CEK', note: 'ok' });
-    throwsMsg(() => ctx.apiReview(P, { action: 'CEK' }), /tidak ada di antrian/);
-  });
-  assert.strictEqual(rec(P).Status, 'Pending', 'review tidak mengubah status pending');
+  as('andi@gmail.com', () => throwsMsg(() => ctx.apiReview(P, { action: 'CEK', note: 'ok' }), /tidak ada di antrian/));
+  assert.strictEqual(rec(P).Status, 'Pending');
   as('sari@gmail.com', () => {
     const list = ctx.apiListReview().items;
-    assert.ok(list.length >= 3);
+    assert.ok(!list.some(i => i.id === P), 'Pending tidak di antrean review');
+    throwsMsg(() => ctx.apiReview(P, { action: 'CEK' }), /tidak ada di antrian/);
+    assert.ok(list.length >= 2);
     assert.strictEqual(list[0].status, 'Abandoned', 'Abandoned paling atas');
     throwsMsg(() => ctx.apiReview(D, { action: 'HITUNG', activeMin: 60 }), /Catatan review wajib/);
     throwsMsg(() => ctx.apiReview(D, { action: 'HITUNG', activeMin: 99999, note: 'x' }), /Menit aktif/);
@@ -431,23 +429,21 @@ const setRow = (sheet, pred, col, val) => {
   sh.data.find((r, i) => i > 0 && pred(r, h))[h.indexOf(col)] = val;
 };
 
-test('2.1 persiapan: sub-line A/B (Grup), mesin per line & per grup, line F1', () => {
+test('2.6 persiapan: line = unit (L05-A, L05-B terpisah), tanpa daftar mesin, line F1', () => {
   as('sari@gmail.com', () => {
     const open = ctx.apiBootstrap('').myOpen;
     if (open) ctx.apiCancel(open.id, 'Input ganda');
   });
-  L.appendRow(lineRow(['L05-A', 'Formation 5A', 'F1', '', 'L05', 'Hall D', 'Ya']));
-  L.appendRow(lineRow(['L05-B', 'Formation 5B', 'F1', '', 'L05', 'Hall D', '']));           // Aktif kosong = aktif
+  L.appendRow(lineRow(['L05-A', 'Formation 5A', 'F1', '', '', 'Hall D', 'Ya']));
+  L.appendRow(lineRow(['L05-B', 'Formation 5B', 'F1', '', '', 'Hall D', '']));             // Aktif kosong = aktif
   L.appendRow(lineRow(['L06', 'Packing', 'F1', 'Limo7', '', 'Hall D', 'Ya']));              // override baterai
   L.appendRow(lineRow(['L07', 'Salah', 'F1', 'X99', '', '', 'Ya']));                       // baterai tidak terdaftar
-  const M = ss.getSheetByName('Mesin');
-  M.appendRow(['M-PRESS', 'Press', 'L05', 'Ya']);      // milik grup → dipakai L05-A & L05-B
-  M.appendRow(['M-OVEN', 'Oven', 'L05-A', 'Ya']);
-  M.appendRow(['M-OLD', 'Mesin lama', 'L05-A', 'Tidak']);
   as('budi@gmail.com', () => {
-    jeq(ctx.apiGetLine('L05-A').machines.map(m => m.id), ['M-PRESS', 'M-OVEN']);
-    jeq(ctx.apiGetLine('L05-B').machines.map(m => m.id), ['M-PRESS']);
+    const v = ctx.apiGetLine('L05-A');
+    assert.strictEqual(v.machines, undefined, 'tidak ada pilihan mesin');
     assert.ok(ctx.apiGetLine('L05-B').line.active);
+    assert.ok(!ctx.apiBootstrap('').master.forms.Mulai.some(f => f.field === 'Mesin ID'), 'form Mulai tanpa mesin');
+    jeq(ctx.apiBootstrap('').master.forms.Mulai.find(f => f.field === 'Tipe').options, ['Corrective'], 'satu tipe → aplikasi tidak menanyakan');
   });
 });
 
@@ -457,42 +453,28 @@ test('2.1 baterai per factory: F1 hanya VF7/Limo7, override per line, default ba
     jeq(v.line.batteries, ['VF7', 'Limo7']);
     assert.strictEqual(v.lastBattery, 'VF7');
     jeq(ctx.apiGetLine('L06').line.batteries, ['Limo7']);
-    throwsMsg(() => ctx.apiStart('L05-A', { baterai: 'E22H', mesin: 'M-OVEN' }), /tidak ada di daftar pilihan untuk line L05-A/);
+    throwsMsg(() => ctx.apiStart('L05-A', { baterai: 'E22H' }), /tidak ada di daftar pilihan untuk line L05-A/);
     throwsMsg(() => ctx.apiStart('L06', 'VF7'), /tidak ada di daftar/);
   });
 });
 
 let MO;
-test('2.1 lock per mesin: 2 teknisi di 2 mesin satu line; mesin sama diblok; mesin wajib jika line punya mesin', () => {
-  as('budi@gmail.com', () => {
-    throwsMsg(() => ctx.apiStart('L05-A', { baterai: 'VF7' }), /Mesin wajib dipilih/);
-    throwsMsg(() => ctx.apiStart('L05-A', { baterai: 'VF7', mesin: 'M-OLD' }), /tidak terdaftar/);
-    MO = ctx.apiStart('L05-A', { baterai: 'VF7', mesin: 'm-oven' }).open.id;
-  });
+test('2.6 satu pekerjaan terbuka per line (line = unit); line lain boleh; mesin dari klien lama diabaikan', () => {
+  as('budi@gmail.com', () => { MO = ctx.apiStart('L05-A', { baterai: 'VF7', mesin: 'm-oven' }).open.id; });
   const r = rec(MO);
-  assert.strictEqual(r['Mesin ID'], 'M-OVEN');
-  assert.strictEqual(r['Nama Mesin'], 'Oven');
+  assert.strictEqual(r['Mesin ID'], '');
+  assert.strictEqual(r['Nama Mesin'], '');
   assert.strictEqual(r.Factory, 'F1');
-  assert.strictEqual(r.Tipe, 'Corrective', 'default tipe = pilihan pertama');
+  assert.strictEqual(r.Tipe, 'Corrective', 'tipe satu-satunya dipakai otomatis');
   as('andi@gmail.com', () => {
-    throwsMsg(() => ctx.apiStart('L05-A', { baterai: 'VF7', mesin: 'M-OVEN' }), /Mesin Oven sedang dikerjakan Budi/);
-    const v = ctx.apiStart('L05-A', { baterai: 'VF7', mesin: 'M-PRESS' });
-    assert.ok(v.openIsMine);
-    assert.strictEqual(v.machines.find(m => m.id === 'M-OVEN').busyBy, 'Budi');
-    assert.strictEqual(v.others.length, 1);
+    throwsMsg(() => ctx.apiStart('L05-A', { baterai: 'VF7' }), /Line L05-A sedang dikerjakan Budi/);
+    assert.strictEqual(ctx.apiGetLine('L05-A').lineLocked, true);
+    const v = ctx.apiStart('L05-B', { baterai: 'VF7' });
+    assert.ok(v.openIsMine, 'unit lain (L05-B) bebas');
   });
-  // mesin yang sama di sub-line lain = mesin fisik lain → boleh
   as('sari@gmail.com', () => {
-    const id = ctx.apiStart('L05-B', { baterai: 'Limo7', mesin: 'M-PRESS' }).open.id;
-    ctx.apiCancel(id, 'Input ganda');
-  });
-});
-
-test('2.1 mesin "Lainnya" → nama wajib diisi, disimpan "Lainnya: <nama>", tidak mengunci mesin lain', () => {
-  as('sari@gmail.com', () => {
-    throwsMsg(() => ctx.apiStart('L05-A', { baterai: 'VF7', mesin: 'Lainnya' }), /wajib diisi nama mesin/);
-    const id = ctx.apiStart('L05-A', { baterai: 'VF7', mesin: 'Lainnya', mesinLain: 'Kompresor' }).open.id;
-    assert.strictEqual(rec(id)['Nama Mesin'], 'Lainnya: Kompresor');
+    const id = ctx.apiStart('L06', { baterai: 'Limo7', mesin: 'Lainnya', mesinLain: 'Kompresor' }).open.id;
+    assert.strictEqual(rec(id)['Nama Mesin'], '', 'isian mesin "Lainnya" dari klien lama diabaikan');
     ctx.apiCancel(id, { values: { 'Alasan cancel': 'Lainnya' }, other: { 'Alasan cancel': 'uji mesin lainnya' } });
     assert.strictEqual(rec(id)['Alasan cancel'], 'Lainnya: uji mesin lainnya');
   });
@@ -507,13 +489,18 @@ test('2.1 Pause "Lainnya" → keterangan wajib, tercatat di Log', () => {
   assert.match(ctx.readTable_('Log').filter(e => e['Maintenance ID'] === MO && e.Kejadian === 'pause')[0].Detail, /Lainnya: Sholat/);
 });
 
-test('2.1 Preventive tidak masuk MTTR, Corrective masuk', () => {
+test('2.6 Preventive dihapus: tipe lain ditolak; jika admin menyalakan lagi, Preventive tetap tidak masuk MTTR', () => {
   advance(30);
   as('budi@gmail.com', () => ctx.apiComplete(MO, done));
   assert.strictEqual(rec(MO)['Masuk MTTR'], 'Ya');
   as('andi@gmail.com', () => {
     const id = ctx.apiBootstrap('').myOpen.id;
     ctx.apiComplete(id, sel('Mesin berhenti', { tanpaPart: true }));
+    throwsMsg(() => ctx.apiStart('L06', { baterai: 'Limo7', tipe: 'Preventive' }), /Tipe maintenance "Preventive"/);
+  });
+  ss.getSheetByName('Pilihan').appendRow(rowOf('Pilihan', { Jenis: 'Tipe Maintenance', Nilai: 'Preventive', Urutan: 2, Aktif: 'Ya' }));
+  ctx.invalidateMaster_();
+  as('andi@gmail.com', () => {
     const p = ctx.apiStart('L06', { baterai: 'Limo7', tipe: 'Preventive' }).open.id;
     advance(20);
     ctx.apiComplete(p, sel('Hasil produk NG', { tanpaPart: true }));
@@ -521,6 +508,8 @@ test('2.1 Preventive tidak masuk MTTR, Corrective masuk', () => {
     assert.strictEqual(rec(p)['Masuk MTTR'], 'Tidak');
     throwsMsg(() => ctx.apiStart('L06', { baterai: 'Limo7', tipe: 'Darurat' }), /Tipe maintenance "Darurat"/);
   });
+  setRow('Pilihan', (r, h) => r[h.indexOf('Nilai')] === 'Preventive', 'Aktif', 'Tidak');
+  ctx.invalidateMaster_();
 });
 
 test('2.1 form editable: label, field tambahan (kolom dibuat otomatis), Lainnya, field sistem tidak bisa dihapus', () => {
@@ -560,32 +549,32 @@ test('2.1 form editable: label, field tambahan (kolom dibuat otomatis), Lainnya,
   setRow('Form', (r, h) => r[h.indexOf('Field')] === 'Kondisi akhir', 'Aktif', 'Tidak');
 });
 
-test('2.1 filter factory/baterai/line(grup)/cari di Pending, Review, Riwayat', () => {
+test('2.1 filter factory/baterai/line/cari di Pending, Review, Riwayat (2.6: tanpa grup)', () => {
   as('budi@gmail.com', () => {
-    const id = ctx.apiStart('L05-B', { baterai: 'Limo7', mesin: 'M-PRESS' }).open.id;
+    const id = ctx.apiStart('L05-B', { baterai: 'Limo7' }).open.id;
     ctx.apiPending(id, pend('Cek oli press', 'Menunggu part', 'BESOK'));
     assert.ok(ctx.apiListPending({ factory: 'F1' }).items.every(i => i.factory === 'F1'));
     assert.strictEqual(ctx.apiListPending({ factory: 'F1' }).items.length, 1);
-    assert.strictEqual(ctx.apiListPending({ line: 'L05' }).items[0].id, id, 'filter grup mencakup sub-line');
+    assert.strictEqual(ctx.apiListPending({ line: 'L05-B' }).items[0].id, id);
+    assert.strictEqual(ctx.apiListPending({ line: 'L05' }).items.length, 0, '2.6: tidak ada filter grup');
     assert.strictEqual(ctx.apiListPending({ baterai: 'VF7' }).items.length, 0);
-    assert.strictEqual(ctx.apiListPending({ q: 'press' }).items.length, 1);
+    assert.strictEqual(ctx.apiListPending({ q: 'formation 5b' }).items.length, 1, 'cari lewat nama line');
     assert.ok(ctx.apiListPending({ factory: 'F2' }).items.every(i => i.factory === 'F2'));
     assert.ok(ctx.apiListReview({ factory: 'F1' }).items.every(i => i.factory === 'F1'));
     assert.ok(ctx.apiHistory({ factory: 'F1', tipe: 'Corrective' }).items.every(i => i.factory === 'F1' && i.tipe === 'Corrective'));
   });
 });
 
-test('2.1 dashboard: MTTR corrective, top mesin/line/teknisi, Lainnya terbanyak, kartu project', () => {
+test('2.1 dashboard: MTTR corrective, top line/teknisi, Lainnya terbanyak, kartu project', () => {
   setRow('Projects', (r, h) => r[h.indexOf('Baterai')] === 'VF7', 'Fase', 'Trial');
   setRow('Projects', (r, h) => r[h.indexOf('Baterai')] === 'VF7', 'Target MTTR (menit)', 10);
   as('sari@gmail.com', () => {
     const d = ctx.apiDashboard({ periode: 30, factory: 'F1' });
-    assert.strictEqual(d.kpi.preventive, 1);
     assert.ok(d.kpi.corrective >= 2);
     const rows = ctx.readTable_('Maintenance').filter(r => r.Factory === 'F1' && r['Masuk MTTR'] === 'Ya');
     near(d.kpi.mttr, rows.reduce((s, r) => s + Number(r['Total aktif (menit)']), 0) / rows.length);
-    assert.ok(d.machines.find(m => m.key === 'Oven · L05-A' && m.count === 1));
-    assert.ok(d.lines.find(l => l.key === 'L05-A'));
+    assert.ok(d.linesFreq.find(l => l.key === 'L05-A' && l.name), '2.6: top line + nama line');
+    assert.strictEqual(d.lines, undefined); assert.strictEqual(d.machines, undefined);
     assert.ok(d.techs.find(t => t.key === 'Budi'));
     assert.ok(d.others.find(o => o.key === 'Nama Mesin → kompresor') === undefined, 'cancel tidak dihitung');
     const vf7 = d.projects.find(p => p.battery === 'VF7');
@@ -597,19 +586,66 @@ test('2.1 dashboard: MTTR corrective, top mesin/line/teknisi, Lainnya terbanyak,
   });
 });
 
-test('2.1 QR mesin: ?mesin= disanitasi, mesin satu line → buka line + mesin terpilih; QR admin berisi mesin', () => {
+test('2.6 PIC tambahan saat Selesai: dari Users aktif, boleh >1, tanpa diri sendiri; masuk Teknisi terlibat, Laporan, Log, Dashboard per teknisi', () => {
+  U.appendRow(rowOf('Users', { Email: 'joko@gmail.com', Nama: 'Joko', Peran: 'Teknisi', Aktif: 'Tidak' }));
+  ctx.invalidateMaster_();
+  let id;
+  as('budi@gmail.com', () => {
+    const m = ctx.apiBootstrap('').master;
+    assert.ok(m.people.find(p => p.email === 'andi@gmail.com' && p.name === 'Andi'), 'daftar PIC dari Users');
+    assert.ok(!m.people.find(p => p.email === 'joko@gmail.com'), 'user nonaktif tidak bisa dipilih');
+    jeq(m.people.map(p => p.name), m.people.map(p => p.name).slice().sort((a, b) => a.localeCompare(b)), 'urut nama');
+    assert.ok(m.forms.Selesai.find(f => f.field === 'PIC tambahan' && f.type === 'sistem' && !f.required), 'opsional');
+    id = ctx.apiStart('L01', { baterai: 'E22H' }).open.id;
+    advance(12);
+    throwsMsg(() => ctx.apiComplete(id, { ...done, pics: ['joko@gmail.com'] }), /joko@gmail.com.*nonaktif/);
+    throwsMsg(() => ctx.apiComplete(id, { ...done, pics: ['siapa@gmail.com'] }), /tidak terdaftar/);
+    assert.strictEqual(rec(id).Status, 'Aktif', 'ditolak sebelum menulis apa pun');
+    ctx.apiComplete(id, { ...done, pics: [' Andi@gmail.com ', 'andi@gmail.com', 'budi@gmail.com', 'sari@gmail.com'] });
+  });
+  const r = rec(id);
+  assert.strictEqual(r['Teknisi terlibat'], 'budi@gmail.com, andi@gmail.com, sari@gmail.com', 'diri sendiri & dobel diabaikan');
+  assert.strictEqual(r['Nama teknisi terlibat'], 'Budi, Andi, Sari');
+  assert.strictEqual(r['Nama PIC'], 'Budi', 'PIC utama tetap yang menekan Selesai');
+  assert.match(ctx.readTable_('Log').find(e => e['Maintenance ID'] === id && e.Kejadian === 'complete').Detail, /PIC tambahan: Andi, Sari/);
+  assert.strictEqual(ctx.laporanValue_('PIC', r, 0, [], ctx.masterData_(), ctx.userNameMap_()), 'Budi, Andi, Sari', 'Laporan & TPM Responsibility');
+  as('andi@gmail.com', () => assert.ok(ctx.apiHistory({}).items.find(i => i.id === id), 'PIC tambahan melihat pekerjaan di Riwayat-nya'));
+  as('owner@gmail.com', () => {
+    const t = ctx.apiDashboard({ periode: 30 }).techs, sari = t.find(x => x.key === 'Sari');
+    assert.ok(sari && sari.count >= 1, 'Dashboard: PIC tambahan ikut dihitung per teknisi');
+    assert.strictEqual(t.filter(x => x.key === 'Budi').length, 1, 'satu baris per teknisi');
+  });
+  // admin mematikan field → pics diabaikan (klien lama / form tanpa field)
+  setRow('Form', (x, h) => x[h.indexOf('Form')] === 'Selesai' && x[h.indexOf('Field')] === 'PIC tambahan', 'Aktif', 'Tidak');
+  ctx.invalidateMaster_();
+  as('sari@gmail.com', () => {
+    const j = ctx.apiStart('L02', { baterai: 'E22H' }).open.id;
+    advance(3);
+    ctx.apiComplete(j, { ...done, pics: ['joko@gmail.com'] });
+    assert.strictEqual(rec(j)['Teknisi terlibat'], 'sari@gmail.com');
+    assert.ok(!ctx.apiBootstrap('').master.forms.Selesai.find(f => f.field === 'PIC tambahan'));
+  });
+  setRow('Form', (x, h) => x[h.indexOf('Form')] === 'Selesai' && x[h.indexOf('Field')] === 'PIC tambahan', 'Aktif', 'Ya');
+  ctx.invalidateMaster_();
+  as('budi@gmail.com', () => {
+    const j = ctx.apiStart('L02', { baterai: 'E22H' }).open.id;
+    throwsMsg(() => ctx.apiComplete(j, { ...done, pics: Array.from({ length: 11 }, (_, i) => 'x' + i + '@gmail.com') }), /tidak terdaftar/);
+    ctx.apiCancel(j, { values: { 'Alasan cancel': 'Lainnya' }, other: { 'Alasan cancel': 'uji pic' } });
+  });
+});
+
+test('2.6 QR: hanya per line; QR mesin lama (?mesin=) disanitasi lalu diabaikan, ?line= tetap membuka line', () => {
   as('andi@gmail.com', () => {
     assert.strictEqual(ctx.doGet({ parameter: { line: 'L05-A', mesin: 'M-OVEN"<x>' } }).vars.mesinId, 'M-OVENx');
-    const b = ctx.apiBootstrap('', 'M-OVEN');
-    assert.strictEqual(b.lineView.line.id, 'L05-A');
-    assert.strictEqual(b.lineView.preselectMesin, 'M-OVEN');
-    assert.strictEqual(ctx.apiBootstrap('', 'M-PRESS').lineView, null, 'mesin milik grup 2 sub-line: butuh ?line=');
-    assert.strictEqual(ctx.apiBootstrap('L05-B', 'M-PRESS').lineView.preselectMesin, 'M-PRESS');
+    assert.strictEqual(ctx.apiBootstrap('', 'M-OVEN').lineView, null, 'QR mesin tanpa line: tidak ada line');
+    const v = ctx.apiBootstrap('L05-A', 'M-OVEN').lineView;
+    assert.strictEqual(v.line.id, 'L05-A');
+    assert.strictEqual(v.preselectMesin, undefined);
     throwsMsg(() => ctx.apiListLinesForQr(), /tidak punya akses/);
   });
   as('sari@gmail.com', () => {
     const q = ctx.apiListLinesForQr();
-    jeq(q.lines.find(l => l.id === 'L05-A').machines.map(m => m.id), ['M-PRESS', 'M-OVEN']);
+    assert.ok(q.lines.find(l => l.id === 'L05-A') && q.lines.every(l => l.machines === undefined));
   });
 });
 
@@ -639,14 +675,11 @@ const lap = (y) => {
 const lapRow = (y, pred) => { const t = lap(y); return t.rows.map((r, j) => Object.assign({ _id: t.keys[j] }, Object.fromEntries(t.head.map((h, i) => [String(h).split('\n').pop(), r[i]])))).filter(pred); };
 let J1, J2;
 
-test('2.2 stop line: ditanya saat Mulai, default dari tipe (Corrective = Ya, Preventive = Tidak), nilai salah ditolak', () => {
+test('2.2 stop line: ditanya saat Mulai, default Ya (Corrective), pilihan teknisi menang, nilai salah ditolak', () => {
   as('dewi@gmail.com', () => {
     throwsMsg(() => ctx.apiStart('L10', { baterai: 'E22H', stopLine: 'Mungkin' }), /Stop line harus/);
-    let id = ctx.apiStart('L10', { baterai: 'E22H', tipe: 'Preventive' }).open.id;
-    assert.strictEqual(rec(id)['Stop line'], 'Tidak');
-    ctx.apiCancel(id, 'Input ganda');
-    id = ctx.apiStart('L10', { baterai: 'E22H', tipe: 'Preventive', stopLine: 'Ya' }).open.id;
-    assert.strictEqual(rec(id)['Stop line'], 'Ya', 'pilihan teknisi menang atas default');
+    const id = ctx.apiStart('L10', { baterai: 'E22H', stopLine: 'Tidak' }).open.id;
+    assert.strictEqual(rec(id)['Stop line'], 'Tidak', 'pilihan teknisi menang atas default');
     ctx.apiCancel(id, 'Input ganda');
     J1 = ctx.apiStart('L10', { baterai: 'E22H' }).open.id;
     const r = rec(J1);
@@ -671,7 +704,7 @@ test('2.2 Selesai: jenis kerusakan wajib, detail opsional tersimpan, banyak part
     assert.strictEqual(r['Detail masalah'], 'Conveyor A stop');
     assert.strictEqual(r['Detail penyebab'], '');
     assert.strictEqual(r['Nama teknisi terlibat'], 'Dewi');
-    J2 = ctx.apiStart('L11', { baterai: 'E245', tipe: 'Preventive' }).open.id;
+    J2 = ctx.apiStart('L11', { baterai: 'E245', stopLine: 'Tidak' }).open.id;
     advance(12);
     ctx.apiComplete(J2, sel('Kebocoran', { tanpaPart: true }));
   });
@@ -736,7 +769,7 @@ test('2.2 Format Laporan bisa diedit: ganti judul kolom, aktifkan kolom, sumber 
   assert.strictEqual(h[h.length - 1], 'Ngawur');
   assert.strictEqual(h[2], 'Tipe', 'urutan mengikuti kolom Urutan');
   const r = lapRow(2026, x => x['Maintenance ID'] === J2)[0];
-  assert.strictEqual(r.Tipe, 'Preventive');
+  assert.strictEqual(r.Tipe, 'Corrective');
   assert.strictEqual(r.Ngawur, '', 'sumber tidak dikenal → kolom kosong, laporan tetap jadi');
   as('sari@gmail.com', () => assert.match(ctx.apiDashboard({}).warnings.join('\n'), /Kolom tidak ada/));
   F.data = F.data.filter(x => x[0] !== 'Tipe' && x[0] !== 'Ngawur');
@@ -754,20 +787,21 @@ test('2.2 tombol "Perbarui Laporan & Rekap": hanya admin', () => {
   });
 });
 
-test('2.2 proses & alias: cari line lewat alias, filter proses, Line ID tidak berubah; dashboard jenis & sparepart', () => {
+test('2.2 proses: cari line lewat nama, filter proses, Line ID tidak berubah (2.6: Alias tidak dipakai); dashboard jenis & sparepart', () => {
   as('dewi@gmail.com', () => {
     const l10 = ctx.apiBootstrap('').master.lines.find(l => l.id === 'L10');
-    assert.strictEqual(l10.alias, 'CR1, Retreat satu');
+    assert.strictEqual(l10.alias, undefined, 'kolom Alias lama diabaikan');
     assert.strictEqual(l10.proses, 'Modul Line');
-    const byAlias = ctx.apiHistory({ q: 'retreat satu' }).items;
-    assert.ok(byAlias.length >= 1 && byAlias.every(i => i.line === 'L10'));
+    assert.strictEqual(ctx.apiHistory({ q: 'retreat satu' }).items.length, 0, 'alias tidak dicari lagi');
+    const byName = ctx.apiHistory({ q: 'retreatment 1' }).items;
+    assert.ok(byName.length >= 1 && byName.every(i => i.line === 'L10'));
     jeq([...new Set(ctx.apiHistory({ proses: 'Modul Line' }).items.map(i => i.line))].sort(), ['L10', 'L11']);
     assert.strictEqual(ctx.apiGetLine('L10').line.proses, 'Modul Line');
     assert.strictEqual(ctx.apiGetDetail(J1).record.proses, 'Modul Line');
   });
   as('sari@gmail.com', () => {
     const d = ctx.apiDashboard({ periode: 30, proses: 'Modul Line' });
-    assert.strictEqual(d.kpi.corrective + d.kpi.preventive, 2);
+    assert.strictEqual(d.kpi.corrective, 2);
     jeq(d.jenis.map(j => j.key).sort(), ['Elektrikal', 'Mekanikal']);
     const fuse = d.parts.find(p => p.key === 'Fuse 10A');
     assert.ok(fuse && fuse.qty === 1 && fuse.jenis === 'Elektrikal');
@@ -904,16 +938,16 @@ test('rekap: tab "Rekap 2026" 12 bulan + total, MTTR tertimbang, bulan = bulan s
   const tot = rows[13];
   assert.strictEqual(tot[0], 'Total 2026');
   assert.strictEqual(tot[1], done.length, 'pekerjaan selesai');
-  assert.strictEqual(tot[2] + tot[3], done.length, 'corrective + preventive = selesai');
-  assert.strictEqual(tot[3], done.filter(r => r.Tipe === 'Preventive').length);
-  near(tot[4], counted.reduce((a, r) => a + Number(r['Total aktif (menit)']), 0) / counted.length);
-  assert.strictEqual(tot[8], all.filter(r => r.Status === 'Cancelled').length);
-  assert.strictEqual(tot[9], all.filter(r => r.Status === 'Abandoned').length);
-  assert.strictEqual(tot[10], all.filter(r => r.Status === 'Abandoned' && r['Masuk MTTR'] === 'Ya').length);
+  assert.strictEqual(tot[2], done.filter(r => r.Tipe !== 'Preventive').length, 'Corrective (2.6: kolom Preventive dihapus)');
+  assert.strictEqual(rows[0].length, 10);
+  near(tot[3], counted.reduce((a, r) => a + Number(r['Total aktif (menit)']), 0) / counted.length);
+  assert.strictEqual(tot[7], all.filter(r => r.Status === 'Cancelled').length);
+  assert.strictEqual(tot[8], all.filter(r => r.Status === 'Abandoned').length);
+  assert.strictEqual(tot[9], all.filter(r => r.Status === 'Abandoned' && r['Masuk MTTR'] === 'Ya').length);
   for (let m = 0; m < 12; m++) {
     assert.strictEqual(rows[1 + m][1], done.filter(r => wibMonth(r.Selesai) === m).length, 'bulan ' + (m + 1));
   }
-  assert.strictEqual(rows[1][4], '', 'bulan tanpa data: MTTR kosong, bukan 0');
+  assert.strictEqual(rows[1][3], '', 'bulan tanpa data: MTTR kosong, bukan 0');
   // jalankan ulang = hasil sama (tidak menumpuk)
   ctx.buildRekap_(2026);
   jeq(rekapRows(2026), rows);
@@ -923,7 +957,7 @@ test('dashboard "Tahun ini" = 1 Januari s/d sekarang, sama dengan rekap', () => 
   as('sari@gmail.com', () => {
     const d = ctx.apiDashboard({ periode: 'ytd' });
     assert.strictEqual(d.periode, 'ytd');
-    near(d.kpi.mttr, rekapRows(2026)[13][4]);
+    near(d.kpi.mttr, rekapRows(2026)[13][3]);
   });
 });
 
@@ -1152,11 +1186,9 @@ test('2.5 bahasa user (Users → Bahasa), label tampilan zh, nilai yang disimpan
   });
   as('zhang@gmail.com', () => assert.strictEqual(ctx.apiBootstrap('').user.lang, 'zh', '"Mandarin" = zh'));
   as('budi@gmail.com', () => assert.strictEqual(ctx.apiBootstrap('').user.lang, 'id', 'kosong = id'));
-  setRow('Mesin', (r) => r[0] === 'M-OVEN', 'Nama (中文)', '烘箱');
   setRow('Lines', (r) => r[0] === 'L10', 'Nama (中文)', '电芯返修 1');
   as('li@gmail.com', () => {
     const tr = ctx.apiBootstrap('').master.trZh;
-    assert.strictEqual(tr['Oven'], '烘箱');
     assert.strictEqual(tr['Cell Retreatment 1'], '电芯返修 1');
     const id = ctx.apiStart('L10', { baterai: 'E22H' }).open.id;
     advance(5);
@@ -1216,13 +1248,13 @@ test('2.5 terjemahan Google: jumlah baris tidak cocok → satu per satu; kuota h
   assert.strictEqual(ctx.translate_(['motor panas'], 'zh')[0], '[zh-CN] motor panas', 'gagal tidak di-cache: dicoba lagi berikutnya');
 });
 
-test('2.5 isi terjemahan otomatis: mengisi sel kosong Mesin/Lines/Pilihan, tidak menimpa yang sudah ada', () => {
+test('2.5 isi terjemahan otomatis: mengisi sel kosong Lines (中文 + English, 2.6)/Pilihan, tidak menimpa yang sudah ada', () => {
   LA.calls = 0;
   ctx.isiTerjemahanMaster_(true);
-  const m = ctx.readTable_('Mesin');
-  assert.strictEqual(m.find(r => r['Mesin ID'] === 'M-OVEN')['Nama (中文)'], '烘箱', 'tidak ditimpa');
-  assert.strictEqual(m.find(r => r['Mesin ID'] === 'M-PRESS')['Nama (中文)'], '[zh-CN] Press');
-  assert.strictEqual(m.find(r => r['Mesin ID'] === 'M-PRESS')['Nama (English)'], '[en] Press');
+  const m = ctx.readTable_('Lines');
+  assert.strictEqual(m.find(r => r['Line ID'] === 'L10')['Nama (中文)'], '电芯返修 1', 'tidak ditimpa');
+  assert.strictEqual(m.find(r => r['Line ID'] === 'L11')['Nama (中文)'], '[zh-CN] Cell Retreatment 2');
+  assert.strictEqual(m.find(r => r['Line ID'] === 'L11')['Nama (English)'], '[en] Cell Retreatment 2');
   assert.ok(LA.calls > 0);
   const n = LA.calls;
   ctx.isiTerjemahanMaster_(true);
@@ -1274,7 +1306,7 @@ test('hapus data testing: sebelum tanggal → pekerjaan + Log + sparepart (juga 
   assert.strictEqual(ctx.parseTanggalWib_(''), null);
   const cut = ctx.parseTanggalWib_('01/02/2027');
   assert.strictEqual(cut.getTime(), Date.UTC(2027, 0, 31, 17, 0, 0), '00:00 WIB');
-  const master = ['Users', 'Lines', 'Mesin', 'Sparepart', 'Pilihan', 'Form', 'Config'].map(n => [n, ctx.readTable_(n).length]);
+  const master = ['Users', 'Lines', 'Sparepart', 'Pilihan', 'Form', 'Config'].map(n => [n, ctx.readTable_(n).length]);
   const old = ctx.readTable_('Maintenance').concat(ctx.readTable_('Arsip 2026')).filter(r => r.Mulai < cut).map(r => r['Maintenance ID']);
   const plan = ctx.testDataPlan_(cut).counts;
   assert.strictEqual(plan.maintenance, old.length);
@@ -1288,7 +1320,7 @@ test('hapus data testing: sebelum tanggal → pekerjaan + Log + sparepart (juga 
   assert.ok(ctx.readTable_('Pemakaian Sparepart').every(u => live.has(u['Maintenance ID'])));
   for (const n of ['Arsip 2026', 'Arsip Log 2026', 'Arsip Sparepart 2026', 'Laporan 2026', 'Rekap 2026']) assert.strictEqual(ss.getSheetByName(n), null, n + ' dihapus (kosong)');
   assert.strictEqual(lap(2027).rows.length, m.filter(r => r.Status !== 'Cancelled').length);
-  jeq(['Users', 'Lines', 'Mesin', 'Sparepart', 'Pilihan', 'Form', 'Config'].map(n => [n, ctx.readTable_(n).length]), master, 'sheet master tidak disentuh');
+  jeq(['Users', 'Lines', 'Sparepart', 'Pilihan', 'Form', 'Config'].map(n => [n, ctx.readTable_(n).length]), master, 'sheet master tidak disentuh');
   // semua
   ctx.hapusDataTesting_(null);
   assert.strictEqual(ctx.readTable_('Maintenance').length, 0);
@@ -1318,7 +1350,7 @@ test('2.5.1 setup: Ringkasan & Baca Saya paling depan, warna tab per kelompok, t
   const TPM = ['TPM E22H', 'TPM E245', 'TPM Limo7', 'TPM VF7'];
   jeq(names.slice(0, 12), ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'Rekap ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart']);
   const shown = ss.getSheets().filter(s => !s.isSheetHidden()).map(s => s.getName());
-  jeq(shown, ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'Rekap ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart', 'Users', 'Lines', 'Mesin', 'Sparepart', 'Pilihan']);
+  jeq(shown, ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'Rekap ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart', 'Users', 'Lines', 'Sparepart', 'Pilihan']);
   assert.strictEqual(ss.getSheetByName('TPM VF7').tabColor, ctx.TEMA_.tab.laporan);
   for (const n of ['Log', 'Terjemahan', 'Config', 'Form', 'Maintenance VF7']) assert.ok(ss.getSheetByName(n).isSheetHidden(), n + ' disembunyikan');
   ss.getSheets().filter(s => /^(Laporan|Rekap) \d{4}$/.test(s.getName()) && !s.getName().endsWith(' ' + y))
@@ -1340,7 +1372,7 @@ test('2.5.1 Ringkasan: rumus ke kolom Maintenance yang benar, tanggal pilihan di
   assert.match(R.data[selesai.r][selesai.c - 1], new RegExp("COUNTIFS\\('Maintenance'!" + st + '2:' + st + ',"Completed",\'Maintenance\'!' + se + '2:' + se));
   const mttr = findCell(R, /^MTTR \(menit\)/);
   assert.match(R.data[mttr.r][mttr.c - 1], new RegExp("FILTER\\('Maintenance'!" + ak + '2:' + ak + ",'Maintenance'!" + mm + '2:' + mm + '="Ya"'), 'MTTR = rata-rata Masuk MTTR = Ya (seperti Rekap)');
-  for (const t of ['HARI INI 今天', 'SEKARANG 现在', 'Per project', 'Jenis kerusakan', '5 mesin', 'Masih terbuka']) assert.ok(findCell(R, new RegExp(t)), t);
+  for (const t of ['HARI INI 今天', 'SEKARANG 现在', 'Per project', 'Jenis kerusakan', '5 line tersering', '5 line terlama', 'Masih terbuka']) assert.ok(findCell(R, new RegExp(t)), t);
   assert.ok(findCell(R, /^VF7$/) && findCell(R, /^E245$/), 'satu baris per project');
   assert.ok(findCell(R, /"Elektrikal 电气"/), 'jenis kerusakan dua bahasa');
   assert.strictEqual(R.charts.length, 2, 'grafik jenis kerusakan + selesai per hari');
@@ -1353,6 +1385,34 @@ test('2.5.1 Ringkasan: rumus ke kolom Maintenance yang benar, tanggal pilihan di
   assert.strictEqual(R.protections.length, 1);
   assert.strictEqual(R.protections[0].unprotected[0].a1, 'C4', 'hanya sel tanggal bebas diedit');
   R.data[3][2] = '';
+});
+
+test('2.6 Top 5 dua daftar per line: tersering (jumlah) & terlama (total waktu aktif), dengan nama line; Ringkasan memakai rumus yang sama', () => {
+  as('owner@gmail.com', () => {
+    const d = ctx.apiDashboard({ periode: 30 });
+    assert.ok(d.linesFreq.length <= 5 && d.linesLong.length <= 5);
+    for (let i = 1; i < d.linesFreq.length; i++) {
+      const a = d.linesFreq[i - 1], b = d.linesFreq[i];
+      assert.ok(a.count > b.count || (a.count === b.count && a.minutes >= b.minutes), 'tersering: jumlah, lalu total waktu');
+    }
+    for (let i = 1; i < d.linesLong.length; i++) {
+      const a = d.linesLong[i - 1], b = d.linesLong[i];
+      assert.ok(a.minutes > b.minutes || (a.minutes === b.minutes && a.count >= b.count), 'terlama: total waktu, lalu jumlah');
+    }
+    assert.ok(d.linesLong.every(l => typeof l.name === 'string' && 'mttr' in l));
+    d.linesFreq.concat(d.linesLong).forEach(l => assert.strictEqual(l.name, (ctx.masterData_().lines[l.key] || { name: '' }).name));
+  });
+  const R = ring(), mu = colL('Mulai'), li = colL('Line'), ak = colL('Total aktif (menit)'), st = colL('Status');
+  const freq = findCell(R, /^5 line tersering/), long = findCell(R, /^5 line terlama/);
+  assert.strictEqual(freq.r, long.r, 'berdampingan');
+  assert.strictEqual(long.c - freq.c, 4, 'kiri B, kanan F');
+  const fF = R.data[freq.r + 1][freq.c - 1], fL = R.data[long.r + 1][long.c - 1];
+  assert.strictEqual(R.data[freq.r][freq.c - 1 + 2], 'Total (jam) 总时长');
+  const base = "=IFERROR(QUERY(FILTER({'Maintenance'!" + li + '2:' + li + ",'Maintenance'!" + mu + '2:' + mu + ",'Maintenance'!" + ak + '2:' + ak +
+    "},'Maintenance'!" + mu + '2:' + mu + ">=$K$2,'Maintenance'!" + mu + '2:' + mu + "<$K$3,'Maintenance'!" + st + '2:' + st + '<>"Cancelled"';
+  assert.ok(fF.startsWith(base), fF.slice(0, 160));
+  assert.ok(fF.includes('order by count(Col2) desc, sum(Col3) desc limit 5'));
+  assert.ok(fL.startsWith(base) && fL.includes('order by sum(Col3) desc, count(Col2) desc limit 5'));
 });
 
 test('2.5.1 tabel: Maintenance belang + filter + status berwarna; kolom teknis disembunyikan; aturan warna admin tetap; idempotent', () => {
@@ -1408,8 +1468,8 @@ test('2.5.1 cache master: edit Ringkasan / Laporan tidak menghapus cache; sheet 
     ctx.onMasterChange({ changeType: 'REMOVE_ROW', source: ss });
     assert.ok(!has(), 'hapus baris → cache dihapus (onChange tidak menyebut sheet-nya)');
     as('budi@gmail.com', () => ctx.apiBootstrap('', '', {}));
-    ctx.onEdit({ range: ss.getSheetByName('Mesin').getRange(2, 2) });
-    assert.ok(!has(), 'edit Mesin → cache dihapus');
+    ctx.onEdit({ range: ss.getSheetByName('Lines').getRange(2, 2) });
+    assert.ok(!has(), 'edit Lines → cache dihapus');
     as('budi@gmail.com', () => ctx.apiBootstrap('', '', {}));
     ctx.onMasterChange({ changeType: 'REMOVE_GRID', source: ss });
     assert.ok(!has(), 'tab dihapus → cache dihapus');
@@ -1441,7 +1501,7 @@ test('2.5.1 locale: en_US → rumus koma; Indonesia (desimal koma) → ; dan \\ 
     assert.strictEqual(cellOf(R, 'K1'), '=IF(ISNUMBER($C$4);INT($C$4);TODAY())');
     jeq(fs_.filter(f => bareCommas(f)), [], 'tidak ada koma pemisah tersisa');
     assert.ok(fs_.some(f => /^=SORT\(\{"Elektrikal 电气"\\COUNTIFS\(/.test(f)), 'array: kolom dipisah \\');
-    assert.ok(fs_.some(f => f.includes('"select Col1, Col2, count(Col3) where')), 'teks QUERY tidak diubah');
+    assert.ok(fs_.some(f => f.includes('"select Col1, count(Col2), sum(Col3)/60, avg(Col3) group by Col1 order by count(Col2) desc, sum(Col3) desc limit 5')), 'teks QUERY tidak diubah');
     const pw = ss.getSheetByName('Pending Work').formulas.A2;
     assert.ok(pw.includes("{'Maintenance'!A2:A\\ ") && !bareCommas(pw), 'Pending Work: ' + pw.slice(0, 60));
     assert.ok(!bareCommas(ss.getSheetByName('Maintenance VF7').formulas.A1));
@@ -1495,29 +1555,32 @@ test('2.5.2 setup: jenis kerusakan Operasional/Produk/MES + Discipline bawaan; b
 let T1, T2;
 test('2.5.2 TPM: tab per project, judul & kotak Status Overview persis Excel manager, hanya Corrective selesai, sel "中文\\n(English)"', () => {
   U.appendRow(rowOf('Users', { Email: 'tono@gmail.com', Nama: 'Tono', Peran: 'Teknisi', Aktif: 'Ya' }));
-  L.appendRow(lineRow(['L77', 'Pack Line', 'F1', 'VF7', '', 'Hall T', 'Ya'], { 'Nama (中文)': 'PACK产线' }));
-  ss.getSheetByName('Mesin').appendRow(rowOf('Mesin', { 'Mesin ID': 'M77', 'Nama Mesin': 'EOL Test', 'Line ID': 'L77', Aktif: 'Ya', 'Nama (中文)': '电性能测试', 'Nama (English)': 'EOL Test' }));
+  // 2.6: line = unit → "mesin" EOL Test adalah baris Lines sendiri (Machine di TPM = nama line 中文 + English)
+  L.appendRow(lineRow(['L77', 'EOL Test', 'F1', 'VF7', '', 'Hall T', 'Ya'], { 'Nama (中文)': '电性能测试', 'Nama (English)': 'EOL Test' }));
   ss.getSheetByName('Projects').appendRow(rowOf('Projects', { 'Factory ID': 'F1', Baterai: 'Kosong', Aktif: 'Ya' }));
+  setRow('Pilihan', (r, h) => r[h.indexOf('Nilai')] === 'Preventive', 'Aktif', 'Ya');   // data Preventive lama (admin menyalakan lagi)
   ctx.invalidateMaster_();
   as('tono@gmail.com', () => {
-    T1 = ctx.apiStart('L77', { baterai: 'VF7', mesin: 'M77' }).open.id;
+    T1 = ctx.apiStart('L77', { baterai: 'VF7' }).open.id;
     advance(20);
     const x = sel('Sensor error', { parts: [{ id: FUSE, qty: 2 }] });
     x.values['Detail masalah'] = 'Kabel putus di konektor';
     x.values['Catatan'] = 'Cek ulang besok';
     ctx.apiComplete(T1, x);
-    const pv = ctx.apiStart('L77', { baterai: 'VF7', mesin: 'M77', tipe: 'Preventive' }).open.id;   // Preventive: tidak masuk TPM
+    const pv = ctx.apiStart('L77', { baterai: 'VF7', tipe: 'Preventive' }).open.id;   // Preventive: tidak masuk TPM
     advance(5);
     ctx.apiComplete(pv, sel('Kebocoran', { tanpaPart: true }));
   });
+  setRow('Pilihan', (r, h) => r[h.indexOf('Nilai')] === 'Preventive', 'Aktif', 'Tidak');
+  ctx.invalidateMaster_();
   as('li@gmail.com', () => {
     advance(30);
-    T2 = ctx.apiStart('L77', { baterai: 'VF7', mesin: 'M77' }).open.id;
+    T2 = ctx.apiStart('L77', { baterai: 'VF7' }).open.id;
     advance(15);
     ctx.apiComplete(T2, { values: { 'Jenis kerusakan': 'MES', Masalah: 'Lainnya', Penyebab: 'Setting berubah', Penanganan: 'Setting ulang' },
-      other: { Masalah: '工单无法下发' }, tanpaPart: true });
+      other: { Masalah: '工单无法下发' }, tanpaPart: true, pics: ['tono@gmail.com'] });
   });
-  const open = as('tono@gmail.com', () => ctx.apiStart('L77', { baterai: 'VF7', mesin: 'M77' }).open.id);   // masih Aktif: tidak masuk
+  const open = as('tono@gmail.com', () => ctx.apiStart('L77', { baterai: 'VF7' }).open.id);   // masih Aktif: tidak masuk
   LA.fail = false;
   const res = ctx.buildTpm_();
   const y = ctx.yearOf_(new FakeDate());
@@ -1560,7 +1623,7 @@ test('2.5.2 TPM: tab per project, judul & kotak Status Overview persis Excel man
   assert.strictEqual(a[9], '[zh-CN] Cek ulang besok\n([en] Cek ulang besok)', 'Notes ← Catatan, tanpa cap waktu');
   assert.strictEqual(b[2], '工单无法下发\n([en] 工单无法下发)', 'teks Mandarin tidak diterjemahkan ke 中文 lagi');
   assert.strictEqual(b[6], 'MES');
-  assert.strictEqual(b[7], 'Li Wei');
+  assert.strictEqual(b[7], 'Li Wei, Tono', '2.6: Responsibility = semua PIC, termasuk PIC tambahan');
   assert.strictEqual(b[9], '', 'tanpa catatan');
   assert.ok(hasFmt(S, 'setNumberFormat', '9,7:' + rows.length + 'x1', 'h:mm') && hasFmt(S, 'setNumberFormat', '9,10:' + rows.length + 'x1', 'yyyy-mm-dd'));
   assert.match(cellOf(tpm('Kosong'), 'D9'), /^Belum ada pekerjaan Corrective selesai sejak 01\/01\//, 'project tanpa data: tab tetap ada');
@@ -1576,7 +1639,7 @@ test('2.5.2 TPM: tab per project, judul & kotak Status Overview persis Excel man
 
 test('2.5.2 TPM: Discipline dari sheet Pilihan, TPM_MULAI & TPM_TIPE dari Config, label 中文 dari sheet dipakai, kuota habis → teks asli + peringatan', () => {
   setRow('Pilihan', atNilai('Elektrikal'), 'Discipline', 'operation');   // huruf kecil tetap dikenali
-  setRow('Mesin', (r, h) => r[h.indexOf('Mesin ID')] === 'M77', 'Nama (中文)', '电性能测试台');
+  setRow('Lines', (r, h) => r[h.indexOf('Line ID')] === 'L77', 'Nama (中文)', '电性能测试台');
   ctx.invalidateMaster_();
   let res = ctx.buildTpm_();
   const a = tpmData('VF7').find(r => String(r[2]).includes('Kabel putus'));
@@ -1599,7 +1662,7 @@ test('2.5.2 TPM: Discipline dari sheet Pilihan, TPM_MULAI & TPM_TIPE dari Config
   ctx.invalidateMaster_();
   assert.ok(ctx.masterData_().warnings.some(w => /Discipline "Listrik"/.test(w)), 'Discipline salah → peringatan');
   as('tono@gmail.com', () => {
-    const id = ctx.apiStart('L77', { baterai: 'VF7', mesin: 'M77' }).open.id;
+    const id = ctx.apiStart('L77', { baterai: 'VF7' }).open.id;
     advance(10);
     const x = sel('Sensor error', { tanpaPart: true });
     x.values['Detail masalah'] = 'Relay panas berasap';
@@ -1648,6 +1711,42 @@ test('2.5.2 TPM ikut: Dashboard "Perbarui Laporan, Rekap & TPM" (admin), trigger
     assert.match(ctx.setup(), /TPM: uji gagal/);
   } finally { ctx.buildTpm_ = keep; }
   assert.strictEqual(ctx.setup(), 'Setup selesai.');
+});
+
+// ---------- 2.6: revisi uji lapangan ----------
+const { docProps } = require('./mock');
+
+test('2.6 migrasi dari 2.5.2: field mesin dimatikan, Preventive dimatikan sekali, Pending keluar dari review, peringatan sheet Mesin', () => {
+  // keadaan spreadsheet 2.5.2: baris Form pilih mesin aktif, Preventive aktif, Pending "Perlu review", sheet Mesin berisi data
+  const F = ss.getSheetByName('Form');
+  F.appendRow(rowOf('Form', { Form: 'Mulai', Field: 'Mesin ID', Label: 'Mesin', Tipe: 'sistem', Wajib: 'Ya', 'Lainnya isi sendiri': 'Ya', Urutan: 1, Aktif: 'Ya' }));
+  setRow('Pilihan', (r, h) => r[h.indexOf('Nilai')] === 'Preventive', 'Aktif', 'Ya');
+  const M = ss.insertSheet('Mesin');
+  M.appendRow(['Mesin ID', 'Nama Mesin', 'Line ID', 'Aktif', 'Nama (中文)', 'Nama (English)']);
+  M.appendRow(['M-OVEN', 'Oven', 'L05-A', 'Ya', '烘箱', 'Oven']);
+  let P;
+  as('dewi@gmail.com', () => { P = ctx.apiStart('L11', { baterai: 'E245' }).open.id; ctx.apiPending(P, pend('Cek', 'Menunggu part', 'BESOK')); });
+  setRow('Maintenance', (r, h) => r[0] === P, 'Status review', 'Perlu review');
+  delete docProps.store.MTTR_2_6_OPTIONS;
+  const msg = ctx.setup();
+  assert.match(msg, /^Setup selesai\. Catatan: Sheet Mesin \(1 baris\) tidak dipakai lagi/);
+  const formRow = ctx.readTable_('Form').find(r => r.Form === 'Mulai' && r.Field === 'Mesin ID');
+  assert.strictEqual(formRow.Aktif, 'Tidak');
+  assert.strictEqual(ctx.readTable_('Pilihan').find(r => r.Nilai === 'Preventive').Aktif, 'Tidak');
+  assert.strictEqual(rec(P)['Status review'], '', 'Pending keluar dari antrean review');
+  assert.strictEqual(rec(P).Status, 'Pending', 'data tidak diubah');
+  assert.ok(ss.getSheetByName('Mesin').isSheetHidden(), 'tab Mesin disembunyikan, tidak dihapus');
+  as('sari@gmail.com', () => assert.ok(!ctx.apiDashboard({}).warnings.some(w => /Mesin ID/.test(w)), 'baris Form lama tidak memicu peringatan'));
+  // admin menyalakan Preventive lagi → setup berikutnya tidak mematikannya
+  setRow('Pilihan', (r, h) => r[h.indexOf('Nilai')] === 'Preventive', 'Aktif', 'Ya');
+  ctx.setup();
+  assert.strictEqual(ctx.readTable_('Pilihan').find(r => r.Nilai === 'Preventive').Aktif, 'Ya', 'dimatikan sekali saja');
+  setRow('Pilihan', (r, h) => r[h.indexOf('Nilai')] === 'Preventive', 'Aktif', 'Tidak');
+  // data lama ber-mesin tetap terbaca: label 中文 mesin dari sheet Mesin lama
+  ctx.invalidateMaster_();
+  assert.strictEqual(ctx.masterData_().tr.zh['Oven'], '烘箱');
+  as('dewi@gmail.com', () => { ctx.apiContinue(P, 'L11'); ctx.apiCancel(P, 'Input ganda'); });
+  ss.deleteSheet(M);
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

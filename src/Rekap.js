@@ -12,7 +12,7 @@
 
 var BULAN_ = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 /** Judul kolom tab Rekap (tampilan saja, dua bahasa; tidak dibaca kode). */
-var REKAP_HEADERS_ = ['Bulan\n月份', 'Pekerjaan selesai\n完成数', 'Corrective\n故障维修', 'Preventive\n预防性维护', 'MTTR Corrective (menit)\n平均修复时间（分钟）',
+var REKAP_HEADERS_ = ['Bulan\n月份', 'Pekerjaan selesai\n完成数', 'Corrective\n故障维修', 'MTTR Corrective (menit)\n平均修复时间（分钟）',
   'Total waktu aktif (jam)\n有效时间（小时）', 'Total waktu pause (jam)\n暂停时间（小时）', 'Total waktu pending (jam)\n挂起时间（小时）',
   'Cancelled\n已取消', 'Abandoned\n已放弃', 'Abandoned dihitung ke MTTR\n计入 MTTR 的已放弃'];
 
@@ -99,7 +99,7 @@ function computeRekap_(year, rows) {
 
 function rekapRow_(o) {
   var h = function (min) { return Math.round(min / 60 * 100) / 100; };
-  return [o.label, o.done, o.corrective, o.preventive, o.mttrN ? round2_(o.mttrSum / o.mttrN) : '',
+  return [o.label, o.done, o.corrective, o.mttrN ? round2_(o.mttrSum / o.mttrN) : '',   // 2.6: kolom Preventive dihapus
     h(o.active), h(o.pause), h(o.pending), o.cancelled, o.abandoned, o.abandonedCounted];
 }
 

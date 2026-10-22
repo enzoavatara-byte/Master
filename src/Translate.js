@@ -184,7 +184,7 @@ function isiTerjemahanMaster_(useGoogle) {
       return d && String(r['Label']).trim() === d[2] ? d[8] : '';
     }]]],
     [APP.SHEETS.MESIN, 'Nama Mesin', [['Nama (中文)', 'zh', null], ['Nama (English)', 'en', null]]],
-    [APP.SHEETS.LINES, 'Nama Line', [['Nama (中文)', 'zh', null]]]
+    [APP.SHEETS.LINES, 'Nama Line', [['Nama (中文)', 'zh', null], ['Nama (English)', 'en', null]]]
   ];
   jobs.forEach(function (job) {
     var sh = ss.getSheetByName(job[0]);

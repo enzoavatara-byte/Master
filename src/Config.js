@@ -40,11 +40,10 @@ var APP = {
     Factory: ['Factory ID', 'Nama', 'Lokasi', 'Aktif'],
     /** Satu baris per baterai/project. Sumber "baterai apa saja di factory ini" + status project. */
     Projects: ['Factory ID', 'Baterai', 'Fase', 'Target MTTR (menit)', 'Catatan', 'Aktif'],
-    /** Satu baris = satu QR. Alias = nama lain untuk pencarian. Proses = kelompok di atas line (kolom "Process" laporan).
-     *  Baterai kosong = semua project di factory-nya. Grup = induk sub-line (L03 untuk L03-A, L03-B). */
-    Lines: ['Line ID', 'Nama Line', 'Alias', 'Proses', 'Factory ID', 'Baterai', 'Grup', 'Area', 'Aktif', 'Nama (中文)'],
-    /** Line ID boleh berisi Line ID atau Grup (mesin dipakai bersama sub-line). Nama Mesin = kolom "Station" laporan. */
-    Mesin: ['Mesin ID', 'Nama Mesin', 'Line ID', 'Aktif', 'Nama (中文)', 'Nama (English)'],
+    /** 2.6: satu baris = satu unit kerja = satu QR (mesin tidak dipilih lagi; nama mesin cukup ditulis di Nama Line).
+     *  Proses = kelompok di atas line (kolom "Process" laporan). Baterai kosong = semua project di factory-nya.
+     *  Kolom lama Alias, Grup (dan sheet Mesin) tidak dipakai lagi; boleh dihapus admin. */
+    Lines: ['Line ID', 'Nama Line', 'Proses', 'Factory ID', 'Baterai', 'Area', 'Aktif', 'Nama (中文)', 'Nama (English)'],
     /** Katalog sparepart, sama dengan Excel: Jenis → Nama → Model (Model boleh kosong). */
     Sparepart: ['Jenis Sparepart', 'Nama Sparepart', 'Model', 'Satuan', 'Urutan', 'Aktif'],
     /** Satu baris per part per pekerjaan (ditulis aplikasi) → bisa direkap. */
@@ -149,7 +148,7 @@ var APP = {
   /** Isi awal sheet Pilihan. Masalah/Penyebab/Penanganan/Part = CONTOH, ganti bersama teknisi senior.
    *  "Lainnya" tidak perlu ditulis: otomatis muncul jika kolom "Lainnya isi sendiri" di sheet Form = Ya. */
   OPTION_DEFAULTS: {
-    'Tipe Maintenance': ['Corrective', 'Preventive'],
+    'Tipe Maintenance': ['Corrective'],
     'Jenis Kerusakan': ['Elektrikal', 'Mekanikal', 'Pneumatik', 'Program', 'Operasional', 'Produk', 'MES'],
     'Masalah': ['Mesin berhenti', 'Sensor error', 'Kebocoran', 'Suara/getaran abnormal', 'Hasil produk NG'],
     'Penyebab': ['Komponen aus', 'Kabel/konektor longgar', 'Setting berubah', 'Kotor/kontaminasi', 'Salah operasi'],
@@ -174,7 +173,6 @@ var APP = {
    */
   FORM_DEFAULTS: [
     // Urutan pecahan (2.5, 1.5, …) = field baru 2.2, supaya langsung berada di posisi yang benar di sheet Form lama.
-    ['Mulai', 'Mesin ID', 'Mesin', 'sistem', '', 'Ya', 'Ya', 1, '设备'],
     ['Mulai', 'Tipe', 'Tipe maintenance', 'sistem', 'Tipe Maintenance', 'Ya', 'Tidak', 2, '维修类型'],
     ['Mulai', 'Stop line', 'Apakah line berhenti (stop line)?', 'sistem', '', 'Ya', 'Tidak', 2.5, '产线是否停线？'],
     ['Mulai', 'Baterai', 'Baterai', 'sistem', '', 'Ya', 'Tidak', 3, '电池项目'],
@@ -191,15 +189,21 @@ var APP = {
     ['Selesai', 'Penanganan', 'Tindakan penanganan', 'pilihan', 'Penanganan', 'Ya', 'Ya', 3, '处理措施'],
     ['Selesai', 'Detail penanganan', 'Detail penanganan', 'teks', '', 'Tidak', 'Tidak', 3.5, '措施详情'],
     ['Selesai', 'Part', 'Sparepart yang diganti', 'sistem', '', 'Ya', 'Ya', 4, '更换的备件'],
+    ['Selesai', 'PIC tambahan', 'PIC lain yang ikut mengerjakan', 'sistem', '', 'Tidak', 'Tidak', 4.5, '其他参与人员'],
     ['Selesai', 'Catatan', 'Catatan', 'teks', '', 'Tidak', 'Tidak', 5, '备注'],
     ['Cancel', 'Alasan cancel', 'Alasan cancel', 'pilihan', 'Alasan Cancel', 'Ya', 'Ya', 1, '取消原因'],
     ['Cancel', 'Catatan', 'Catatan', 'teks', '', 'Tidak', 'Tidak', 2, '备注']
   ],
   FORMS: ['Mulai', 'Pause', 'Pending', 'Selesai', 'Cancel'],
   /** Baris Form baru di 2.2: setup() menambahkannya ke sheet Form lama jika belum ada (baris lain tidak disentuh). */
-  FORM_MIGRATE: ['Mulai.Stop line', 'Selesai.Jenis kerusakan', 'Selesai.Detail masalah', 'Selesai.Detail penyebab', 'Selesai.Detail penanganan'],
+  FORM_MIGRATE: ['Mulai.Stop line', 'Selesai.Jenis kerusakan', 'Selesai.Detail masalah', 'Selesai.Detail penyebab', 'Selesai.Detail penanganan',
+    'Selesai.PIC tambahan'],
+  /** 2.6: baris Form yang tidak dipakai lagi (mesin tidak dipilih) → setup menyetel Aktif = Tidak, aplikasi melewatinya. */
+  FORM_RETIRE: ['Mulai.Mesin ID'],
+  /** 2.6: pilihan yang dimatikan SEKALI saat upgrade (admin boleh menyalakannya lagi; setup berikutnya tidak menyentuhnya). */
+  OPTION_RETIRE_ONCE: { 'Tipe Maintenance': ['Preventive'] },
   /** Field sistem yang selalu aktif (logika aplikasi bergantung padanya). */
-  LOCKED_FIELDS: ['Mulai.Mesin ID', 'Mulai.Tipe', 'Mulai.Baterai', 'Pending.Yang tertunda', 'Pending.Tenggat', 'Selesai.Part', 'Cancel.Alasan cancel'],
+  LOCKED_FIELDS: ['Mulai.Tipe', 'Mulai.Baterai', 'Pending.Yang tertunda', 'Pending.Tenggat', 'Selesai.Part', 'Cancel.Alasan cancel'],
   /** Kolom Maintenance yang tidak boleh dipakai sebagai field tambahan. */
   RESERVED_FIELDS: ['Maintenance ID', 'Line', 'Status', 'Teknisi awal', 'Teknisi terakhir', 'Mulai', 'Selesai',
     'Total aktif (menit)', 'Total pause (menit)', 'Total pending (menit)', 'Status review', 'Masuk MTTR', 'Status sejak',

@@ -22,7 +22,6 @@ function serialize_(r, c) {
     id: String(r['Maintenance ID']),
     line: String(r['Line']),
     lineName: line ? line.name : '',
-    grup: line ? line.grup : '',
     factory: factory,
     factoryName: c.md.factoryMap[factory] ? c.md.factoryMap[factory].name : factory,
     battery: String(r['Baterai'] || ''),
@@ -94,22 +93,20 @@ function sortPending_(list) {
   });
 }
 
+/** 2.6: review = keputusan admin (Cancelled, Abandoned). Pending tidak lagi masuk review (fungsi Cek dihapus). */
 function reviewVisible_(r, user) {
-  if (r['Status review'] !== APP.REVIEW.NEEDED) return false;
-  return isAdmin_(user) || isInvolved_(r, user.email);
+  return r['Status review'] === APP.REVIEW.NEEDED && r['Status'] !== APP.STATUS.PENDING && isAdmin_(user);
 }
 
-/** Item review boleh diputuskan oleh user ini? Pending: admin + teknisi terkait. Lainnya: admin. */
 function canDecide_(r, user) {
-  if (isAdmin_(user)) return true;
-  return r['Status'] === APP.STATUS.PENDING && isInvolved_(r, user.email);
+  return isAdmin_(user);
 }
 
 // ---------- Bootstrap & beranda ----------
 
 /**
  * @param {string} lineId  dari QR (?line=)
- * @param {string} mesinId dari QR mesin (?mesin=)
+ * @param {string} mesinId dari QR mesin lama (?mesin=): diabaikan sejak 2.6 (line = unit), QR lama tetap membuka line-nya
  * @param {Object} filter  filter Beranda yang tersimpan di HP
  */
 function apiBootstrap(lineId, mesinId, filter) {
@@ -121,7 +118,6 @@ function bootstrap_(user, lineId, mesinId, filter) {
   var rows = readTable_(APP.SHEETS.MAINT);
   var c = ctx_();
   var mine = openForUser_(rows, user.email);
-  if (!lineId && mesinId) lineId = lineOfMachine_(c.md, mesinId);
   return {
     user: user,
     serverNowIso: c.now.toISOString(),
@@ -134,7 +130,7 @@ function bootstrap_(user, lineId, mesinId, filter) {
     counts: withSaran_(counts_(rows, user), user),
     stats: stats_(rows, c, filter),
     recent: recent_(rows, c, filter),
-    lineView: lineId ? lineView_(lineId, rows, c, user, mesinId) : null
+    lineView: lineId ? lineView_(lineId, rows, c, user) : null
   };
 }
 
@@ -168,16 +164,6 @@ function apiRefresh(filter, clientVersion) {
     try { out.appUrl = ScriptApp.getService().getUrl(); } catch (e) { /* tanpa URL: HP diminta buka ulang manual */ }
   }
   return out;
-}
-
-/** QR mesin tanpa ?line=: cari line-nya (hanya jika mesin terdaftar di satu Line ID, bukan Grup). */
-function lineOfMachine_(md, mesinId) {
-  var id = normLine_(mesinId);
-  var m = md.machines.filter(function (x) { return x.id === id; })[0];
-  if (!m) return '';
-  if (md.lines[m.line]) return m.line;
-  var subs = Object.keys(md.lines).filter(function (k) { return md.lines[k].grup === m.line; });
-  return subs.length === 1 ? subs[0] : '';
 }
 
 function counts_(rows, user) {
@@ -238,12 +224,13 @@ function recent_(rows, c, filter) {
 
 // ---------- Halaman line ----------
 
-function apiGetLine(lineId, mesinId) {
+function apiGetLine(lineId) {
   var user = requireUser_();
-  return lineView_(lineId, readTable_(APP.SHEETS.MAINT), ctx_(), user, mesinId);
+  return lineView_(lineId, readTable_(APP.SHEETS.MAINT), ctx_(), user);
 }
 
-function lineView_(lineId, rows, c, user, mesinId) {
+/** Halaman line. 2.6: line = unit kerja → satu pekerjaan terbuka per line, tanpa pilih mesin. */
+function lineView_(lineId, rows, c, user) {
   var md = c.md;
   var line = lineOf_(md, lineId);
   if (!line) return { found: false, lineId: normLine_(lineId), serverNowIso: c.now.toISOString() };
@@ -253,37 +240,24 @@ function lineView_(lineId, rows, c, user, mesinId) {
   var mineHere = mineRow && normLine_(mineRow['Line']) === key ? mineRow : null;
   var others = opens.filter(function (r) { return r !== mineHere; });
 
-  var busy = {};
-  opens.forEach(function (r) { var k = machineKey_(r); busy[k || '*'] = r; });
-  var lineBusy = busy['*'] || null;  // pekerjaan "seluruh line" mengunci semua mesin
-  var machines = machinesForLine_(md, line).map(function (m) {
-    var b = busy[m.id] || lineBusy;
-    return { id: m.id, name: m.name, busyBy: b ? nameOf_(c, b['Teknisi terakhir']) : '', busyId: b ? String(b['Maintenance ID']) : '' };
-  });
-
   var pendings = rows.filter(function (r) {
     return r['Status'] === APP.STATUS.PENDING && normLine_(r['Line']) === key;
   }).map(function (r) { return serialize_(r, c); });
 
   var last = lastBattery_(rows, key);
-  var pre = normLine_(mesinId);
-  var preMachine = pre ? machines.filter(function (m) { return m.id === pre; })[0] : null;
   var first = mineHere || others[0] || null;
 
   return {
     found: true,
     line: {
-      id: line.id, name: line.name, factory: line.factory, proses: line.proses, alias: line.alias,
+      id: line.id, name: line.name, factory: line.factory, proses: line.proses,
       factoryName: md.factoryMap[line.factory] ? md.factoryMap[line.factory].name : line.factory,
-      batteries: line.batteries, grup: line.grup, area: line.area, active: line.active
+      batteries: line.batteries, area: line.area, active: line.active
     },
     open: first ? serialize_(first, c) : null,
     openIsMine: !!(first && first === mineHere),
     others: others.map(function (r) { return serialize_(r, c); }),
-    lineLocked: !!lineBusy && lineBusy !== mineHere,
-    machines: machines,
-    preselectMesin: preMachine ? preMachine.id : '',
-    unknownMesin: pre && !preMachine ? pre : '',
+    lineLocked: !mineHere && others.length > 0,
     myOpenElsewhere: (mineRow && !mineHere) ? serialize_(mineRow, c) : null,
     pendings: sortPending_(pendings),
     lastBattery: line.batteries.indexOf(last) !== -1 ? last : (line.batteries[0] || ''),
@@ -365,9 +339,8 @@ function apiListReview(filter) {
 
 /**
  * Keputusan review.
- * @param {{action:'CEK'|'SETUJU'|'HITUNG'|'KELUARKAN', note?:string, activeMin?:number}} p
- *   CEK      : Pending sudah dicek (Admin atau teknisi terkait). Pending tetap di daftar Pending.
- *   SETUJU   : Cancelled disetujui (Admin).
+ * @param {{action:'SETUJU'|'HITUNG'|'KELUARKAN', note?:string, activeMin?:number}} p  (Admin; Cek Pending dihapus di 2.6)
+ *   SETUJU   : Cancelled disetujui.
  *   HITUNG   : Abandoned dihitung dengan menit aktif hasil koreksi Admin (masuk MTTR hanya jika tipenya dihitung).
  *   KELUARKAN: Abandoned dikeluarkan dari MTTR.
  */
@@ -384,9 +357,7 @@ function apiReview(id, p, filter) {
     var st = r['Status'], detail;
     var now = new Date();
 
-    if (st === APP.STATUS.PENDING && p.action === 'CEK') {
-      detail = 'Pending dicek';
-    } else if (st === APP.STATUS.CANCELLED && p.action === 'SETUJU') {
+    if (st === APP.STATUS.CANCELLED && p.action === 'SETUJU') {
       detail = 'Cancel disetujui';
     } else if (st === APP.STATUS.ABANDONED && (p.action === 'HITUNG' || p.action === 'KELUARKAN')) {
       if (!note) throw new Error('Catatan review wajib diisi untuk Abandoned.');
@@ -426,13 +397,16 @@ function inc_(map, key, minutes, mttr) {
   return o;
 }
 
-function topList_(map, n, extra) {
+/** @param {string=} by 'minutes' = urut total waktu (terlama); default urut jumlah (tersering). */
+function topList_(map, n, extra, by) {
   return Object.keys(map).map(function (k) {
     var o = map[k];
     var out = { key: o.key, count: o.count, minutes: round2_(o.minutes), mttr: o.mttrN ? round2_(o.mttrSum / o.mttrN) : null };
     if (extra) extra(out, o);
     return out;
-  }).sort(function (a, b) { return (b.count - a.count) || (b.minutes - a.minutes); }).slice(0, n);
+  }).sort(by === 'minutes'
+    ? function (a, b) { return (b.minutes - a.minutes) || (b.count - a.count); }
+    : function (a, b) { return (b.count - a.count) || (b.minutes - a.minutes); }).slice(0, n);
 }
 
 /**
@@ -456,8 +430,9 @@ function apiDashboard(f) {
   var kpi = { mttr: null, mttrN: 0, corrective: 0, preventive: 0, activeMin: 0, cancelled: 0, abandoned: 0,
     openNow: 0, pendingNow: 0, overdueNow: 0 };
   var sum = 0;
-  var byMachine = {}, byLine = {}, byTech = {}, byProblem = {}, byOther = {}, byJenis = {};
+  var byLine = {}, byTech = {}, byProblem = {}, byOther = {}, byJenis = {};
   var mttrTypes = mttrTypes_();
+  var lineName = function (out) { var l = c.md.lines[out.key]; out.name = l ? l.name : ''; };
 
   inPeriod.forEach(function (r) {
     var st = r['Status'];
@@ -471,11 +446,13 @@ function apiDashboard(f) {
       kpi.activeMin += min;
     }
     if (counted) { sum += min; kpi.mttrN++; }
-    // Frekuensi: semua pekerjaan non-cancel (termasuk yang masih berjalan/pending) = seberapa sering mesin bermasalah.
-    var mKey = r['Nama Mesin'] ? String(r['Nama Mesin']) : '(tanpa mesin)';
-    inc_(byMachine, mKey + ' · ' + r['Line'], min, counted).line = String(r['Line']);
+    // Frekuensi: semua pekerjaan non-cancel (termasuk yang masih berjalan/pending) = seberapa sering line (unit) bermasalah.
     inc_(byLine, String(r['Line']), min, counted);
-    if (st === APP.STATUS.COMPLETED || counted) inc_(byTech, nameOf_(c, r['Teknisi terakhir']), min, counted);
+    // 2.6: pekerjaan bersama dihitung untuk setiap teknisi terlibat (termasuk PIC tambahan), bukan hanya teknisi terakhir.
+    if (st === APP.STATUS.COMPLETED || counted) {
+      uniq_(String(r['Teknisi terlibat'] || r['Teknisi terakhir'] || '').split(',').map(function (e) { return e.trim().toLowerCase(); }).filter(String))
+        .forEach(function (e) { inc_(byTech, nameOf_(c, e), min, counted); });
+    }
     if (r['Masalah']) inc_(byProblem, String(r['Masalah']), min, counted);
     if (st === APP.STATUS.COMPLETED && r['Jenis kerusakan']) inc_(byJenis, String(r['Jenis kerusakan']), min, counted);
     ['Nama Mesin', 'Masalah', 'Penyebab', 'Penanganan', 'Yang tertunda', 'Alasan cancel'].forEach(function (col) {
@@ -561,8 +538,9 @@ function apiDashboard(f) {
     periode: ytd ? 'ytd' : days,
     kpi: kpi,
     weeks: weeks.map(function (x) { return { label: x.label, count: x.count, mttr: x.n ? round2_(x.sum / x.n) : null }; }),
-    machines: topList_(byMachine, 10, function (out, o) { out.line = o.line; }),
-    lines: topList_(byLine, 10),
+    // Top 5 (2.6): tersering (jumlah → MTBF) dan terlama (total waktu aktif → MTTR), per line = unit
+    linesFreq: topList_(byLine, 5, lineName),
+    linesLong: topList_(byLine, 5, lineName, 'minutes'),
     techs: topList_(byTech, 10),
     problems: topList_(byProblem, 8),
     jenis: topList_(byJenis, 10),
@@ -674,9 +652,8 @@ function apiListLinesForQr() {
     baseUrl: ScriptApp.getService().getUrl(),
     lines: lines.map(function (l) {
       return {
-        id: l.id, name: l.name, area: l.area, active: l.active, grup: l.grup, proses: l.proses,
-        factoryName: md.factoryMap[l.factory] ? md.factoryMap[l.factory].name : l.factory,
-        machines: machinesForLine_(md, l).map(function (m) { return { id: m.id, name: m.name }; })
+        id: l.id, name: l.name, area: l.area, active: l.active, proses: l.proses,
+        factoryName: md.factoryMap[l.factory] ? md.factoryMap[l.factory].name : l.factory
       };
     })
   };

@@ -60,14 +60,14 @@ function openForUser_(rows, email) {
 }
 
 
-/** Kunci mesin: Mesin ID, atau "Lainnya: <nama>" jika mesin tidak terdaftar, atau '' (seluruh line). */
+/** Kunci mesin pekerjaan lama (sebelum 2.6): Mesin ID / "Lainnya: <nama>". Pekerjaan 2.6 = '' (seluruh line = unit). */
 function machineKey_(r) {
   return normLine_(r['Mesin ID']) || String(r['Nama Mesin'] || '').trim().toUpperCase();
 }
 
 /**
- * Pekerjaan terbuka yang bentrok di line yang sama: mesin sama, atau salah satunya tanpa mesin
- * (pekerjaan "seluruh line" mengunci semua mesin di line itu).
+ * Pekerjaan terbuka yang bentrok di line yang sama. Sejak 2.6 key selalu '' → satu pekerjaan terbuka per line;
+ * pekerjaan lama ber-mesin (pending dari versi sebelumnya) hanya bentrok dengan mesin yang sama atau pekerjaan seluruh line.
  */
 function openConflict_(rows, lineId, key, exceptId) {
   var line = normLine_(lineId);
@@ -215,8 +215,8 @@ function applyFormValues_(r, values, now, user) {
 
 /**
  * Mulai: timer aktif berjalan + Maintenance ID dibuat pada saat yang sama.
- * @param {{mesin?:string, mesinLain?:string, tipe?:string, baterai:string, values?:Object, other?:Object}|string} p
- *   string = baterai (kompatibel 2.0). mesin = Mesin ID atau "Lainnya".
+ * @param {{tipe?:string, baterai:string, stopLine?:string, values?:Object, other?:Object}|string} p
+ *   string = baterai (kompatibel 2.0). Sejak 2.6 tidak ada pilihan mesin (line = unit); `mesin` dari klien lama diabaikan.
  */
 function apiStart(lineId, p) {
   var user = requireUser_();
@@ -237,23 +237,6 @@ function apiStart(lineId, p) {
   var tipe = cleanText_(p.tipe, 50) || tipes[0];
   if (tipes.indexOf(tipe) === -1) throw new Error('Tipe maintenance "' + tipe + '" tidak ada di daftar pilihan.');
 
-  var mesinDef = fieldDef_(md, 'Mulai', 'Mesin ID');
-  var machines = machinesForLine_(md, line);
-  var mesinId = '', mesinName = '';
-  var pick = cleanText_(p.mesin, 60);
-  if (pick === APP.OTHER && mesinDef.other) {
-    var t = cleanText_(p.mesinLain, 100);
-    if (!t) throw new Error(mesinDef.label + ': pilih "Lainnya" → wajib diisi nama mesin/alat.');
-    mesinName = APP.OTHER_PREFIX + t;
-  } else if (pick) {
-    var m = findMachine_(md, line, pick);
-    if (!m) throw new Error(mesinDef.label + ' "' + pick + '" tidak terdaftar di line ' + line.id + '.');
-    mesinId = m.id;
-    mesinName = m.name;
-  } else if (machines.length && mesinDef.required) {
-    throw new Error(mesinDef.label + ' wajib dipilih.');
-  }
-
   var custom = validateForm_(md, 'Mulai', p);
   var stop = stopLineValue_(md, p.stopLine, tipe);
 
@@ -261,7 +244,7 @@ function apiStart(lineId, p) {
     var rows = readTable_(APP.SHEETS.MAINT);
     var mine = openForUser_(rows, user.email);
     if (mine) throw new Error('Anda masih punya maintenance ' + mine['Status'] + ' (' + mine['Maintenance ID'] + '). Selesaikan, pending, atau cancel dulu.');
-    var other = openConflict_(rows, line.id, normLine_(mesinId) || mesinName.toUpperCase());
+    var other = openConflict_(rows, line.id, '');
     if (other) throw new Error(conflictMsg_(other, userNameMap_()));
 
     var now = new Date();
@@ -273,8 +256,6 @@ function apiStart(lineId, p) {
     r['Stop line'] = stop;
     r['Baterai'] = bat;
     r['Tipe'] = tipe;
-    r['Mesin ID'] = mesinId;
-    r['Nama Mesin'] = mesinName;
     r['Status'] = APP.STATUS.ACTIVE;
     r['Teknisi awal'] = user.email;
     r['Teknisi terakhir'] = user.email;
@@ -290,7 +271,7 @@ function apiStart(lineId, p) {
     setNames_(r);
     appendObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], APP.EVENTS.START, user.email,
-      [tipe, 'Line ' + r['Line'], mesinName ? 'mesin ' + mesinName : '', 'baterai ' + bat, stop ? 'stop line ' + stop : ''].concat(custom.summary).filter(String).join(', '));
+      [tipe, 'Line ' + r['Line'], 'baterai ' + bat, stop ? 'stop line ' + stop : ''].concat(custom.summary).filter(String).join(', '));
     rows.push(r);
     syncReports_(r, rows);
     return rows;
@@ -347,7 +328,6 @@ function apiPending(id, input) {
     applyFormValues_(r, f.values, now, user);
     r['Tenggat'] = deadline;
     r['Peringatan pada'] = '';
-    r['Status review'] = APP.REVIEW.NEEDED;
     return [APP.EVENTS.PENDING, ['Tenggat ' + fmtDate_(deadline)].concat(f.summary).join(' · ')];
   });
 }
@@ -455,13 +435,34 @@ function appendUsage_(r, parts, now) {
 }
 
 /**
- * @param {{values:Object, other?:Object, tanpaPart:boolean, parts:Object[]}} input  parts lihat validateParts_.
+ * PIC tambahan saat Selesai (2.6): email dari sheet Users yang aktif, tanpa diri sendiri, tanpa dobel, maks 10.
+ * @return {string[]} email (huruf kecil)
+ */
+function validatePics_(md, pics, user) {
+  var active = {};
+  md.users.forEach(function (u) { if (u.email && isActiveRow_(u.aktif)) active[u.email] = true; });
+  var out = [];
+  (Array.isArray(pics) ? pics : []).forEach(function (e) {
+    e = String(e || '').trim().toLowerCase();
+    if (!e || e === user.email || out.indexOf(e) !== -1) return;
+    if (!active[e]) throw new Error('PIC "' + e + '" tidak terdaftar / nonaktif di sheet Users.');
+    out.push(e);
+  });
+  if (out.length > 10) throw new Error('PIC tambahan maksimal 10 orang.');
+  return out;
+}
+
+/**
+ * @param {{values:Object, other?:Object, tanpaPart:boolean, parts:Object[], pics?:string[]}} input
+ *   parts lihat validateParts_; pics = email PIC tambahan (ikut dihitung sebagai teknisi terlibat).
  */
 function apiComplete(id, input) {
   var user = requireUser_();
   var md = masterData_();
   input = formInput_(input, 'Masalah');
   var f = validateForm_(md, 'Selesai', input);
+  var pics = fieldDef_(md, 'Selesai', 'PIC tambahan') ? validatePics_(md, input.pics, user) : [];
+  var names = pics.length ? userNameMap_() : {};
   var parts = [];
   if (!input.tanpaPart) {
     parts = validateParts_(md, input.parts);
@@ -478,9 +479,11 @@ function apiComplete(id, input) {
     r['Masuk MTTR'] = countsForMttr_(r) ? APP.MTTR.YES : APP.MTTR.NO;
     r['Status review'] = '';
     r['Peringatan pada'] = '';
+    pics.forEach(function (e) { addInvolved_(r, e); });
     setNames_(r);
     appendUsage_(r, parts, now);
-    return [APP.EVENTS.COMPLETE, f.summary.concat(['Sparepart: ' + part.replace(/\n/g, '; ')]).join(' · '), parts];
+    var extra = pics.length ? ['PIC tambahan: ' + pics.map(function (e) { return names[e] || e; }).join(', ')] : [];
+    return [APP.EVENTS.COMPLETE, f.summary.concat(['Sparepart: ' + part.replace(/\n/g, '; ')], extra).join(' · '), parts];
   });
 }
 

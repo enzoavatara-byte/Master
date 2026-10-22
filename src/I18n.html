@@ -145,7 +145,7 @@ I18N.zh = {
   'Semua factory': '所有工厂', 'Semua baterai': '所有电池项目', 'Semua line': '所有产线', 'Semua item': '全部项目',
   'Item milik saya': '我的项目', 'Semua status': '所有状态', 'Semua tipe': '所有类型', 'Saya saja': '只看我的',
   'Alias: {a}': '别名：{a}', 'Baterai {b}': '电池项目 {b}', '{g} (semua sub-line)': '{g}（所有子产线）', 'Grup {g}': '{g} 组',
-  'Seluruh line': '整条产线', 'Ketik line, nama, alias, proses…': '输入产线、名称、别名、工序…',
+  'Seluruh line': '整条产线', 'Ketik line, nama, proses…': '输入产线、名称、工序…',
   'Tidak ada line yang cocok.': '没有匹配的产线。', 'Line tidak ditemukan': '未找到产线',
   'Line <b>{l}</b> tidak terdaftar. QR mungkin salah atau line sudah dihapus. Hubungi Admin.': '产线 <b>{l}</b> 未登记。二维码可能有误或产线已删除。请联系管理员。',
   'Line ini nonaktif. Maintenance tidak bisa dimulai.': '此产线已停用，无法开始维修。',
@@ -154,7 +154,7 @@ I18N.zh = {
 
   // ---------- halaman line & mulai ----------
   'Mulai maintenance': '开始维修', 'Atau mulai maintenance baru': '或开始新的维修', 'Sedang dikerjakan di line ini': '此产线正在维修',
-  'Seluruh line sedang dikerjakan. Tunggu selesai atau koordinasi dengan PIC di atas.': '整条产线正在维修。请等待完成，或与上方负责人协调。',
+  'Line ini sedang dikerjakan. Tunggu selesai atau koordinasi dengan PIC di atas.': '此产线正在维修。请等待完成，或与上方负责人协调。',
   'Waktu mulai & Maintenance ID dibuat server saat tombol ditekan.': '开始时间和维修单号在按下按钮时由服务器生成。',
   '▶ MULAI': '▶ 开始', '▶ RESUME': '▶ 恢复', '▶ Lanjutkan': '▶ 继续', '▶ Lanjutkan (scan QR)': '▶ 继续（扫码）', '(scan QR)': '（扫码）',
   '✔ SELESAI': '✔ 完成', 'Cancel maintenance': '取消维修',
@@ -217,7 +217,7 @@ I18N.zh = {
 
   // ---------- pending, riwayat, review ----------
   'Tidak ada pekerjaan pending.': '没有挂起的工作。', 'Urutan: lewat tenggat, lalu paling lama': '排序：先逾期，再按等待时间',
-  'Cari line, alias, mesin, ID, masalah…': '搜索产线、别名、设备、单号、问题…', '{n} pending': '挂起 {n}',
+  'Cari line, ID, masalah…': '搜索产线、单号、问题…', '{n} pending': '挂起 {n}',
   '{n} lewat': '逾期 {n}', '{n} lewat tenggat': '逾期 {n}', 'Tandai sudah dicek': '标记为已检查',
   '{n} pekerjaan': '{n} 项工作', '(ditampilkan {n} terbaru)': '（显示最新 {n} 条）', '{w} · aktif {d}': '{w} · 有效 {d}',
   '{n} part': '{n} 个备件', 'Belum ada data.': '暂无数据。', 'Semua beres': '全部处理完毕',
@@ -236,7 +236,7 @@ I18N.zh = {
   'MTTR & kesehatan mesin': 'MTTR 与设备状况', 'MTTR (Corrective)': 'MTTR（故障维修）', 'MTTR 7 hari (Corrective)': '近 7 天 MTTR（故障维修）',
   'MTTR ({x})': 'MTTR（{x}）', '{n} pekerjaan dihitung': '计入 {n} 项工作', '{d} total aktif': '有效时间合计 {d}',
   'tidak masuk MTTR': '不计入 MTTR', '{a} dihitung · {b} berjalan · {c} pending': '计入 {a} · 进行中 {b} · 挂起 {c}',
-  'Corrective selesai': '完成的故障维修', 'Selesai: corrective / preventive': '完成：故障维修 / 预防性维护', 'Sparepart manual': '手动备件', 'Preventive selesai': '完成的预防性维护',
+  'Corrective selesai': '完成的故障维修', 'Dihitung ke MTTR': '计入 MTTR', 'Sparepart manual': '手动备件', 'Preventive selesai': '完成的预防性维护',
   'Maintenance selesai per minggu (12 minggu)': '每周完成的维修（12 周）',
   'Minggu {w}: {n} selesai · MTTR {m} mnt': '第 {w} 周：完成 {n} · MTTR {m} 分钟',
   'Minggu {w}: <b>{n}</b> selesai · MTTR {m} mnt. Tap batang untuk detail.': '第 {w} 周：完成 <b>{n}</b> · MTTR {m} 分钟。点击柱形查看详情。',
@@ -248,6 +248,10 @@ I18N.zh = {
   'Pekerjaan selesai di periode ini.': '此期间完成的工作。',
   'Berapa kali dipakai (jumlah pekerjaan). Data dari sheet <b>Pemakaian Sparepart</b>.': '使用次数（工作数）。数据来自 <b>Pemakaian Sparepart</b> 表。',
   'total {n}': '合计 {n}',
+  '5 line tersering rusak': '故障最多的 5 条产线', '5 line terlama diperbaiki': '维修时间最长的 5 条产线',
+  'Jumlah kerusakan di periode ini (termasuk yang masih berjalan). Paling menurunkan MTBF.': '此期间的故障次数（包括进行中的）。对 MTBF 影响最大。',
+  'Total waktu aktif perbaikan di periode ini. Paling menaikkan MTTR.': '此期间维修有效时间合计。对 MTTR 影响最大。',
+  '{d} total': '合计 {d}', '{n}× rusak': '故障 {n} 次', 'rata-rata {m} mnt': '平均 {m} 分钟', 'Cari nama…': '搜索姓名…',
   'Yang sering muncul sebaiknya dijadikan pilihan tetap di sheet <b>Pilihan</b> (atau <b>Mesin</b>) supaya teknisi cukup tap.':
     '经常出现的内容建议加入 <b>Pilihan</b>（或 <b>Mesin</b>）表作为固定选项，技术员只需点选。',
   'Status project': '项目状态', 'Fase belum diisi': '未填写阶段', 'Belum ada data di periode ini.': '此期间暂无数据。',
@@ -260,7 +264,9 @@ I18N.zh = {
     'Google Sheet 的 <b>Laporan {y}</b> 和 <b>Rekap</b> 页在每次操作后实时更新。手动编辑 Maintenance 或 Format Laporan 表后，请点此按钮。',
   'Buka Google Sheet': '打开 Google Sheet', 'Perlu dicek di Google Sheet ({n})': '需要在 Google Sheet 中检查（{n}）',
   '✓ {l} ({n} baris) & {r} diperbarui.': '✓ {l}（{n} 行）和 {r} 已更新。',
-  'QR Line & Mesin': '产线和设备二维码',
+  'QR Line': '产线二维码',
+  'Satu QR per baris sheet <b>Lines</b> (satu unit kerja). QR mesin lama tetap bisa dipakai: membuka line-nya.':
+    '<b>Lines</b> 表每行一个二维码（一个工作单元）。旧的设备二维码仍可使用：会打开对应产线。',
   'Line dari sheet <b>Lines</b>, mesin dari sheet <b>Mesin</b>. QR mesin langsung memilih mesinnya saat di-scan (1 tap lebih cepat).':
     '产线来自 <b>Lines</b> 表，设备来自 <b>Mesin</b> 表。扫描设备二维码会直接选中该设备（少点一次）。',
   'URL saat ini /dev (hanya untuk editor). Buka dari URL deployment /exec sebelum mencetak QR.': '当前网址是 /dev（仅供编辑者）。打印二维码前请从部署网址 /exec 打开。',

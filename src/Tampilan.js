@@ -124,8 +124,8 @@ function tabPlan_(ss) {
     .forEach(function (n) { add(n, 'laporan'); });
   add(S.PENDING, 'laporan'); add(S.SARAN, 'laporan');
   add(S.MAINT, 'app'); add(S.PEMAKAIAN, 'app');
-  [S.USERS, S.LINES, S.MESIN, S.SPAREPART, S.OPTIONS].forEach(function (n) { add(n, 'atur'); });
-  [S.PROJECTS, S.FACTORY, S.FORM, S.FORMAT, S.PANDUAN, S.CONFIG, S.RENCANA].forEach(function (n) { add(n, 'atur', true); });
+  [S.USERS, S.LINES, S.SPAREPART, S.OPTIONS].forEach(function (n) { add(n, 'atur'); });
+  [S.PROJECTS, S.FACTORY, S.FORM, S.FORMAT, S.PANDUAN, S.CONFIG, S.RENCANA, S.MESIN].forEach(function (n) { add(n, 'atur', true); });   // Mesin: tidak dipakai lagi (2.6)
   add(S.LOG, 'app', true); add(S.TERJEMAHAN, 'app', true);
   var rest = ss.getSheets().map(function (sh) { return sh.getName(); }).filter(function (n) { return !seen[n]; });
   rest.filter(function (n) { return /^(Laporan|Rekap) \d{4}$/.test(n); }).sort().reverse().forEach(function (n) { add(n, 'laporan', true); });
@@ -172,6 +172,7 @@ function tableSpecs_() {
   [S.FACTORY, S.PROJECTS, S.FORMAT].forEach(function (n) { spec[n] = { off: 'Aktif', dropdowns: { 'Aktif': YT } }; });
   [S.LINES, S.MESIN, S.SPAREPART, S.OPTIONS].forEach(function (n) { spec[n] = { filter: true, off: 'Aktif', dropdowns: { 'Aktif': YT } }; });
   spec[S.OPTIONS].dropdowns['Discipline'] = APP.TPM_DISCIPLINES;
+  spec[S.LINES].hide = ['Alias', 'Grup'];   // kolom lama (sebelum 2.6), tidak dipakai lagi
   spec[S.FORM] = { filter: true, off: 'Aktif', wide: { 'Label': 230, 'Label (中文)': 160 },
     dropdowns: { 'Tipe': ['pilihan', 'teks', 'angka', 'sistem'], 'Wajib': YT, 'Lainnya isi sendiri': YT, 'Aktif': YT } };
   spec[S.PANDUAN] = { off: 'Aktif', wrap: ['Isi'], dropdowns: { 'Untuk': ['Teknisi', 'Admin', 'Semua'], 'Aktif': YT } };
@@ -365,7 +366,7 @@ function buildRingkasan_(ss) {
   };
   var ST = R('Status'), MU = R('Mulai'), SE = R('Selesai'), SJ = R('Status sejak'), AK = R('Total aktif (menit)'), MM = R('Masuk MTTR');
   var TI = R('Tipe'), BA = R('Baterai'), JE = R('Jenis kerusakan'), SL = R('Stop line'), TG = R('Tenggat'), RV = R('Status review');
-  var LI = R('Line'), NM = R('Nama Mesin'), PIC = R('Nama PIC'), TT = R('Yang tertunda');
+  var LI = R('Line'), PIC = R('Nama PIC'), TT = R('Yang tertunda');
   // Sel bantu (kolom K, disembunyikan): K1 tanggal tampil, K2 awal bulan, K3 awal bulan berikutnya.
   var D = '$K$1', B0 = '$K$2', B1 = '$K$3';
   var between = function (rng, a, b) { return rng + ',">="&' + a + ',' + rng + ',"<"&' + b; };
@@ -476,23 +477,30 @@ function buildRingkasan_(ss) {
   var chartRow = jHead;   // grafik di kanan tabel jenis (kolom E)
   r = Math.max(r, chartRow + 15) + 1;
 
-  // 5 mesin paling sering bermasalah bulan ini (tanpa cancel)
-  put(r, 2, '5 mesin paling sering bermasalah bulan ini  ·  本月故障最多的 5 台设备'); fmt.push(['sub', r]); r++;
-  put(r, 2, 'Line 产线'); put(r, 3, 'Mesin 设备'); put(r, 4, 'Jumlah 数量');
+  // 2.6 Top 5 bulan ini (tanpa cancel), per line = unit: tersering (jumlah → MTBF) di kiri, terlama (total waktu → MTTR) di kanan
+  put(r, 2, '5 line tersering rusak  ·  故障最多的 5 条产线'); put(r, 6, '5 line terlama diperbaiki  ·  维修时间最长的 5 条产线'); fmt.push(['sub', r]); r++;
+  ['Line 产线', 'Kali 次数', 'Total (jam) 总时长', 'Rata-rata (mnt) 平均'].forEach(function (t, i) { put(r, 2 + i, t); put(r, 6 + i, t); });
   var tHead = r; r++;
-  var qd = function (x) { return 'date \'"&YEAR(' + x + ')&"-"&TEXT(MONTH(' + x + '),"00")&"-"&TEXT(DAY(' + x + '),"00")&"\''; };
-  put(r, 2, '=IFERROR(QUERY({' + LI + ',' + NM + ',' + MU + ',' + ST + '},"select Col1, Col2, count(Col3) where Col3 >= ' + qd(B0) +
-    ' and Col3 < ' + qd(B1) + ' and Col4 <> \'' + APP.STATUS.CANCELLED + '\' and Col2 <> \'\' group by Col1, Col2 order by count(Col3) desc limit 5 label Col1 \'\', Col2 \'\', count(Col3) \'\'",0),"–")');
+  // FILTER dulu (tanggal dibandingkan sebagai angka), QUERY hanya mengelompokkan: tidak bergantung tipe date/datetime QUERY
+  var top5 = function (order) {
+    return '=IFERROR(QUERY(FILTER({' + LI + ',' + MU + ',' + AK + '},' + MU + '>=' + B0 + ',' + MU + '<' + B1 + ',' + ST + '<>"' + APP.STATUS.CANCELLED + '",' + LI + '<>""),"select Col1, count(Col2), sum(Col3)/60, avg(Col3) group by Col1 order by ' + order +
+      ' limit 5 label Col1 \'\', count(Col2) \'\', sum(Col3)/60 \'\', avg(Col3) \'\'",0),"–")';
+  };
+  put(r, 2, top5('count(Col2) desc, sum(Col3) desc'));
+  put(r, 6, top5('sum(Col3) desc, count(Col2) desc'));
   r += 5;
-  fmt.push(['table', tHead, r - 1, 3]);
+  fmt.push(['table', tHead, r - 1, 4, 2]);
+  fmt.push(['table', tHead, r - 1, 4, 6]);
+  fmt.push(['num', tHead + 1, 4, 5, '0.0']); fmt.push(['num', tHead + 1, 5, 5, '0']);
+  fmt.push(['num', tHead + 1, 8, 5, '0.0']); fmt.push(['num', tHead + 1, 9, 5, '0']);
   r++;
 
   // masih terbuka sekarang (rumus FILTER memanjang ke bawah: selalu paling bawah)
   put(r, 2, 'Masih terbuka (sekarang)  ·  未完成的工作（现在）'); fmt.push(['sub', r]); r++;
-  ['Line 产线', 'Mesin 设备', 'Status 状态', 'Teknisi 技术员', 'Mulai 开始', 'Tenggat 期限', 'Yang tertunda 待处理'].forEach(function (t, i) { put(r, 2 + i, t); });
+  ['Line 产线', 'Status 状态', 'Teknisi 技术员', 'Mulai 开始', 'Tenggat 期限', 'Yang tertunda 待处理'].forEach(function (t, i) { put(r, 2 + i, t); });
   var oHead = r; r++;
-  put(r, 2, '=IFERROR(SORT(FILTER({' + [LI, NM, ST, PIC, MU, TG, TT].join(',') + '},(' + ST + '="' + APP.STATUS.ACTIVE + '")+(' + ST + '="' +
-    APP.STATUS.PAUSE + '")+(' + ST + '="' + APP.STATUS.PENDING + '")),3,TRUE,5,TRUE),"Tidak ada · 无")');
+  put(r, 2, '=IFERROR(SORT(FILTER({' + [LI, ST, PIC, MU, TG, TT].join(',') + '},(' + ST + '="' + APP.STATUS.ACTIVE + '")+(' + ST + '="' +
+    APP.STATUS.PAUSE + '")+(' + ST + '="' + APP.STATUS.PENDING + '")),2,TRUE,4,TRUE),"Tidak ada · 无")');
 
   // grafik "selesai per hari bulan ini": data bantu di kolom M:N (disembunyikan)
   var days = [['Tanggal', 'Selesai 完成']];
@@ -549,21 +557,24 @@ function buildRingkasan_(ss) {
       sh.getRange(f[1] + 1, 2, 1, statuses.length).setFontSize(18).setNumberFormat('0');
       sh.setRowHeight(f[1], 36);
       sh.setRowHeight(f[1] + 1, 36);
-    } else if (f[0] === 'table') {
-      sh.getRange(f[1], 2, 1, f[3]).setBackground(TEMA_.head).setFontColor(TEMA_.headText).setFontWeight('bold').setWrap(true);
-      if (f[2] > f[1]) sh.getRange(f[1] + 1, 2, f[2] - f[1], f[3]).setBorder(null, null, true, null, null, true, '#E3E7ED', SpreadsheetApp.BorderStyle.SOLID);
+    } else if (f[0] === 'table') {   // [table, baris judul, baris akhir, jumlah kolom, kolom awal (bawaan B)]
+      var tc = f[4] || 2;
+      sh.getRange(f[1], tc, 1, f[3]).setBackground(TEMA_.head).setFontColor(TEMA_.headText).setFontWeight('bold').setWrap(true);
+      if (f[2] > f[1]) sh.getRange(f[1] + 1, tc, f[2] - f[1], f[3]).setBorder(null, null, true, null, null, true, '#E3E7ED', SpreadsheetApp.BorderStyle.SOLID);
+    } else if (f[0] === 'num') {     // [num, baris, kolom, jumlah baris, format]
+      sh.getRange(f[1], f[2], f[3], 1).setNumberFormat(f[4]);
     }
   });
   // daftar "masih terbuka": judul, status berwarna, tanggal pendek, tenggat lewat merah
-  sh.getRange(oHead, 2, 1, 7).setBackground(TEMA_.head).setFontColor(TEMA_.headText).setFontWeight('bold').setWrap(true);
+  sh.getRange(oHead, 2, 1, 6).setBackground(TEMA_.head).setFontColor(TEMA_.headText).setFontWeight('bold').setWrap(true);
   var open = function (c) { return sh.getRange(oHead + 1, c, 300, 1); };
+  open(5).setNumberFormat('dd/mm hh:mm');
   open(6).setNumberFormat('dd/mm hh:mm');
-  open(7).setNumberFormat('dd/mm hh:mm');
   Object.keys(TEMA_.status).forEach(function (s) {
-    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(s).setBackground(TEMA_.status[s][0]).setFontColor(TEMA_.status[s][1]).setRanges([open(4)]).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(s).setBackground(TEMA_.status[s][0]).setFontColor(TEMA_.status[s][1]).setRanges([open(3)]).build());
   });
-  rules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(fx_('=AND(ISNUMBER($G' + (oHead + 1) + '),$G' + (oHead + 1) + '<NOW())'))
-    .setFontColor(TEMA_.late).setBold(true).setRanges([open(7)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(fx_('=AND(ISNUMBER($F' + (oHead + 1) + '),$F' + (oHead + 1) + '<NOW())'))
+    .setFontColor(TEMA_.late).setBold(true).setRanges([open(6)]).build());
   // kotak "Lewat tenggat" & "Perlu review" berwarna jika > 0; hasil project hijau / merah
   rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0).setBackground(TEMA_.status.Abandoned[0]).setFontColor(TEMA_.late)
     .setRanges([sh.getRange(A(nowRow + 1, 6, nowRow + 1, 7))]).build());
@@ -634,8 +645,7 @@ function buildBacaSaya_(ss) {
     [T.app, APP.SHEETS.MAINT, 'Semua data pekerjaan (data asli aplikasi). Kolom email & waktu sistem disembunyikan.\n所有维修原始数据。邮箱和系统时间列已隐藏。', 'Hanya admin, untuk memperbaiki salah isi\n仅管理员修正错误'],
     [T.app, APP.SHEETS.PEMAKAIAN, 'Satu baris = satu sparepart yang dipakai. Bisa difilter.\n每行 = 一个使用的备件。可以筛选。', 'Tidak\n否'],
     [T.atur, APP.SHEETS.USERS, 'Teknisi & admin. Nama di sini yang tampil di laporan. Bahasa: zh = aplikasi 中文.\n技术员和管理员。Bahasa 填 zh = 中文界面。', 'Ya (admin)\n可以（管理员）'],
-    [T.atur, APP.SHEETS.LINES, 'Daftar line. Satu baris = satu QR.\n产线列表。一行 = 一个二维码。', 'Ya (admin)\n可以（管理员）'],
-    [T.atur, APP.SHEETS.MESIN, 'Mesin per line.\n每条产线的设备。', 'Ya (admin)\n可以（管理员）'],
+    [T.atur, APP.SHEETS.LINES, 'Daftar line / unit kerja. Satu baris = satu QR (nama mesin cukup ditulis di Nama Line).\n产线 / 工位列表。一行 = 一个二维码。', 'Ya (admin)\n可以（管理员）'],
     [T.atur, APP.SHEETS.SPAREPART, 'Katalog sparepart: Jenis → Nama → Model.\n备件目录：类别 → 名称 → 型号。', 'Ya (admin)\n可以（管理员）'],
     [T.atur, APP.SHEETS.OPTIONS, 'Isi pilihan di form (masalah, penyebab, …) + nama 中文 / English + Discipline TPM per jenis kerusakan.\n表单选项（现象、原因 …）、中英文名称及 TPM 范围。', 'Ya (admin)\n可以（管理员）']
   ];

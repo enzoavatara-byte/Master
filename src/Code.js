@@ -207,6 +207,7 @@ function setup() {
     });
   });
   migrateDiscipline_();   // 2.5.2: Jenis kerusakan Operasional / Produk / MES + kolom Discipline (tab TPM)
+  var notes = migrate26_(ss);   // 2.6: field mesin, Preventive, review Pending
 
   if (readTable_(APP.SHEETS.FACTORY).length === 0) {
     APP.FACTORY_DEFAULTS.forEach(function (f) {
@@ -285,7 +286,47 @@ function setup() {
   // Tab Ringkasan & Baca Saya, warna, belang, filter, dropdown, urutan & sembunyikan tab. Gagal di sini tidak menggagalkan setup.
   var p = rapikanTampilan_({ full: true });
   if (tpmErr) p.push(tpmErr);
-  return p.length ? 'Setup selesai. Tampilan belum lengkap: ' + p.join(' · ') : 'Setup selesai.';
+  return 'Setup selesai.' + (notes.length ? ' Catatan: ' + notes.join(' ') : '') + (p.length ? ' Tampilan belum lengkap: ' + p.join(' · ') : '');
+}
+
+/**
+ * Upgrade ke 2.6, aman dijalankan berulang: baris Form yang tidak dipakai lagi (pilih mesin) dimatikan; pilihan di
+ * OPTION_RETIRE_ONCE (Preventive) dimatikan SEKALI (admin boleh menyalakannya lagi); Pending lama keluar dari antrean
+ * review (fungsi Cek dihapus). Data pekerjaan lama tidak diubah.
+ * @return {string[]} catatan untuk admin (mis. sheet Mesin lama masih berisi data)
+ */
+function migrate26_(ss) {
+  var notes = [];
+  var off = function (name, pred) {
+    var sh = sheet_(name), vals = sh.getDataRange().getValues(), h = vals[0].map(function (x) { return String(x).trim(); });
+    var ca = h.indexOf('Aktif');
+    if (ca < 0) return;
+    for (var i = 1; i < vals.length; i++) {
+      if (isActiveRow_(vals[i][ca]) && String(vals[i][0]).trim() && pred(vals[i], h)) sh.getRange(i + 1, ca + 1).setValue(APP.NO);
+    }
+  };
+  off(APP.SHEETS.FORM, function (row, h) {
+    return APP.FORM_RETIRE.indexOf(String(row[h.indexOf('Form')]).trim() + '.' + String(row[h.indexOf('Field')]).trim()) !== -1;
+  });
+  var props = PropertiesService.getDocumentProperties();
+  if (!props.getProperty('MTTR_2_6_OPTIONS')) {
+    off(APP.SHEETS.OPTIONS, function (row, h) {
+      return (APP.OPTION_RETIRE_ONCE[String(row[h.indexOf('Jenis')]).trim()] || []).indexOf(String(row[h.indexOf('Nilai')]).trim()) !== -1;
+    });
+    props.setProperty('MTTR_2_6_OPTIONS', new Date().toISOString());
+  }
+  var msh = sheet_(APP.SHEETS.MAINT), mh = headers_(msh), cr = mh.indexOf('Status review') + 1;
+  if (cr > 0) {
+    readTable_(APP.SHEETS.MAINT).forEach(function (r) {
+      if (r['Status'] === APP.STATUS.PENDING && r['Status review'] === APP.REVIEW.NEEDED) msh.getRange(r._row, cr).setValue('');
+    });
+  }
+  var mesin = ss.getSheetByName(APP.SHEETS.MESIN);
+  if (mesin && mesin.getLastRow() > 1) {
+    notes.push('Sheet Mesin (' + (mesin.getLastRow() - 1) + ' baris) tidak dipakai lagi: sejak 2.6 satu baris Lines = satu unit = satu QR. ' +
+      'Jika sebuah mesin perlu dicatat sendiri, tambahkan barisnya di Lines (mis. "Line Pack 1 - EOL Test") lalu cetak QR-nya.');
+  }
+  return notes;
 }
 
 /**
