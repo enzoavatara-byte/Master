@@ -317,6 +317,47 @@ function apiHistory(f) {
   };
 }
 
+/**
+ * Download Riwayat (2.6): kolom = tab Laporan (sheet Format Laporan), pekerjaan yang DIMULAI di rentang tanggal + filter Riwayat.
+ * Teknisi: hanya pekerjaan yang ia ikuti; Admin: scope "all" = semua. Cancelled hanya jika dipilih di filter status.
+ * Tanggal dikirim sebagai {d: ISO} supaya klien menulis sel tanggal Excel asli. Maks APP.EXPORT_LIMIT baris (paling awal).
+ * @param {{from:string, to:string, scope?:string, status?:string, tipe?:string, factory?, baterai?, proses?, line?, q?}} f
+ */
+function apiExport(f) {
+  var user = requireUser_();
+  f = f || {};
+  var all = f.scope === 'all' && isAdmin_(user);
+  var c = ctx_(), rg = statsRange_(f), seen = {}, rows = [];
+  var add = function (r) {
+    var id = String(r['Maintenance ID']);
+    if (seen[id] || !(r['Mulai'] instanceof Date) || r['Mulai'] < rg.from || r['Mulai'] >= rg.to) return;
+    if (!all && !isInvolved_(r, user.email)) return;
+    if (f.status ? r['Status'] !== f.status : r['Status'] === APP.STATUS.CANCELLED) return;
+    if (f.tipe && String(r['Tipe'] || '') !== f.tipe) return;
+    if (!matchFilter_(c.md, r, f, c.names)) return;
+    seen[id] = true;
+    rows.push(r);
+  };
+  readTable_(APP.SHEETS.MAINT).forEach(add);
+  for (var y = yearOf_(rg.from); y <= yearOf_(new Date(rg.to.getTime() - 1)); y++) {
+    if (findSheet_(archiveName_(y))) readTable_(archiveName_(y)).forEach(add);
+  }
+  rows.sort(function (a, b) { return (a['Mulai'] - b['Mulai']) || String(a['Maintenance ID']).localeCompare(String(b['Maintenance ID'])); });
+  var total = rows.length;
+  rows = rows.slice(0, APP.EXPORT_LIMIT);
+  var usage = statsUsage_(rows, rg), cols = c.md.report;
+  var cell = function (v) { return v instanceof Date ? { d: v.toISOString() } : (v == null ? '' : v); };
+  return {
+    serverNowIso: c.now.toISOString(), from: rg.fromKey, to: rg.toKey, total: total, truncated: total > rows.length, limit: APP.EXPORT_LIMIT,
+    title: String(getConfig_('LAPORAN_JUDUL') || ''), appName: appName_(),
+    columns: cols.map(function (k) { return { name: k.kolom, source: k.sumber }; }),
+    rows: rows.map(function (r, i) {
+      var used = usage[String(r['Maintenance ID'])] || [];
+      return cols.map(function (k) { return cell(laporanValue_(k.sumber, r, i, used, c.md, c.names)); });
+    })
+  };
+}
+
 // ---------- Review ----------
 
 function apiListReview(filter) {

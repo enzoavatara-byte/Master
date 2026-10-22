@@ -281,7 +281,9 @@ var APP = {
   TRIGGER_MINUTES: 15,
   /** Jam (WIB) pembangunan ulang penuh Laporan & Rekap tiap malam. Sehari-hari keduanya diperbarui langsung tiap aksi. */
   REKAP_HOUR: 1,
-  HISTORY_LIMIT: 500
+  HISTORY_LIMIT: 500,
+  /** Download Riwayat (.xlsx / CSV): batas baris per file. */
+  EXPORT_LIMIT: 5000
 };
 
 /** Membaca nilai dari sheet Config, fallback ke default. */

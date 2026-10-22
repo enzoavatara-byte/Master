@@ -1994,4 +1994,100 @@ test('2.6 KPI tab + tutup bulan: angka = Rekap, Dashboard, tutup → terkunci wa
   target('E22H', '');
 });
 
+test('2.6 Statistik: sama dengan KPI (MTTR / downtime / MTBF), Pareto %, lihat per teknisi (semua PIC) / sparepart / bulan, tap batang → daftar, batas', () => {
+  const now = new FakeDate(), ymd = (d) => ctx.ymdOf_(d);
+  const y = ctx.yearOf_(now), M = ctx.monthOf_(now), py = M === 1 ? y - 1 : y, pm = M === 1 ? 12 : M - 1;
+  const pk = ctx.ymKey_(py, pm), last = new Date(Date.UTC(py, pm, 0)).getUTCDate();
+  const month = { from: pk + '-01', to: pk + '-' + String(last).padStart(2, '0') };
+  const kpi = ctx.computeKpi_(py, pm, ctx.rekapRows_(py), ctx.masterData_(), ctx.kpiSettings_(), now);
+  as('budi@gmail.com', () => {
+    const st = ctx.apiStats({ ...month, by: 'project', measure: 'mtbf' });
+    assert.ok(st.groups.length);
+    st.groups.forEach(g => {
+      const k = kpi.find(x => x.level === 'Project' && x.kunci === g.key);
+      jeq([g.n, g.mttr, g.downtime, g.jamOperasi, g.mtbf], [k.kerusakan, k.mttr, k.downtime, k.jamOperasi, k.mtbf], 'project ' + g.key + ' = KPI');
+    });
+    const plant = kpi.find(x => x.level === 'Plant');
+    jeq([st.total.n, st.total.mttr, st.total.downtime, st.total.jamOperasi, st.total.mtbf], [plant.kerusakan, plant.mttr, plant.downtime, plant.jamOperasi, plant.mtbf], 'total = Plant');
+    for (let i = 1; i < st.groups.length; i++) assert.ok(st.groups[i - 1].mtbf <= st.groups[i].mtbf, 'MTBF: terburuk dulu');
+    const ln = ctx.apiStats({ ...month, by: 'line', measure: 'mtbf' }).groups[0];
+    const kl = kpi.find(x => x.level === 'Line' && x.kunci === ln.key);
+    jeq([ln.n, ln.mtbf, ln.jamOperasi], [kl.kerusakan, kl.mtbf, kl.jamOperasi], 'line = KPI');
+
+    const from = ymd(new FakeDate(now.getTime() - 700 * 86400000)), to = ymd(now);
+    const fr = ctx.apiStats({ from, to, by: 'line', measure: 'frek' });
+    assert.strictEqual(fr.pareto, true);
+    assert.strictEqual(fr.groups.reduce((a, g) => a + g.n, 0) + 0, fr.more ? fr.groups.reduce((a, g) => a + g.n, 0) : fr.total.n, 'jumlah per line = total');
+    assert.strictEqual(fr.groups[fr.groups.length - 1].cum, fr.more ? fr.groups[fr.groups.length - 1].cum : 100, 'Pareto berakhir 100%');
+    for (let i = 1; i < fr.groups.length; i++) assert.ok(fr.groups[i - 1].value >= fr.groups[i].value && fr.groups[i - 1].cum <= fr.groups[i].cum);
+    assert.strictEqual(ctx.apiStats({ from, to, by: 'line', measure: 'mttr' }).pareto, false, 'rata-rata: tanpa Pareto');
+    // teknisi: pekerjaan bersama dihitung untuk setiap PIC (PIC tambahan 2.6)
+    const tk = ctx.apiStats({ from, to, by: 'teknisi', measure: 'frek' });
+    assert.ok(tk.groups.reduce((a, g) => a + g.n, 0) > tk.total.n, 'satu pekerjaan, beberapa teknisi');
+    assert.ok(tk.groups.find(g => g.key === 'tono@gmail.com' && g.label === 'Tono'), 'PIC tambahan (TPM: Li + Tono)');
+    // sparepart: nilai = jumlah dipakai
+    const sp = ctx.apiStats({ from, to, by: 'sparepart', measure: 'mtbf' });
+    assert.strictEqual(sp.measure, 'frek', 'sparepart: hanya jumlah');
+    const fuse = sp.groups.find(g => g.key === 'Fuse 10A');
+    assert.ok(fuse && fuse.value === fuse.qty && fuse.qty >= fuse.n);
+    // per bulan: kronologis, bulan kosong tetap ada
+    const bl = ctx.apiStats({ from, to, by: 'bulan', measure: 'frek' });
+    assert.strictEqual(bl.groups[0].key, from.slice(0, 7));
+    assert.strictEqual(bl.groups[bl.groups.length - 1].key, to.slice(0, 7));
+    for (let i = 1; i < bl.groups.length; i++) assert.ok(bl.groups[i].key > bl.groups[i - 1].key);
+    assert.strictEqual(bl.groups.reduce((a, g) => a + g.n, 0), bl.total.n);
+    // tap batang → daftar pekerjaan
+    const g0 = fr.groups[0], it = ctx.apiStatsItems({ from, to, by: 'line' }, g0.key);
+    assert.strictEqual(it.total, g0.n);
+    assert.ok(it.items.every(x => x.line === g0.key));
+    const fusesJobs = ctx.apiStatsItems({ from, to, by: 'sparepart' }, 'Fuse 10A');
+    assert.strictEqual(fusesJobs.total, fuse.n);
+    // filter Dashboard ikut
+    const f1 = ctx.apiStatsItems({ from, to, by: 'project', factory: 'F1' }, 'VF7');
+    assert.ok(f1.items.every(x => x.factory === 'F1'));
+    // batas & salah isi
+    throwsMsg(() => ctx.apiStats({ from, to, by: 'hari' }), /maksimal 3 bulan/);
+    throwsMsg(() => ctx.apiStats({ from, to, by: 'teknisi', measure: 'mtbf' }), /MTBF hanya bisa dilihat per line, proses, atau project/);
+    throwsMsg(() => ctx.apiStats({ from: to, to: from }), /sesudah tanggal/);
+    throwsMsg(() => ctx.apiStats({ from: '2026-02-30', to }), /Tanggal tidak valid: 2026-02-30/);
+    throwsMsg(() => ctx.apiStats({ from: '2020-01-01', to }), /maksimal 2 tahun/);
+    const hr = ctx.apiStats({ ...month, by: 'hari', measure: 'downtime' });
+    assert.strictEqual(hr.groups.length, last, 'satu batang per hari');
+  });
+});
+
+test('2.6 Download Riwayat: kolom tab Laporan, teknisi hanya pekerjaannya, admin semua, Cancelled hanya jika dipilih, tanggal asli, batas baris', () => {
+  const now = new FakeDate(), from = ctx.ymdOf_(new FakeDate(now.getTime() - 700 * 86400000)), to = ctx.ymdOf_(now);
+  const cols = ctx.masterData_().report.map(c => c.kolom);
+  const mine = as('budi@gmail.com', () => ctx.apiExport({ from, to }));
+  jeq(mine.columns.map(c => c.name), cols, 'kolom = Format Laporan');
+  const idCol = mine.columns.findIndex(c => c.source === 'Maintenance ID');
+  const maint = ctx.readTable_('Maintenance');
+  const ids = (res) => res.rows.map(r => idCol >= 0 ? r[idCol] : null);
+  assert.ok(mine.total > 0);
+  if (idCol >= 0) assert.ok(ids(mine).every(id => ctx.isInvolved_(maint.find(r => r['Maintenance ID'] === id), 'budi@gmail.com')), 'teknisi: hanya yang ia ikuti');
+  const notAll = as('budi@gmail.com', () => ctx.apiExport({ from, to, scope: 'all' }));
+  assert.strictEqual(notAll.total, mine.total, 'teknisi tidak bisa scope all');
+  const all = as('owner@gmail.com', () => ctx.apiExport({ from, to, scope: 'all' }));
+  assert.ok(all.total > mine.total);
+  const nonCancel = maint.concat(ss.getSheetByName('Arsip 2026') ? ctx.readTable_('Arsip 2026') : []).filter(r => r.Status !== 'Cancelled' && r.Mulai >= ctx.statsRange_({ from, to }).from);
+  assert.strictEqual(all.total, new Set(nonCancel.map(r => r['Maintenance ID'])).size, 'semua kecuali Cancelled');
+  const canc = as('owner@gmail.com', () => ctx.apiExport({ from, to, scope: 'all', status: 'Cancelled' }));
+  assert.ok(canc.total > 0 && canc.total === maint.filter(r => r.Status === 'Cancelled').length, 'Cancelled jika dipilih');
+  const tg = all.columns.findIndex(c => c.source === 'Tanggal');
+  assert.ok(tg >= 0 && all.rows.every(r => r[tg] && typeof r[tg].d === 'string'), 'tanggal dikirim sebagai tanggal (bukan teks)');
+  assert.ok(all.rows.every(r => r.every(v => typeof v !== 'object' || v === null || typeof v.d === 'string')));
+  const lim = ctx.APP.EXPORT_LIMIT;
+  ctx.APP.EXPORT_LIMIT = 3;
+  try {
+    const cut = as('owner@gmail.com', () => ctx.apiExport({ from, to, scope: 'all' }));
+    assert.strictEqual(cut.rows.length, 3);
+    assert.strictEqual(cut.truncated, true);
+    assert.strictEqual(cut.total, all.total);
+  } finally { ctx.APP.EXPORT_LIMIT = lim; }
+  const day = as('owner@gmail.com', () => ctx.apiExport({ from: to, to, scope: 'all' }));
+  assert.ok(day.rows.length <= all.rows.length);
+  throwsMsg(() => as('owner@gmail.com', () => ctx.apiExport({})), /Pilih periode/);
+});
+
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

@@ -2,7 +2,7 @@
   :root {
     --bg: #e9eef6; --card: #ffffff; --soft: #f4f6fa; --text: #2b3a4d; --muted: #8391a3; --line: #e3e8ef;
     --navy: #37506d; --navy-2: #45617f; --navy-3: #52708f; --navy-text: #ffffff; --navy-muted: #b6c4d4;
-    --accent: #f26b5b; --accent-soft: #fde6e2; --bar: #3e6b99; --track: #e4e9f1;
+    --accent: #f26b5b; --accent-soft: #fde6e2; --bar: #3e6b99; --track: #e4e9f1; --viz: #2a78d6; --viz-rest: #a9b4c2;
     --ok: #1f8a5b; --ok-soft: #e1f3ea; --warn: #b7791f; --warn-soft: #fff3db; --danger: #d64533; --danger-soft: #fde8e5;
     --shadow: 0 10px 30px rgba(55, 80, 109, .12);
     --radius: 22px;
@@ -11,7 +11,7 @@
     :root:not([data-theme="light"]) {
       --bg: #141b24; --card: #1d2733; --soft: #243140; --text: #e6ecf3; --muted: #93a3b6; --line: #2c3a4a;
       --navy: #22344a; --navy-2: #2c425c; --navy-3: #36506d; --navy-muted: #9fb2c7;
-      --accent: #ff7e6e; --accent-soft: #3d2320; --bar: #6b9bd0; --track: #2c3a4a;
+      --accent: #ff7e6e; --accent-soft: #3d2320; --bar: #6b9bd0; --track: #2c3a4a; --viz: #3987e5; --viz-rest: #56667a;
       --ok: #5fd39c; --ok-soft: #173326; --warn: #f2c05c; --warn-soft: #3a2e12; --danger: #ff8a7a; --danger-soft: #3d1f1b;
       --shadow: 0 10px 30px rgba(0, 0, 0, .35);
     }
@@ -165,7 +165,7 @@
 
   /* ---------- forms ---------- */
   label.lbl { display: block; font-weight: 800; font-size: 13px; margin-bottom: 8px; }
-  select, input[type=text], input[type=number], input[type=date], textarea {
+  select, input[type=text], input[type=number], input[type=date], input[type=month], textarea {
     width: 100%; border: 2px solid var(--line); border-radius: 14px; padding: 13px 14px; background: var(--card); font-size: 16px; }
   textarea { min-height: 84px; resize: vertical; }
   select:focus, input:focus, textarea:focus { outline: none; border-color: var(--accent); }
@@ -317,6 +317,16 @@
   .rank-row { padding: 8px 0; }
   .htrack { height: 8px; border-radius: 4px; background: var(--track); margin: 5px 0 3px; overflow: hidden; }
   .hfill { height: 100%; border-radius: 4px; background: var(--bar); }
+  /* Statistik (2.6): satu hue (biru) + abu-abu untuk penegasan Pareto; nilai selalu tertulis sebagai teks di samping batang */
+  .hfill.vital, .cfill.viz { background: var(--viz); }
+  .hfill.rest { background: var(--viz-rest); }
+  .stat-row { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 8px 0; color: inherit; font: inherit; cursor: pointer; border-radius: 8px; }
+  .stat-row .htrack { height: 10px; border-radius: 0 5px 5px 0; }
+  .stat-row .hfill { border-radius: 0 5px 5px 0; }
+  .stat-row:hover .hfill, .stat-row:focus-visible .hfill, .col:hover .cfill, .col:focus-visible .cfill { filter: brightness(1.15); }
+  .stat-row:focus-visible, .col:focus-visible { outline: 2px solid var(--viz); outline-offset: 2px; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; }
+  .swatch.vital { background: var(--viz); }
   table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; }
   table.tbl th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); }
   table.tbl td { padding: 9px 8px 9px 0; border-bottom: 1px solid var(--line); }

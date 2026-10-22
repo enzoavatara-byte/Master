@@ -361,3 +361,189 @@ function menuTutupBulan() {
   ui.alert(res.label + ' ditutup' + (res.reclosed ? ' ulang' : '') + '.\n\nPlant: ' + kpiBrief_(res.plant) + '\nTab: ' + res.sheet +
     (res.reviews ? '\n\nCatatan: ' + res.reviews + ' pekerjaan bulan itu masih menunggu review. Setelah direview, tutup ulang bulan ini.' : ''));
 }
+
+// ---------- Statistik (Dashboard → Statistik) ----------
+/*
+ * Dasar sama dengan KPI: kerusakan yang masuk MTTR dan final di rentang tanggal (WIB), plus filter Dashboard.
+ * Jadi MTTR / downtime / MTBF satu project untuk satu bulan penuh = angka tab KPI. Pekerjaan yang masih berjalan tidak ikut.
+ */
+var STATS_BY_ = ['line', 'proses', 'project', 'teknisi', 'jenis', 'discipline', 'masalah', 'sparepart', 'hari', 'bulan'];
+var STATS_MEASURES_ = ['frek', 'mttr', 'downtime', 'mtbf'];
+var STATS_MTBF_BY_ = ['line', 'proses', 'project'];   // MTBF butuh jam operasi = jumlah line
+var STATS_TOP_ = 30, STATS_DAYS_MAX_ = 93, STATS_ITEMS_MAX_ = 100;
+
+function ymdOf_(d) { return Utilities.formatDate(d, APP.TZ, 'yyyy-MM-dd'); }
+
+/** Rentang dari klien: 'yyyy-mm-dd' s/d 'yyyy-mm-dd' (inklusif, WIB). */
+function statsRange_(f) {
+  var re = /^(\d{4})-(\d{2})-(\d{2})$/, a = re.exec(String(f.from || '')), b = re.exec(String(f.to || ''));
+  if (!a || !b) throw new Error('Pilih periode (tanggal dari & sampai).');
+  var day = function (m, s) {
+    var d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) - 7 * 3600000);
+    if (ymdOf_(d) !== s) throw new Error('Tanggal tidak valid: ' + s);
+    return d;
+  };
+  var from = day(a, f.from), to = new Date(day(b, f.to).getTime() + 86400000);
+  if (to <= from) throw new Error('Tanggal "sampai" harus sama dengan atau sesudah tanggal "dari".');
+  if (to - from > 731 * 86400000) throw new Error('Rentang maksimal 2 tahun.');
+  return { from: from, to: to, fromKey: f.from, toKey: f.to };
+}
+
+/** Jumlah hari operasi dalam rentang (s/d hari ini). */
+function kpiDaysRange_(rg, s, now) {
+  var today = ymdOf_(now), n = 0;
+  for (var t = rg.from.getTime(); t < rg.to.getTime(); t += 86400000) {
+    var key = ymdOf_(new Date(t));
+    if (key > today) break;
+    var p = key.split('-');
+    if ((s.mulai && key < s.mulai) || s.libur[key] || !s.days[new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]))).getUTCDay()]) continue;
+    n++;
+  }
+  return n;
+}
+
+/** Kerusakan (definisi KPI) final di rentang yang lolos filter. Maintenance + Arsip tahun yang tercakup. */
+function statsRows_(md, rg, f, names, s) {
+  var seen = {}, out = [];
+  var add = function (r) {
+    var id = String(r['Maintenance ID']), st = r['Status'];
+    if (seen[id] || r['Masuk MTTR'] !== APP.MTTR.YES || (st !== APP.STATUS.COMPLETED && st !== APP.STATUS.ABANDONED)) return;
+    var d = finalDate_(r);
+    if (!d || d < rg.from || d >= rg.to || (s.mulai && ymdOf_(d) < s.mulai) || !matchFilter_(md, r, f, names)) return;
+    seen[id] = true;
+    out.push(r);
+  };
+  readTable_(APP.SHEETS.MAINT).forEach(add);
+  for (var y = yearOf_(rg.from); y <= yearOf_(new Date(rg.to.getTime() - 1)); y++) {
+    if (findSheet_(archiveName_(y))) readTable_(archiveName_(y)).forEach(add);
+  }
+  return out;
+}
+
+/** Pemakaian sparepart per Maintenance ID (hanya untuk "Lihat per sparepart"). */
+function statsUsage_(rows, rg) {
+  var ids = {}, out = {};
+  rows.forEach(function (r) { ids[String(r['Maintenance ID'])] = true; });
+  var add = function (u) { var id = String(u['Maintenance ID']); if (ids[id]) (out[id] = out[id] || []).push(u); };
+  if (findSheet_(APP.SHEETS.PEMAKAIAN)) readTable_(APP.SHEETS.PEMAKAIAN).forEach(add);
+  for (var y = yearOf_(rg.from); y <= yearOf_(new Date(rg.to.getTime() - 1)); y++) {
+    if (findSheet_(archiveUsageName_(y))) readTable_(archiveUsageName_(y)).forEach(add);
+  }
+  return out;
+}
+
+/** Kelompok sebuah pekerjaan untuk "Lihat per" (teknisi & sparepart bisa lebih dari satu). @return {Array<{key, label, qty?}>} */
+function statsKeys_(by, r, md, names, usage) {
+  var base = function (v) { v = String(v || '').trim(); return v.indexOf(APP.OTHER_PREFIX) === 0 ? APP.OTHER : (v || '(kosong)'); };
+  var one = function (k, label) { return [{ key: k, label: label || k }]; };
+  var d = finalDate_(r);
+  switch (by) {
+    case 'line': var l = lineOf_(md, r['Line']), id = String(r['Line'] || ''); return one(id, id + (l && l.name ? ' · ' + l.name : ''));
+    case 'proses': return one(prosesOfRecord_(md, r) || '(tanpa proses)');
+    case 'project': return one(String(r['Baterai'] || '') || '(tanpa project)');
+    case 'teknisi':
+      return uniq_(String(r['Teknisi terlibat'] || r['Teknisi terakhir'] || '').split(',').map(function (e) { return e.trim().toLowerCase(); }).filter(String))
+        .map(function (e) { return { key: e, label: names[e] || e }; });
+    case 'jenis': return one(base(r['Jenis kerusakan']));
+    case 'discipline': return one(disciplineOf_(md, r['Jenis kerusakan']));
+    case 'masalah': return one(base(r['Masalah']));
+    case 'sparepart':
+      return (usage[String(r['Maintenance ID'])] || []).map(function (u) {
+        var k = String(u['Nama Sparepart'] || '') + (u['Model'] ? ' ' + u['Model'] : '');
+        return { key: k, label: k, qty: Number(u['Jumlah'] || 0) };
+      });
+    case 'hari': return one(ymdOf_(d));
+    case 'bulan': return one(ymOf_(d), ymLabel_(ymOf_(d)));
+  }
+  return [];
+}
+
+/** Line aktif yang lolos filter Dashboard (pool jam operasi MTBF). */
+function statsLinePool_(md, f) {
+  return Object.keys(md.lines).filter(function (k) {
+    var l = md.lines[k];
+    return l.active && (!f.factory || l.factory === normLine_(f.factory)) && (!f.line || k === normLine_(f.line)) &&
+      (!f.proses || l.proses === String(f.proses)) && (!f.baterai || l.batteries.indexOf(String(f.baterai)) !== -1);
+  });
+}
+
+/**
+ * @param {{from:string, to:string, by:string, measure:string, factory?, baterai?, proses?, line?, q?}} f
+ * @return {{groups:Object[], total:Object, more:number, pareto:boolean, ...}}
+ */
+function apiStats(f) {
+  requireUser_();
+  f = f || {};
+  var by = STATS_BY_.indexOf(f.by) !== -1 ? f.by : 'line', measure = STATS_MEASURES_.indexOf(f.measure) !== -1 ? f.measure : 'frek';
+  if (by === 'sparepart') measure = 'frek';
+  if (measure === 'mtbf' && STATS_MTBF_BY_.indexOf(by) === -1) throw new Error('MTBF hanya bisa dilihat per line, proses, atau project.');
+  var c = ctx_(), md = c.md, rg = statsRange_(f), s = kpiSettings_();
+  var time = by === 'hari' || by === 'bulan';
+  if (by === 'hari' && rg.to - rg.from > STATS_DAYS_MAX_ * 86400000) throw new Error('Lihat per hari maksimal 3 bulan. Pilih "Lihat per bulan" untuk rentang yang lebih panjang.');
+  var rows = statsRows_(md, rg, f, c.names, s), usage = by === 'sparepart' ? statsUsage_(rows, rg) : {};
+  var perLine = kpiDaysRange_(rg, s, c.now) * s.hours, pool = statsLinePool_(md, f);
+  var down = function (r) {
+    return r['Stop line'] === APP.YES && r['Selesai'] instanceof Date && r['Mulai'] instanceof Date
+      ? Math.max(0, r['Selesai'].getTime() - r['Mulai'].getTime()) / 3600000 : 0;
+  };
+  var groups = {}, total = { n: 0, act: 0, down: 0, lines: {} };
+  rows.forEach(function (r) {
+    var act = Number(r['Total aktif (menit)'] || 0), dt = down(r), line = normLine_(r['Line']);
+    total.n++; total.act += act; total.down += dt; if (line) total.lines[line] = true;
+    statsKeys_(by, r, md, c.names, usage).forEach(function (k) {
+      var g = groups[k.key] = groups[k.key] || { key: k.key, label: k.label, n: 0, act: 0, down: 0, qty: 0, lines: {} };
+      g.n++; g.act += act; g.down += dt; g.qty += k.qty || 0;
+      if (line) g.lines[line] = true;
+    });
+  });
+  var count = function (list, g) { var set = {}; list.concat(Object.keys(g.lines)).forEach(function (k) { set[k] = true; }); return Object.keys(set).length; };
+  var poolOf = function (g) {
+    if (by === 'line') return [g.key];
+    if (by === 'proses') return pool.filter(function (k) { return md.lines[k].proses === g.key; });
+    return pool.filter(function (k) { return md.lines[k].batteries.indexOf(g.key) !== -1; });
+  };
+  var shape = function (g, lineN) {
+    var jamOp = round2_(perLine * lineN);
+    var o = { key: g.key, label: g.label, n: g.n, mttr: g.n ? round2_(g.act / g.n) : null, downtime: round2_(g.down), qty: g.qty };
+    if (lineN != null) { o.jamOperasi = jamOp; o.mtbf = g.n && jamOp > 0 ? round2_(Math.max(0, jamOp - g.down) / g.n) : null; }
+    o.value = measure === 'frek' ? (by === 'sparepart' ? g.qty : g.n) : (measure === 'mttr' ? o.mttr : (measure === 'downtime' ? o.downtime : o.mtbf));
+    return o;
+  };
+  var mtbfBy = STATS_MTBF_BY_.indexOf(by) !== -1;
+  var list = Object.keys(groups).map(function (k) { return shape(groups[k], mtbfBy ? count(poolOf(groups[k]), groups[k]) : null); });
+  if (time) {   // kronologis, bulan / hari tanpa kerusakan tetap tampil (0)
+    var keys = [];
+    if (by === 'hari') for (var t = rg.from.getTime(); t < rg.to.getTime(); t += 86400000) keys.push(ymdOf_(new Date(t)));
+    else for (var m = ymOf_(rg.from); m <= ymOf_(new Date(rg.to.getTime() - 1)); m = ymOf_(new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5)), 15)))) keys.push(m);
+    var byKey = {};
+    list.forEach(function (g) { byKey[g.key] = g; });
+    list = keys.map(function (k) { return byKey[k] || shape({ key: k, label: by === 'bulan' ? ymLabel_(k) : k, n: 0, act: 0, down: 0, qty: 0, lines: {} }, null); });
+  } else {
+    list = list.filter(function (g) { return g.value != null; });
+    list.sort(measure === 'mtbf' ? function (a, b) { return (a.value - b.value) || (b.n - a.n); }   // MTBF: terburuk dulu
+      : function (a, b) { return (b.value - a.value) || (b.n - a.n) || String(a.label).localeCompare(String(b.label)); });
+  }
+  var pareto = !time && (measure === 'frek' || measure === 'downtime');
+  if (pareto) {
+    var sum = list.reduce(function (a, g) { return a + g.value; }, 0), run = 0;
+    list.forEach(function (g) { run += g.value; g.cum = sum ? Math.round(run / sum * 1000) / 10 : 0; });
+  }
+  var more = time ? 0 : Math.max(0, list.length - STATS_TOP_);
+  return {
+    serverNowIso: c.now.toISOString(), from: rg.fromKey, to: rg.toKey, by: by, measure: measure, pareto: pareto,
+    groups: time ? list : list.slice(0, STATS_TOP_), more: more,
+    total: shape(total, count(pool, total)), hours: s.hours, warn: s.warn
+  };
+}
+
+/** Daftar pekerjaan satu batang statistik (tap batang → daftar → Detail). */
+function apiStatsItems(f, key) {
+  requireUser_();
+  f = f || {};
+  var by = STATS_BY_.indexOf(f.by) !== -1 ? f.by : 'line';
+  var c = ctx_(), rg = statsRange_(f), s = kpiSettings_();
+  var rows = statsRows_(c.md, rg, f, c.names, s), usage = by === 'sparepart' ? statsUsage_(rows, rg) : {};
+  var hit = rows.filter(function (r) { return statsKeys_(by, r, c.md, c.names, usage).some(function (k) { return k.key === String(key); }); });
+  hit.sort(function (a, b) { return finalDate_(b) - finalDate_(a); });
+  return { serverNowIso: c.now.toISOString(), total: hit.length, items: hit.slice(0, STATS_ITEMS_MAX_).map(function (r) { return serialize_(r, c); }) };
+}

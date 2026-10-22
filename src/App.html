@@ -32,7 +32,9 @@
     q: { pending: '', review: '', history: '' },
     pendingFilter: 'ALL',
     history: { status: '', tipe: '', scope: 'mine', data: null },
-    dash: { periode: 30 },
+    dash: { periode: 30, mode: 'ringkasan' },
+    stat: { by: 'line', measure: 'frek', p: { kind: 'bulan' } },   // Dashboard → Statistik (2.6)
+    dl: { kind: 'bulan' },                                         // Riwayat → Download (2.6)
     sheetClose: null
   };
 
@@ -119,6 +121,49 @@
     var s = v >= 100 ? String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : (Math.round(v * 10) / 10).toFixed(1);
     return LANG === 'zh' ? s : s.replace(/[.,]/g, function (c) { return c === '.' ? ',' : '.'; });   // id: 4.416 · 1,5
   }
+  // ---------- periode (Statistik & Download): hari ini / tanggal / bulan / tahun / rentang, tanggal WIB ----------
+  var BULAN_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+  function todayKey() { var d = new Date(serverNow() + 7 * 3600000); return d.getUTCFullYear() + '-' + two(d.getUTCMonth() + 1) + '-' + two(d.getUTCDate()); }
+  /** @param {{kind:string, date?, month?, year?, from?, to?}} p @return {{from:string, to:string}} 'yyyy-mm-dd', inklusif */
+  function periodRange(p) {
+    var today = todayKey(), ok = function (v, re) { return re.test(v || '') ? v : ''; };
+    if (p.kind === 'tanggal') { var d = ok(p.date, /^\d{4}-\d\d-\d\d$/) || today; return { from: d, to: d }; }
+    if (p.kind === 'bulan') {
+      var m = ok(p.month, /^\d{4}-\d\d$/) || today.slice(0, 7);
+      return { from: m + '-01', to: m + '-' + two(new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5)), 0)).getUTCDate()) };
+    }
+    if (p.kind === 'tahun') { var y = ok(String(p.year || ''), /^\d{4}$/) || today.slice(0, 4); return { from: y + '-01-01', to: y + '-12-31' }; }
+    if (p.kind === 'rentang') {
+      var a = ok(p.from, /^\d{4}-\d\d-\d\d$/) || today, b = ok(p.to, /^\d{4}-\d\d-\d\d$/) || today;
+      return a <= b ? { from: a, to: b } : { from: b, to: a };
+    }
+    return { from: today, to: today };
+  }
+  function periodText(p) {
+    var r = periodRange(p), dm = function (k) { return k.slice(8) + '/' + k.slice(5, 7) + '/' + k.slice(0, 4); };
+    if (p.kind === 'bulan') return monthLabel(r.from.slice(0, 7), BULAN_ID[Number(r.from.slice(5, 7)) - 1] + ' ' + r.from.slice(0, 4));
+    if (p.kind === 'tahun') return r.from.slice(0, 4);
+    return r.from === r.to ? dm(r.from) : dm(r.from) + ' – ' + dm(r.to);
+  }
+  /** Pilihan periode di dalam `box`; p diubah langsung, onChange() setiap kali berubah. */
+  function bindPeriod(box, prefix, p, onChange) {
+    var draw = function () {
+      var today = todayKey(), y = Number(today.slice(0, 4)), r = periodRange(p), input = '';
+      if (p.kind === 'tanggal') input = '<input type="date" data-p="date" value="' + esc(r.from) + '" max="' + today + '">';
+      if (p.kind === 'bulan') input = '<input type="month" data-p="month" value="' + esc(r.from.slice(0, 7)) + '" max="' + today.slice(0, 7) + '" placeholder="yyyy-mm">';
+      if (p.kind === 'tahun') input = '<select data-p="year">' + [y, y - 1, y - 2].map(function (v) { return '<option' + (String(v) === r.from.slice(0, 4) ? ' selected' : '') + '>' + v + '</option>'; }).join('') + '</select>';
+      if (p.kind === 'rentang') input = '<div class="row"><input type="date" data-p="from" value="' + esc(r.from) + '" max="' + today + '"><span class="muted">–</span>' +
+        '<input type="date" data-p="to" value="' + esc(r.to) + '" max="' + today + '"></div>';
+      box.innerHTML = '<div class="scroll-x">' + chips(prefix + '-kind', [{ value: 'hari', label: 'Hari ini' }, { value: 'tanggal', label: 'Tanggal' }, { value: 'bulan', label: 'Bulan' },
+        { value: 'tahun', label: 'Tahun' }, { value: 'rentang', label: 'Rentang' }], { selected: p.kind || 'hari' }) + '</div>' + (input ? '<div style="margin-top:8px">' + input + '</div>' : '');
+      bindChips(box, function (n, v) { p.kind = v; draw(); onChange(); });
+      [].forEach.call(box.querySelectorAll('[data-p]'), function (el) {
+        el.onchange = function () { p[el.getAttribute('data-p')] = el.value; onChange(); };
+      });
+    };
+    draw();
+  }
+
   /** "2026-09" → "September 2026" / "2026年9月" */
   function monthLabel(key, idLabel) {
     var m = /^(\d{4})-(\d{2})$/.exec(key || '');
@@ -1333,12 +1378,23 @@
       filterBar('history') +
       '<div class="scroll-x">' + chips('status', statuses.map(function (s) { return { value: s, label: s || 'Semua status' }; }), { selected: h.status }) + '</div>' +
       '<div class="row" style="margin:8px 0 14px"><div class="grow">' + (tipes.length > 1 ? chips('tipe', [{ value: '', label: 'Semua tipe' }].concat(tipes), { selected: h.tipe }) : '') + '</div>' +
-      '<button class="btn ghost" id="h-csv" style="width:auto">CSV</button></div><div id="h-list"><div class="loading">Memuat…</div></div>';
+      '<button class="btn ghost" id="h-dl" style="width:auto">⬇ Download</button></div><div id="h-list"><div class="loading">Memuat…</div></div>';
     bindChips($('view-history'), function (n, val) { h[n] = val; fetchHistory(); });
     bindFilterBar($('view-history'), function (fromSearch) { if (fromSearch) fetchHistory(); else loadHistory(); });
-    $('h-csv').onclick = downloadCsv;
+    $('h-dl').onclick = openDownload;
     if ($('h-scope')) $('h-scope').onclick = function () { h.scope = h.scope === 'all' ? 'mine' : 'all'; loadHistory(); };
     fetchHistory();
+  }
+
+  /** Satu pekerjaan di daftar (Riwayat, Statistik → tap batang). Tap → Detail. */
+  function itemHtml(r, showTech) {
+    return '<button class="item" data-detail="' + esc(r.id) + '"><div class="row between"><span class="small muted">' + esc(r.id) + '</span><span>' + pill(r.status) + tipeTag(r.tipe) + '</span></div>' +
+      '<div class="t">' + lineTitle(r) + ' · ' + esc(r.battery) + '</div>' +
+      '<div class="small muted">' + esc(t('{w} · aktif {d}', { w: fmtShort(r.startIso), d: dur(r.activeMin * 60000) })) +
+      (showTech ? ' · ' + esc(r.techLastName) : '') + '</div>' +
+      (r.masalah ? '<div class="small clamp">' + esc((r.jenisKerusakan ? L(r.jenisKerusakan) + ' · ' : '') + L(r.masalah) + ' → ' + L(r.penanganan) +
+        (r.parts.length && r.part !== NO_PART && r.part !== 'Tidak ada' ? ' · ' + t('{n} part', { n: r.parts.length }) : '')) + '</div>' : '') +
+      (r.tertunda && r.status === 'Pending' ? '<div class="small clamp">' + esc(L(r.tertunda)) + '</div>' : '') + '</button>';
   }
 
   function fetchHistory() {
@@ -1351,41 +1407,117 @@
       h.data = res.items;
       $('h-list').innerHTML = '<p class="small muted" style="margin:0 4px 10px">' + t('{n} pekerjaan', { n: res.total }) + (res.truncated ? ' ' + t('(ditampilkan {n} terbaru)', { n: res.items.length }) : '') +
         (res.spreadsheetUrl ? ' · <a href="' + esc(res.spreadsheetUrl) + '" target="_blank" style="color:var(--accent)">Buka Google Sheet</a>' : '') + '</p>' +
-        (res.items.length ? res.items.map(function (r) {
-          return '<button class="item" data-detail="' + esc(r.id) + '"><div class="row between"><span class="small muted">' + esc(r.id) + '</span><span>' + pill(r.status) + tipeTag(r.tipe) + '</span></div>' +
-            '<div class="t">' + lineTitle(r) + ' · ' + esc(r.battery) + '</div>' +
-            '<div class="small muted">' + esc(t('{w} · aktif {d}', { w: fmtShort(r.startIso), d: dur(r.activeMin * 60000) })) +
-            (h.scope === 'all' ? ' · ' + esc(r.techLastName) : '') + '</div>' +
-            (r.masalah ? '<div class="small clamp">' + esc((r.jenisKerusakan ? L(r.jenisKerusakan) + ' · ' : '') + L(r.masalah) + ' → ' + L(r.penanganan) +
-              (r.parts.length && r.part !== NO_PART && r.part !== 'Tidak ada' ? ' · ' + t('{n} part', { n: r.parts.length }) : '')) + '</div>' : '') +
-            (r.tertunda && r.status === 'Pending' ? '<div class="small clamp">' + esc(L(r.tertunda)) + '</div>' : '') + '</button>';
-        }).join('') : '<div class="empty">Belum ada data.</div>');
+        (res.items.length ? res.items.map(function (r) { return itemHtml(r, h.scope === 'all'); }).join('') : '<div class="empty">Belum ada data.</div>');
       bindDetailLinks($('h-list'));
     }).catch(function (e) { $('h-list').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
   }
 
-  function downloadCsv() {
-    var data = state.history.data;
-    if (!data) return;
-    var cols = [['id', 'Maintenance ID'], ['factoryName', 'Factory'], ['proses', 'Proses'], ['line', 'Line'], ['mesin', 'Mesin'], ['battery', 'Baterai'], ['tipe', 'Tipe'],
-      ['status', 'Status'], ['techFirstName', 'Teknisi awal'], ['techLastName', 'Teknisi terakhir'], ['startText', 'Mulai'], ['finishText', 'Selesai'], ['stopLine', 'Stop line'],
-      ['activeMin', 'Total aktif (menit)'], ['pauseMin', 'Total pause (menit)'], ['pendingMin', 'Total pending (menit)'], ['jenisKerusakan', 'Jenis kerusakan'],
-      ['masalah', 'Masalah'], ['detailMasalah', 'Detail masalah'], ['penyebab', 'Penyebab'], ['detailPenyebab', 'Detail penyebab'],
-      ['penanganan', 'Penanganan'], ['detailPenanganan', 'Detail penanganan'], ['part', 'Sparepart'], ['tertunda', 'Yang tertunda'], ['tenggatText', 'Tenggat'],
-      ['cancelReason', 'Alasan cancel'], ['review', 'Status review'], ['mttr', 'Masuk MTTR'], ['catatan', 'Catatan']];
-    function cell(v) {
+  // ---------- Download Riwayat (.xlsx; CSV jika library Excel tidak bisa dimuat) ----------
+  var EXCELJS_SRC = ['https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'];
+  var EXCELJS_SRI = 'sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz';
+  var excelLoad = null;
+  /** ExcelJS dimuat hanya saat Download (±1 MB), dicoba dari dua CDN; integritas file dicek (SRI). */
+  function loadExcelJs() {
+    if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+    if (excelLoad) return excelLoad;
+    excelLoad = EXCELJS_SRC.reduce(function (p, src) {
+      return p.catch(function () {
+        return new Promise(function (ok, fail) {
+          var el = document.createElement('script');
+          el.src = src; el.integrity = EXCELJS_SRI; el.crossOrigin = 'anonymous'; el.async = true;
+          var timer = setTimeout(function () { el.remove(); fail(new Error('timeout')); }, 20000);
+          el.onload = function () { clearTimeout(timer); window.ExcelJS ? ok(window.ExcelJS) : fail(new Error('ExcelJS kosong')); };
+          el.onerror = function () { clearTimeout(timer); el.remove(); fail(new Error('gagal memuat ' + src)); };
+          document.head.appendChild(el);
+        });
+      });
+    }, Promise.reject(new Error('mulai')));
+    excelLoad.catch(function () { excelLoad = null; });   // dicoba lagi lain kali (mis. sinyal kembali)
+    return excelLoad;
+  }
+
+  function openDownload() {
+    var h = state.history;
+    var s = openSheet('<h2>' + esc(t('Download riwayat')) + '</h2><p class="small muted">' +
+      esc(t('Kolom sama dengan tab Laporan (format Excel). Filter, status & pilihan "{s}" di Riwayat ikut. Cancelled hanya jika status Cancelled dipilih.',
+        { s: h.scope === 'all' ? t('Semua teknisi') : t('Pekerjaan saya') })) + '</p>' +
+      '<label class="lbl">' + esc(t('Pekerjaan yang dimulai')) + '</label><div id="dl-period"></div>' +
+      '<div class="stack" style="margin-top:14px"><button class="btn" id="dl-xlsx">' + esc(t('Download Excel (.xlsx)')) + '</button>' +
+      '<button class="btn ghost" id="dl-csv">' + esc(t('Download CSV')) + '</button><div id="dl-out"></div></div>');
+    bindPeriod(s.querySelector('#dl-period'), 'dl', state.dl, function () {});
+    var go = function (kind, btn) {
+      var f = serverFilter('history'), rg = periodRange(state.dl);
+      f.scope = h.scope; f.status = h.status; f.tipe = h.tipe; f.from = rg.from; f.to = rg.to;
+      busy(btn, true, t('Menyiapkan file…'));
+      s.querySelector('#dl-out').innerHTML = '';
+      call('apiExport', f).then(function (res) {
+        if (!res.rows.length) { busy(btn, false); s.querySelector('#dl-out').innerHTML = '<div class="alert warn">' + esc(t('Tidak ada pekerjaan di periode ini.')) + '</div>'; return; }
+        var name = 'mttr-riwayat-' + res.from + (res.to !== res.from ? '_' + res.to : '');
+        var note = res.truncated ? t('Hanya {n} baris pertama dari {t} (batas per file). Persempit periode untuk sisanya.', { n: res.rows.length, t: res.total }) : '';
+        var done = function (msg) { busy(btn, false); s.querySelector('#dl-out').innerHTML = '<div class="alert ' + (note ? 'warn' : 'ok') + '">' + esc(msg + (note ? ' ' + note : '')) + '</div>'; };
+        if (kind === 'csv') { saveBlob(csvOf(res), name + '.csv'); done(t('✓ {n} baris diunduh (CSV).', { n: res.rows.length })); return; }
+        loadExcelJs().then(function (X) { return xlsxOf(X, res); }).then(function (blob) {
+          saveBlob(blob, name + '.xlsx');
+          done(t('✓ {n} baris diunduh (Excel).', { n: res.rows.length }));
+        }).catch(function (e) {
+          console.warn('ExcelJS: ' + e);
+          saveBlob(csvOf(res), name + '.csv');
+          done(t('Library Excel tidak bisa dimuat (internet / jaringan kantor?). File CSV yang diunduh; bisa dibuka di Excel.'));
+        });
+      }).catch(function (e) { busy(btn, false); toast(cleanErr(e), 'err'); });
+    };
+    s.querySelector('#dl-xlsx').onclick = function () { go('xlsx', this); };
+    s.querySelector('#dl-csv').onclick = function () { go('csv', this); };
+  }
+
+  function saveBlob(blob, name) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 60000);
+  }
+  /** {d: ISO} → tanggal WIB (Excel tidak punya zona waktu: jam dinding WIB ditulis apa adanya). */
+  function wib(v) { return new Date(new Date(v.d).getTime() + 7 * 3600000); }
+  function csvOf(res) {
+    var cell = function (v, src) {
+      if (v && typeof v === 'object' && v.d) { var d = wib(v); v = two(d.getUTCDate()) + '/' + two(d.getUTCMonth() + 1) + '/' + d.getUTCFullYear() + (src === 'Tanggal' ? '' : ' ' + two(d.getUTCHours()) + ':' + two(d.getUTCMinutes())); }
       v = v == null ? '' : String(v);
       if (/^[=+\-@]/.test(v)) v = "'" + v;   // cegah formula injection saat dibuka di Excel
       return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
-    }
-    var out = [cols.map(function (c) { return c[1]; }).join(',')].concat(data.map(function (r) {
-      return cols.map(function (c) { return cell(r[c[0]]); }).join(',');
+    };
+    var out = [res.columns.map(function (c) { return cell(c.name); }).join(',')].concat(res.rows.map(function (r) {
+      return r.map(function (v, i) { return cell(v, res.columns[i].source); }).join(',');
     }));
-    var blob = new Blob(['﻿' + out.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'mttr-' + new Date(serverNow()).toISOString().slice(0, 10) + '.csv';
-    document.body.appendChild(a); a.click(); a.remove();
+    return new Blob(['\ufeff' + out.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  }
+  function xlsxOf(X, res) {
+    var wb = new X.Workbook(), ws = wb.addWorksheet('Riwayat'), n = res.columns.length;
+    wb.creator = res.appName;
+    ws.addRow([res.title || res.appName]);
+    ws.mergeCells(1, 1, 1, Math.max(1, n));
+    ws.getRow(1).font = { bold: true, size: 13 };
+    var head = ws.addRow(res.columns.map(function (c) { return c.name; }));
+    head.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    head.alignment = { wrapText: true, vertical: 'middle' };
+    head.eachCell(function (c) { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F4B6E' } }; });
+    var width = res.columns.map(function (c) { return Math.min(40, Math.max(8, String(c.name).length + 2)); });
+    res.rows.forEach(function (r) {
+      var row = ws.addRow(r.map(function (v) { return v && typeof v === 'object' && v.d ? wib(v) : v; }));
+      r.forEach(function (v, i) {
+        var c = row.getCell(i + 1);
+        if (v && typeof v === 'object' && v.d) c.numFmt = res.columns[i].source === 'Tanggal' ? 'dd/mm/yyyy' : 'dd/mm/yyyy hh:mm';
+        var lines = String(v && v.d ? '00/00/0000 00:00' : v).split('\n');   // sparepart ke bawah: satu baris per part
+        width[i] = Math.min(50, Math.max(width[i], Math.max.apply(null, lines.map(function (x) { return x.length + 2; }))));
+      });
+      row.alignment = { wrapText: true, vertical: 'top' };
+    });
+    ws.columns.forEach(function (col, i) { col.width = width[i]; });
+    ws.views = [{ state: 'frozen', ySplit: 2 }];
+    ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: n } };
+    return wb.xlsx.writeBuffer().then(function (buf) {
+      return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    });
   }
 
   // ---------- REVIEW ----------
@@ -1463,14 +1595,125 @@
     var head = '<div class="hello"><div><div class="hi">MTTR, MTBF & kesehatan line</div><h1>Dashboard</h1></div><div class="row">' +
       (isAdmin() ? '<button class="btn ghost" id="d-qr" style="width:auto">QR</button>' : '') + helpBtn() + '</div></div>' +
       filterBar(null) +
-      '<div style="margin:-2px 0 14px">' + chips('periode', [{ value: '7', label: '7 hari' }, { value: '30', label: '30 hari' }, { value: '90', label: '90 hari' }, { value: 'ytd', label: 'Tahun ini' }],
-        { selected: String(state.dash.periode) }) + '</div><div id="d-body"><div class="loading">Menghitung…</div></div>';
+      '<div style="margin:-2px 0 12px">' + chips('mode', [{ value: 'ringkasan', label: 'Ringkasan' }, { value: 'statistik', label: 'Statistik' }], { selected: state.dash.mode }) + '</div>' +
+      (state.dash.mode === 'statistik' ? '<div id="d-stat-ctl"></div>'
+        : '<div style="margin:-2px 0 14px">' + chips('periode', [{ value: '7', label: '7 hari' }, { value: '30', label: '30 hari' }, { value: '90', label: '90 hari' }, { value: 'ytd', label: 'Tahun ini' }],
+          { selected: String(state.dash.periode) }) + '</div>') + '<div id="d-body"><div class="loading">Menghitung…</div></div>';
     $('view-dashboard').innerHTML = head;
     bindFilterBar($('view-dashboard'), loadDashboard);
-    bindChips($('view-dashboard'), function (n, v) { state.dash.periode = v === 'ytd' ? v : Number(v); fetchDashboard(); });
+    bindChips($('view-dashboard'), function (n, v) {
+      if (n === 'mode') { state.dash.mode = v; loadDashboard(); return; }
+      state.dash.periode = v === 'ytd' ? v : Number(v); fetchDashboard();
+    });
     if ($('d-qr')) $('d-qr').onclick = function () { setView('qr'); loadQr(); };
     bindHelp($('view-dashboard'));
-    fetchDashboard();
+    if (state.dash.mode === 'statistik') loadStats(); else fetchDashboard();
+  }
+
+  // ---------- Statistik (2.6): lihat per …, Pareto, MTTR / downtime / MTBF, sparepart; tap batang → daftar pekerjaan ----------
+  var STAT_BY = [['line', 'Line'], ['proses', 'Proses'], ['project', 'Project'], ['teknisi', 'Teknisi'], ['jenis', 'Jenis kerusakan'], ['discipline', 'Discipline'],
+    ['masalah', 'Masalah'], ['sparepart', 'Sparepart'], ['hari', 'Hari'], ['bulan', 'Bulan']];
+  var STAT_MTBF = ['line', 'proses', 'project'];
+  function loadStats() {
+    var st = state.stat;
+    if (st.by === 'sparepart') st.measure = 'frek';
+    if (st.measure === 'mtbf' && STAT_MTBF.indexOf(st.by) === -1) st.measure = 'frek';
+    var spare = st.by === 'sparepart';
+    $('d-stat-ctl').innerHTML = '<div class="card flat stack" style="margin-bottom:14px">' +
+      '<div><label class="lbl">' + esc(t('Periode (kerusakan yang selesai)')) + '</label><div id="s-period"></div></div>' +
+      '<div><label class="lbl">' + esc(t('Lihat per')) + '</label><select id="s-by">' + STAT_BY.map(function (b) {
+        return '<option value="' + b[0] + '"' + (b[0] === st.by ? ' selected' : '') + '>' + esc(t(b[1])) + '</option>';
+      }).join('') + '</select></div>' +
+      '<div><label class="lbl">' + esc(t('Ukuran')) + '</label><div class="scroll-x" id="s-measure">' + chips('s-measure', [
+        { value: 'frek', label: spare ? 'Jumlah dipakai' : 'Jumlah' }, { value: 'mttr', label: 'MTTR', disabled: spare },
+        { value: 'downtime', label: 'Downtime', disabled: spare }, { value: 'mtbf', label: 'MTBF', disabled: STAT_MTBF.indexOf(st.by) === -1 }], { selected: st.measure }) + '</div></div></div>';
+    bindPeriod($('s-period'), 'sp', st.p, fetchStats);
+    $('s-by').onchange = function () { st.by = this.value; loadStats(); };
+    bindChips($('s-measure'), function (n, v) { st.measure = v; fetchStats(); });
+    fetchStats();
+  }
+
+  function statFilter() {
+    var st = state.stat, f = serverFilter(), r = periodRange(st.p);
+    f.from = r.from; f.to = r.to; f.by = st.by; f.measure = st.measure;
+    return f;
+  }
+  function fetchStats() {
+    var body = $('d-body');
+    if (body.firstChild && !body.querySelector('.loading')) body.style.opacity = '.45';   // muat ulang: tampilan lama tetap, tanpa lompat
+    call('apiStats', statFilter()).then(renderStats)
+      .catch(function (e) { body.style.opacity = ''; body.innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
+  }
+
+  function statValue(res, v) {
+    if (v == null) return '–';
+    if (res.measure === 'mttr') return mnt(v) + ' ' + t('mnt');
+    if (res.measure === 'downtime' || res.measure === 'mtbf') return jam(v) + ' ' + t('jam');
+    return String(v) + (res.by === 'sparepart' ? '' : '×');
+  }
+  function renderStats(res) {
+    syncClock(res.serverNowIso);
+    var body = $('d-body'), st = state.stat;
+    body.style.opacity = '';
+    var byLabel = t((STAT_BY.filter(function (b) { return b[0] === res.by; })[0] || ['', res.by])[1]);
+    var mLabel = { frek: res.by === 'sparepart' ? t('Jumlah dipakai') : t('Jumlah kerusakan'), mttr: 'MTTR', downtime: t('Downtime'), mtbf: 'MTBF' }[res.measure];
+    var k = res.total, time = res.by === 'hari' || res.by === 'bulan';
+    var html = '<div class="card"><div class="caps">' + esc(t('{m} per {b}', { m: mLabel, b: byLabel.toLowerCase() })) + '</div>' +
+      '<p class="small" style="margin:6px 0 0">' + esc(periodText(st.p)) + ' · ' + esc(t('{n} kerusakan · MTTR {m} mnt · downtime {d} jam', { n: k.n, m: mnt(k.mttr), d: jam(k.downtime) })) +
+      (k.mtbf != null ? ' · MTBF ' + esc(jam(k.mtbf)) + ' ' + esc(t('jam')) : '') + '</p>';
+    var note = res.pareto ? t('Biru = kelompok yang menyumbang ±80% total (Pareto). Mulai perbaikan dari atas.')
+      : { mttr: t('Rata-rata waktu aktif perbaikan per kerusakan.'), mtbf: t('Rata-rata jam operasi antar kerusakan. Paling atas = MTBF terendah (paling sering rusak).') }[res.measure] || '';
+    if (res.by === 'sparepart') note = t('Jumlah dipakai, dari sheet Pemakaian Sparepart. Biru = ±80% pemakaian.');
+    if (note && !time) html += '<p class="tiny muted" style="margin:4px 0 0">' + (res.pareto ? '<span class="swatch vital"></span> ' : '') + esc(note) + '</p>';
+    var vals = res.groups.map(function (g) { return g.value || 0; }), max = Math.max.apply(null, vals.concat([0])) || 1;
+    if (!res.groups.length || (time && !k.n)) {
+      html += '<div class="empty small">' + esc(t('Belum ada kerusakan selesai di periode ini.')) + '</div>';
+    } else if (time) {
+      var n = res.groups.length, lastI = n - 1, maxI = vals.indexOf(Math.max.apply(null, vals)), step = Math.ceil(n / 8);
+      html += '<div class="scroll-x"><div class="cols" id="s-cols" style="grid-template-columns:repeat(' + n + ',minmax(10px,1fr));min-width:' + Math.max(0, n * 13) + 'px">' +
+        res.groups.map(function (g, i) {
+          var lbl = res.by === 'hari' ? g.key.slice(8) : (LANG === 'zh' ? Number(g.key.slice(5)) + '月' : BULAN_ID[Number(g.key.slice(5)) - 1].slice(0, 3));
+          return '<button type="button" class="col" data-k="' + esc(g.key) + '" title="' + esc(g.label + ': ' + statValue(res, g.value) + ' · ' + t('{n}× rusak', { n: g.n })) + '">' +
+            '<span class="n">' + ((i === maxI || i === lastI) && g.value ? esc(res.measure === 'frek' ? String(g.value) : (res.measure === 'mttr' ? mnt(g.value) : jam(g.value))) : '') + '</span>' +
+            '<span class="ctrack"><span class="cfill viz" style="height:' + Math.round((g.value || 0) / max * 100) + '%"></span></span>' +
+            '<span class="lbl">' + (i % step === 0 || i === lastI ? esc(lbl) : '') + '</span></button>';
+        }).join('') + '</div></div><p class="small muted" id="s-cap" style="margin:8px 0 0">' + esc(t('Tap batang untuk melihat daftar pekerjaannya.')) + '</p>';
+    } else {
+      var prev = 0;
+      html += '<div class="rank">' + res.groups.map(function (g) {
+        var vital = res.pareto && prev < 80;
+        prev = g.cum || 0;
+        var sub = res.by === 'sparepart' ? t('{n} pekerjaan', { n: g.n })
+          : res.measure === 'mtbf' ? t('{n}× rusak · jam operasi {h}', { n: g.n, h: jam(g.jamOperasi) })
+          : (res.measure === 'frek' ? '' : t('{n}× rusak', { n: g.n }) + ' · ') + (res.measure === 'mttr' ? t('downtime {d} jam', { d: jam(g.downtime) }) : 'MTTR ' + mnt(g.mttr) + ' ' + t('mnt'));
+        if (res.pareto) sub = t('kumulatif {p}%', { p: String(g.cum).replace('.', LANG === 'zh' ? '.' : ',') }) + (sub ? ' · ' + sub : '');
+        var name = keyLabel(g.label);
+        return '<button type="button" class="stat-row" data-k="' + esc(g.key) + '" title="' + esc(name + ': ' + statValue(res, g.value) + ' · ' + sub) + '">' +
+          '<div class="row between small"><span class="grow clamp1">' + esc(name) + '</span><b>' + esc(statValue(res, g.value)) + '</b></div>' +
+          '<div class="htrack"><div class="hfill ' + (res.pareto ? (vital ? 'vital' : 'rest') : 'vital') + '" style="width:' + Math.max(2, Math.round((g.value || 0) / max * 100)) + '%"></div></div>' +
+          '<div class="tiny muted">' + esc(sub) + '</div></button>';
+      }).join('') + '</div>' + (res.more ? '<p class="tiny muted" style="margin:8px 0 0">' + esc(t('+{n} kelompok lain tidak ditampilkan. Persempit dengan filter.', { n: res.more })) + '</p>' : '');
+    }
+    (res.warn || []).forEach(function (w) { html += '<p class="tiny" style="color:var(--warn);margin:8px 0 0">' + esc(w) + '</p>'; });
+    body.innerHTML = html + '</div>';
+    [].forEach.call(body.querySelectorAll('[data-k]'), function (el) {
+      el.onclick = function () {
+        var g = res.groups.filter(function (x) { return x.key === el.getAttribute('data-k'); })[0];
+        if (g && g.n) openStatItems(g, res);
+      };
+    });
+  }
+
+  function openStatItems(g, res) {
+    var s = openSheet('<h2>' + esc(keyLabel(g.label)) + '</h2><p class="small muted">' + esc(periodText(state.stat.p) + ' · ' + statValue(res, g.value) +
+      (res.measure === 'frek' && res.by !== 'sparepart' ? '' : ' · ' + t('{n}× rusak', { n: g.n }))) + '</p><div id="si-list"><div class="loading">Memuat…</div></div>');
+    call('apiStatsItems', statFilter(), g.key).then(function (r) {
+      syncClock(r.serverNowIso);
+      var box = s.querySelector('#si-list');
+      box.innerHTML = (r.total > r.items.length ? '<p class="tiny muted">' + esc(t('(ditampilkan {n} terbaru)', { n: r.items.length })) + '</p>' : '') +
+        r.items.map(function (x) { return itemHtml(x, true); }).join('');
+      bindDetailLinks(box);
+    }).catch(function (e) { s.querySelector('#si-list').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
   }
 
   function fetchDashboard() {
