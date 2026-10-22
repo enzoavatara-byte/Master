@@ -113,6 +113,17 @@
     return two(d.getUTCDate()) + '/' + two(d.getUTCMonth() + 1) + ' ' + two(d.getUTCHours()) + ':' + two(d.getUTCMinutes());
   }
   function mnt(v) { return v == null ? '–' : Math.round(v) + ''; }
+  /** Angka jam KPI: 1 desimal di bawah 100 (koma untuk Bahasa Indonesia), bulat di atasnya. */
+  function jam(v) {
+    if (v == null) return '–';
+    var s = v >= 100 ? String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : (Math.round(v * 10) / 10).toFixed(1);
+    return LANG === 'zh' ? s : s.replace(/[.,]/g, function (c) { return c === '.' ? ',' : '.'; });   // id: 4.416 · 1,5
+  }
+  /** "2026-09" → "September 2026" / "2026年9月" */
+  function monthLabel(key, idLabel) {
+    var m = /^(\d{4})-(\d{2})$/.exec(key || '');
+    return m && LANG === 'zh' ? m[1] + '年' + Number(m[2]) + '月' : (idLabel || key);
+  }
   function initials(name) {
     return String(name || '?').split(/[\s@.]+/).filter(String).slice(0, 2).map(function (p) { return p[0]; }).join('').toUpperCase() || '?';
   }
@@ -1449,7 +1460,7 @@
 
   // ---------- DASHBOARD ----------
   function loadDashboard() {
-    var head = '<div class="hello"><div><div class="hi">MTTR & kesehatan mesin</div><h1>Dashboard</h1></div><div class="row">' +
+    var head = '<div class="hello"><div><div class="hi">MTTR, MTBF & kesehatan line</div><h1>Dashboard</h1></div><div class="row">' +
       (isAdmin() ? '<button class="btn ghost" id="d-qr" style="width:auto">QR</button>' : '') + helpBtn() + '</div></div>' +
       filterBar(null) +
       '<div style="margin:-2px 0 14px">' + chips('periode', [{ value: '7', label: '7 hari' }, { value: '30', label: '30 hari' }, { value: '90', label: '90 hari' }, { value: 'ytd', label: 'Tahun ini' }],
@@ -1493,6 +1504,62 @@
       }).join('') + '</div></div>';
   }
 
+  /** KPI bulan berjalan (2.6): Plant = 4 angka, project = baris dengan target & ✓ / ✗ (teks + warna). Admin: tutup bulan lalu. */
+  function kpiCard(k) {
+    if (!k || !k.rows || !k.rows.length) return '';
+    var plant = k.rows[0], proj = k.rows.slice(1), mLabel = monthLabel(k.bulan, k.label);
+    var verdict = function (x) {
+      if (!x.tercapai) return '';
+      return x.tercapai === '✓' ? '<span class="status ok">' + esc(t('✓ Tercapai')) + '</span>'
+        : '<span class="status over">' + esc(t('✗ {x} belum tercapai', { x: x.tercapai.replace(/^✗\s*/, '') })) + '</span>';
+    };
+    var tgt = function (v, ge, unit) { return v == null ? '' : ' <span class="muted">(' + esc(t(ge ? 'target ≥ {v} {u}' : 'target ≤ {v} {u}', { v: ge ? jam(v) : mnt(v), u: t(unit) })) + ')</span>'; };
+    var html = '<div class="card"><div class="caps">' + esc(t('KPI bulan ini · {m}', { m: mLabel })) + '</div>' +
+      '<p class="tiny muted" style="margin:4px 0 0">' + esc(t('Semua line. MTBF = (jam operasi − downtime) ÷ jumlah kerusakan. Angka bisa berubah sampai bulan ditutup admin.')) + '</p>' +
+      '<div class="kpis four" style="margin:10px 0 4px">' +
+      tile('MTTR', mnt(plant.mttr), plant.mttr == null ? '' : 'mnt', '') +
+      tile('MTBF', jam(plant.mtbf), plant.mtbf == null ? '' : 'jam', plant.kerusakan ? '' : esc(t('tanpa kerusakan'))) +
+      tile('Kerusakan', plant.kerusakan, '', '') +
+      tile('Downtime', jam(plant.downtime), 'jam', esc(t('jam operasi {h}', { h: jam(plant.jamOperasi) }))) + '</div>';
+    if (proj.length) {
+      html += '<div class="rank">' + proj.map(function (x) {
+        return '<div class="rank-row"><div class="row between"><b>' + esc(x.nama) + '</b>' + verdict(x) + '</div>' +
+          '<div class="small">MTTR <b>' + mnt(x.mttr) + '</b> ' + esc(t('mnt')) + tgt(x.targetMttr, false, 'mnt') +
+          ' · MTBF <b>' + jam(x.mtbf) + '</b> ' + esc(t('jam')) + tgt(x.targetMtbf, true, 'jam') + '</div>' +
+          '<div class="tiny muted">' + esc(t('{n}× rusak · downtime {d} jam · jam operasi {h}', { n: x.kerusakan, d: jam(x.downtime), h: jam(x.jamOperasi) })) + '</div></div>';
+      }).join('') + '</div>';
+    }
+    (k.warn || []).forEach(function (w) { html += '<p class="tiny" style="color:var(--warn);margin:8px 0 0">' + esc(w) + '</p>'; });
+    var p = k.prev;
+    if (p) {
+      var pl = monthLabel(p.bulan, p.label);
+      html += '<div style="margin-top:12px">' + (p.closedIso
+        ? '<p class="tiny muted" style="margin:0">' + esc(t('{m} sudah ditutup {d} oleh {n}.', { m: pl, d: fmtShort(p.closedIso), n: p.closedBy })) +
+          ' <button type="button" class="link" id="d-close" data-ym="' + esc(p.bulan) + '" data-label="' + esc(pl) + '" data-re="1">' + esc(t('Tutup ulang')) + '</button></p>'
+        : '<div class="alert warn" style="margin-bottom:10px">' + esc(t('{m} belum ditutup.', { m: pl })) +
+          (p.reviews ? ' <b>' + esc(t('{n} pekerjaan bulan itu masih menunggu review', { n: p.reviews })) + '</b> — ' + esc(t('sebaiknya direview dulu.')) : '') + '</div>' +
+          '<button type="button" class="btn navy" id="d-close" data-ym="' + esc(p.bulan) + '" data-label="' + esc(pl) + '">' + esc(t('Tutup bulan {m}', { m: pl })) + '</button>') + '</div>';
+    }
+    return html + '</div>';
+  }
+
+  function closeMonth(btn) {
+    var ym = btn.getAttribute('data-ym'), label = btn.getAttribute('data-label'), re = btn.getAttribute('data-re');
+    var s = openSheet('<h2>' + esc(t('Tutup bulan {m}', { m: label })) + '</h2><p class="small">' +
+      esc(t('Angka KPI {m} dikunci: edit data lama sesudah ini tidak mengubahnya lagi. Tab KPI di Google Sheet ikut diperbarui.', { m: label })) + '</p>' +
+      (re ? '<p class="small muted">' + esc(t('Sudah pernah ditutup: angka lama diganti angka sekarang, dan keduanya dicatat di Log.')) + '</p>' : '') +
+      '<button class="btn navy" id="tb-ok">' + esc(re ? t('Tutup ulang') : t('Tutup bulan')) + '</button>');
+    s.querySelector('#tb-ok').onclick = function () {
+      var b = this;
+      busy(b, true, t('Memproses…'));
+      call('apiTutupBulan', ym).then(function (res) {
+        closeSheet();
+        toast(t('{m} ditutup.', { m: label }) + (res.reviews ? ' ' + t('{n} pekerjaan masih menunggu review: tutup ulang setelah direview.', { n: res.reviews }) : ''), 'ok');
+        fetchDashboard();
+      }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+    };
+  }
+
   function renderDashboard(d) {
     syncClock(d.serverNowIso);
     var k = d.kpi;
@@ -1500,7 +1567,9 @@
       tile(t('MTTR ({x})', { x: L(d.mttrTypes) }), mnt(k.mttr), k.mttr == null ? '' : 'mnt', esc(t('{n} pekerjaan dihitung', { n: k.mttrN }))) +
       tile('Corrective selesai', k.corrective, '', esc(t('{d} total aktif', { d: dur(k.activeMin * 60000) }))) +
       tile('Sedang berjalan', k.openNow, '', esc(t('{n} pending', { n: k.pendingNow })) + (k.overdueNow ? ' · <span style="color:var(--danger);font-weight:800">' + esc(t('{n} lewat tenggat', { n: k.overdueNow })) + '</span>' : '')) +
+      tile('Downtime stop line', jam(k.downtimeMin / 60), 'jam', esc(t('{n} pekerjaan stop line', { n: k.stopN }))) +
       '</div>';
+    html += kpiCard(d.kpiMonth);
 
     // Project
     if (d.projects.length) {
@@ -1549,20 +1618,21 @@
 
     if (d.others.length) {
       html += rankList('Isian "Lainnya" terbanyak', d.others, {
-        note: t('Yang sering muncul sebaiknya dijadikan pilihan tetap di sheet <b>Pilihan</b> (atau <b>Mesin</b>) supaya teknisi cukup tap.')
+        note: t('Yang sering muncul sebaiknya dijadikan pilihan tetap di sheet <b>Pilihan</b> supaya teknisi cukup tap.')
       });
     }
     if (isAdmin()) {
       html += '<div class="card"><div class="caps">Laporan format Excel</div><p class="small muted" style="margin:6px 0 12px">' +
         t('Tab <b>Laporan {y}</b> & <b>Rekap</b> di Google Sheet diperbarui langsung setiap aksi. Tekan tombol ini setelah mengedit sheet Maintenance atau Format Laporan secara manual.', { y: new Date(serverNow()).getFullYear() }) + ' ' +
         t('Tab <b>TPM &lt;project&gt;</b> (format Excel manager, 中文 + English) diperbarui tiap malam dan saat tombol ini ditekan.') + '</p>' +
-        '<button class="btn ghost" id="d-report">Perbarui Laporan, Rekap & TPM</button><div id="d-report-out"></div></div>';
+        '<button class="btn ghost" id="d-report">Perbarui Laporan, Rekap, TPM & KPI</button><div id="d-report-out"></div></div>';
     }
     if (d.warnings.length) {
       html += '<div class="card"><div class="caps" style="color:var(--warn)">' + t('Perlu dicek di Google Sheet ({n})', { n: d.warnings.length }) + '</div><ul class="small" style="margin:10px 0 0;padding-left:18px">' +
         d.warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul></div>';
     }
     $('d-body').innerHTML = html;
+    if ($('d-close')) $('d-close').onclick = function () { closeMonth(this); };
     if ($('d-report')) $('d-report').onclick = function () {
       var b = this;
       busy(b, true, t('Membuat laporan…'));
@@ -1574,6 +1644,8 @@
           (res.tpmError ? '<span style="color:var(--warn)">' + esc(t('TPM gagal: {e}', { e: res.tpmError })) + '</span> ' : '') +
           (res.tpmWarn ? '<span style="color:var(--warn)">' + esc(res.tpmWarn) + '</span> ' : '') +
           (res.tpmUntranslated ? esc(t('{n} teks belum diterjemahkan (kuota Google); tekan lagi nanti.', { n: res.tpmUntranslated })) + ' ' : '') +
+          (res.kpi ? esc(t('✓ {s} diperbarui.', { s: res.kpi })) + ' ' : '') +
+          (res.kpiError ? '<span style="color:var(--warn)">' + esc(t('KPI gagal: {e}', { e: res.kpiError })) + '</span> ' : '') +
           '<a href="' + esc(res.spreadsheetUrl) + '" target="_blank" style="color:var(--accent)">Buka Google Sheet</a></p>';
       }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
     };

@@ -70,6 +70,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Laporan & Rekap tahunan (buat / perbarui)…', 'menuRekapTahunan')
     .addItem('Perbarui tab TPM (format Excel manager)', 'menuTpm')
+    .addItem('Perbarui tab KPI (MTTR & MTBF)', 'menuKpi')
+    .addItem('Tutup bulan KPI…', 'menuTutupBulan')
     .addItem('Arsipkan data tahun lalu…', 'menuArsipkanTahun')
     .addItem('Hapus data testing…', 'menuHapusDataTesting')
     .addSeparator()
@@ -143,7 +145,7 @@ function menuMuatUlangMaster() {
 function cekFile() {
   var missing = [];
   var scripts = { Config: typeof APP, Db: typeof readTable_, Auth: typeof currentEmail_, Master: typeof masterData_,
-    Maintenance: typeof apiStart, Api: typeof apiBootstrap, Rekap: typeof buildLaporan_, Translate: typeof translate_, Tampilan: typeof rapikanTampilan_, Tpm: typeof buildTpm_ };
+    Maintenance: typeof apiStart, Api: typeof apiBootstrap, Rekap: typeof buildLaporan_, Translate: typeof translate_, Tampilan: typeof rapikanTampilan_, Tpm: typeof buildTpm_, Kpi: typeof computeKpi_ };
   Object.keys(scripts).forEach(function (f) { if (scripts[f] === 'undefined') missing.push(f + ' (script)'); });
   ['Index', 'App', 'Styles', 'Message', 'Panduan', 'I18n'].forEach(function (f) {
     try { HtmlService.createHtmlOutputFromFile(f); } catch (e) { missing.push(f + ' (HTML)'); }
@@ -192,7 +194,7 @@ function setup() {
 
   // Log & Maintenance hanya boleh ditulis kode. Proteksi "warning only": editor manual
   // mendapat peringatan (user tetap perlu akses Editor karena web app berjalan sebagai user).
-  [APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN, APP.SHEETS.SARAN].forEach(function (name) {
+  [APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN, APP.SHEETS.SARAN, APP.SHEETS.KPI_DATA].forEach(function (name) {
     var sh = ss.getSheetByName(name);
     if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) {
       sh.protect().setDescription('Ditulis oleh aplikasi MTTR. Jangan diedit manual.').setWarningOnly(true);
@@ -285,6 +287,7 @@ function setup() {
   // Di luar lock (terjemahan baru disimpan dengan lock sendiri). Gagal di sini tidak menggagalkan setup.
   var tpmErr = '';
   try { buildTpm_(); } catch (e) { tpmErr = 'TPM: ' + (e && e.message || e); console.warn(tpmErr); }
+  try { var kpi = buildKpi_(); if (kpi.warn) notes.push(kpi.warn); } catch (e) { tpmErr += (tpmErr ? ' · ' : '') + 'KPI: ' + (e && e.message || e); console.warn('KPI: ' + e); }
 
   var blank = ss.getSheetByName('Sheet1');
   if (blank && ss.getSheets().length > 1 && blank.getLastRow() === 0) ss.deleteSheet(blank);

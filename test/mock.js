@@ -217,7 +217,11 @@ const ctx = {
     newDataValidation: () => recorder('dv'),
     RecalculationInterval: { HOUR: 'HOUR' },
     getUi: () => ({ createMenu: (name) => { ui.menus.push(name); return { addItem() { return this; }, addSeparator() { return this; }, addToUi() {} }; },
-      alert: (msg) => { (ui.alerts = ui.alerts || []).push(msg); return 'OK'; } })
+      alert: (msg) => { (ui.alerts = ui.alerts || []).push(msg); return 'OK'; },
+      // jawaban prompt diambil dari ui.answers (null / habis = Cancel)
+      prompt: (title) => { (ui.asked = ui.asked || []).push(title); const a = (ui.answers || []).shift();
+        return { getSelectedButton: () => (a == null ? 'CANCEL' : 'OK'), getResponseText: () => (a == null ? '' : a) }; },
+      ButtonSet: { OK_CANCEL: 'OK_CANCEL' }, Button: { OK: 'OK', CANCEL: 'CANCEL' } })
   },
   Session: { getActiveUser: () => ({ getEmail: () => user.email }) },
   LockService: {

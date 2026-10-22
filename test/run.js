@@ -41,7 +41,7 @@ test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempot
   jeq(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Tipe Maintenance').map(r => r.Nilai), ['Corrective'], '2.6: Preventive dihapus');
   jeq(triggers.map(t => t.getHandlerFunction()).sort(), ['checkTimeouts', 'onMasterChange', 'refreshRekap'], 'trigger tidak dobel');
   assert.strictEqual(triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every, 'hari:1@1', 'bangun ulang penuh tiap malam');
-  assert.strictEqual(ctx.readTable_('Config').length, 14);
+  assert.strictEqual(ctx.readTable_('Config').length, 18);
   assert.strictEqual(ctx.readTable_('Users')[0].Peran, 'Admin');
   jeq(ctx.readTable_('Projects').map(p => p['Factory ID'] + ':' + p.Baterai), ['F1:VF7', 'F1:Limo7', 'F2:E22H', 'F2:E245']);
   assert.strictEqual(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Masalah').length, 5, 'pilihan tidak terduplikasi');
@@ -1312,7 +1312,7 @@ test('hapus data testing: sebelum tanggal → pekerjaan + Log + sparepart (juga 
   assert.strictEqual(plan.maintenance, old.length);
   assert.ok(plan.log > 0 && plan.sparepart > 0);
   const out = ctx.hapusDataTesting_(cut);
-  jeq(out, plan);
+  jeq(out, Object.assign({ kpi: [] }, plan), 'tidak ada KPI tertutup → tidak ada yang dibuka lagi');
   const m = ctx.readTable_('Maintenance');
   assert.ok(m.length >= 1 && m.every(r => r.Mulai >= cut), 'yang dimulai sejak tanggal itu tetap ada');
   const live = new Set(m.map(r => r['Maintenance ID']));
@@ -1348,11 +1348,11 @@ test('2.5.1 setup: Ringkasan & Baca Saya paling depan, warna tab per kelompok, t
   assert.strictEqual(ctx.setup(), 'Setup selesai.', 'tampilan tanpa masalah');
   const y = ctx.yearOf_(new FakeDate()), names = ss.getSheets().map(s => s.getName());
   const TPM = ['TPM E22H', 'TPM E245', 'TPM Limo7', 'TPM VF7'];
-  jeq(names.slice(0, 12), ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'Rekap ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart']);
+  jeq(names.slice(0, 13), ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'Rekap ' + y, 'KPI ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart']);
   const shown = ss.getSheets().filter(s => !s.isSheetHidden()).map(s => s.getName());
-  jeq(shown, ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'Rekap ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart', 'Users', 'Lines', 'Sparepart', 'Pilihan']);
+  jeq(shown, ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'Rekap ' + y, 'KPI ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart', 'Users', 'Lines', 'Sparepart', 'Pilihan']);
   assert.strictEqual(ss.getSheetByName('TPM VF7').tabColor, ctx.TEMA_.tab.laporan);
-  for (const n of ['Log', 'Terjemahan', 'Config', 'Form', 'Maintenance VF7']) assert.ok(ss.getSheetByName(n).isSheetHidden(), n + ' disembunyikan');
+  for (const n of ['Log', 'Terjemahan', 'Config', 'Form', 'Maintenance VF7', 'KPI data']) assert.ok(ss.getSheetByName(n).isSheetHidden(), n + ' disembunyikan');
   ss.getSheets().filter(s => /^(Laporan|Rekap) \d{4}$/.test(s.getName()) && !s.getName().endsWith(' ' + y))
     .forEach(s => assert.ok(s.isSheetHidden(), s.getName() + ' (tahun lain) disembunyikan'));
   assert.strictEqual(ss.getSheetByName('Ringkasan').tabColor, ctx.TEMA_.tab.baca);
@@ -1800,6 +1800,198 @@ test('2.6 migrasi dari 2.5.2: field mesin dimatikan, Preventive dimatikan sekali
   assert.strictEqual(ctx.masterData_().tr.zh['Oven'], '烘箱');
   as('dewi@gmail.com', () => { ctx.apiContinue(P, 'L11'); ctx.apiCancel(P, 'Input ganda'); });
   ss.deleteSheet(M);
+});
+
+// ---------- 2.6: KPI bulanan MTTR & MTBF ----------
+const W = (y, mo, d, h, mi) => new FakeDate(Date.UTC(y, mo - 1, d, h - 7, mi || 0));   // jam WIB
+test('2.6 KPI hitung: MTTR, downtime stop line, jam operasi (hari operasi, libur, KPI_MULAI, bulan berjalan), MTBF per Plant / Project / Line, target', () => {
+  const warn = [];
+  const days = (v) => ctx.parseHariOperasi_(v, warn).map(Number).join('');   // indeks 0 = Minggu
+  assert.strictEqual(days(''), '1111111');
+  assert.strictEqual(days('Sen-Min'), '1111111');
+  assert.strictEqual(days('Sen - Sab'), '0111111');
+  assert.strictEqual(days('Jum-Sen'), '1100011', 'rentang melewati Minggu');
+  assert.strictEqual(days('1-5'), '0111110');
+  assert.strictEqual(days('Senin, Rabu'), '0101000');
+  assert.strictEqual(warn.length, 0);
+  assert.strictEqual(days('libur saja'), '1111111');
+  assert.match(warn[0], /HARI_OPERASI "libur saja" tidak dikenal/);
+
+  const md = {
+    lines: { A: { active: true, batteries: ['VF7'], name: 'Line A' }, B: { active: true, batteries: ['VF7', 'Limo7'], name: 'Line B' },
+      C: { active: false, batteries: ['Limo7'], name: 'Line C' }, D: { active: false, batteries: ['VF7'], name: 'Line D' } },
+    projects: [{ battery: 'VF7', target: 20, targetMtbf: 500 }, { battery: 'Limo7', target: null, targetMtbf: 500 }, { battery: 'VF7', target: 99, targetMtbf: null }]
+  };
+  const job = (line, bat, st, mttr, mulai, selesai, aktif, stop, extra) => Object.assign({ 'Maintenance ID': line + aktif, Line: line, Baterai: bat, Status: st,
+    'Masuk MTTR': mttr, Mulai: mulai, Selesai: selesai || '', 'Status sejak': selesai || mulai, 'Total aktif (menit)': aktif, 'Stop line': stop }, extra || {});
+  const rows = [
+    job('A', 'VF7', 'Completed', 'Ya', W(2026, 9, 5, 9), W(2026, 9, 5, 10), 40, 'Ya'),                       // downtime 1 jam
+    job('B', 'Limo7', 'Completed', 'Ya', W(2026, 9, 10, 10, 30), W(2026, 9, 10, 12), 60, 'Ya'),             // 1,5 jam
+    job('B', 'VF7', 'Abandoned', 'Ya', W(2026, 9, 12, 8), '', 20, 'Ya', { 'Status sejak': W(2026, 9, 12, 12) }),   // dihitung admin, tanpa Selesai
+    job('C', 'Limo7', 'Completed', 'Ya', W(2026, 9, 20, 8), W(2026, 9, 20, 9), 30, 'Tidak'),                // line nonaktif tapi rusak
+    job('A', 'VF7', 'Completed', 'Tidak', W(2026, 9, 6, 8), W(2026, 9, 6, 9), 500, 'Ya'),                    // tidak masuk MTTR
+    job('A', 'VF7', 'Cancelled', 'Tidak', W(2026, 9, 7, 8), '', 0, 'Ya', { 'Status sejak': W(2026, 9, 7, 9) }),
+    job('A', 'VF7', 'Completed', 'Ya', W(2026, 9, 30, 23), W(2026, 10, 1, 0, 30), 700, 'Ya'),               // selesai 1 Okt WIB → Oktober
+    job('A', 'VF7', 'Completed', 'Ya', W(2026, 8, 31, 23, 50), W(2026, 9, 1, 0, 30), 10, 'Tidak'),          // selesai 1 Sep WIB → September
+    job('A', 'OLD', 'Completed', 'Ya', W(2026, 9, 15, 8), W(2026, 9, 15, 9), 20, 'Tidak')                    // project lama (tidak di sheet Projects)
+  ];
+  // September 2026: 30 hari, Minggu 6/13/20/27, libur Kamis 17 → Sen-Sab = 25 hari × 24 jam = 600 jam per line
+  const s = { hours: 24, days: ctx.parseHariOperasi_('Sen-Sab', []), libur: { '2026-09-17': true }, mulai: '', warn: [] };
+  const now = W(2026, 10, 22, 10);
+  assert.strictEqual(ctx.kpiDays_(2026, 9, s, now), 25);
+  assert.strictEqual(ctx.kpiDays_(2026, 10, s, now), 19, 'bulan berjalan: 1–22 Okt tanpa Minggu 4/11/18');
+  assert.strictEqual(ctx.kpiDays_(2026, 11, s, now), 0, 'bulan depan');
+  const k = ctx.computeKpi_(2026, 9, rows, md, s, now);
+  const pick = (lv, key) => { const x = k.find(o => o.level === lv && o.kunci === key); assert.ok(x, lv + ' ' + key); return x; };
+  const val = (x) => [x.kerusakan, x.mttr, x.downtime, x.jamOperasi, x.mtbf, x.targetMttr, x.targetMtbf, x.tercapai];
+  // Plant: 6 kerusakan, aktif 180 → MTTR 30; downtime 2,5; line A,B (aktif) + C (rusak) = 3 × 600; MTBF (1800 − 2,5) / 6
+  jeq(val(pick('Plant', 'PLANT')), [6, 30, 2.5, 1800, 299.58, null, null, '']);
+  // VF7: baris 1, 3, 8 → MTTR 70/3; line A, B → 1200 jam; target MTTR 20 & MTBF 500 (baris Projects pertama) → keduanya gagal
+  jeq(val(pick('Project', 'VF7')), [3, 23.33, 1, 1200, 399.67, 20, 500, '✗ MTTR & MTBF']);
+  // Limo7: line B (aktif, juga melayani VF7 → dihitung penuh) + C (nonaktif tapi rusak) → 1200 jam
+  jeq(val(pick('Project', 'Limo7')), [2, 45, 1.5, 1200, 599.25, null, 500, '✓']);
+  jeq(val(pick('Project', 'OLD')), [1, 20, 0, 600, 600, null, null, ''], 'project yang sudah tidak ada tetap tampil (total cocok)');
+  jeq(val(pick('Line', 'A')), [3, 23.33, 1, 600, 199.67, null, null, '']);
+  jeq(val(pick('Line', 'C')), [1, 30, 0, 600, 600, null, null, '']);
+  assert.strictEqual(pick('Line', 'A').nama, 'A · Line A');
+  assert.ok(!k.find(o => o.kunci === 'D'), 'line nonaktif tanpa kerusakan tidak tampil');
+  jeq(k.map(o => o.level), ['Plant', 'Project', 'Project', 'Project', 'Line', 'Line', 'Line']);
+  // tanpa kerusakan → MTBF kosong, target dianggap tercapai
+  const none = ctx.computeKpi_(2026, 8, [], md, s, now).find(o => o.kunci === 'VF7');
+  jeq(val(none), [0, null, 0, 26 * 24 * 2, null, 20, 500, '✓'], 'Agustus: 31 hari − 5 Minggu');
+  // KPI_MULAI 10/09: hari & kerusakan sebelum tanggal itu tidak dihitung (10–30 Sep tanpa Minggu 13/20/27 & libur 17 = 17 hari)
+  const s2 = Object.assign({}, s, { mulai: '2026-09-10' });
+  assert.strictEqual(ctx.kpiDays_(2026, 9, s2, now), 17);
+  jeq(val(ctx.computeKpi_(2026, 9, rows, md, s2, now, { levels: ['Plant'] })[0]).slice(0, 4), [4, 32.5, 1.5, 3 * 17 * 24]);
+  assert.strictEqual(ctx.computeKpi_(2026, 9, rows, md, s, now, { levels: ['Plant', 'Project'] }).length, 4, 'Dashboard: tanpa level Line');
+});
+
+test('2.6 KPI Config: jam operasi, hari operasi, tanggal libur (teks / sel tanggal), KPI_MULAI; salah isi → peringatan, bukan error', () => {
+  const setCfg = (k, v) => { setRow('Config', (r, h) => r[h.indexOf('Key')] === k, 'Value', v); ctx.invalidateMaster_(); };
+  let s = ctx.kpiSettings_();
+  jeq([s.hours, s.days.every(Boolean), Object.keys(s.libur).length, s.mulai, s.warn], [24, true, 0, '', []], 'bawaan: 24 jam × setiap hari');
+  setCfg('JAM_OPERASI_PER_HARI', '16,5'); setCfg('HARI_OPERASI', 'Sen-Jum'); setCfg('TANGGAL_LIBUR', '25/12/2026; 01/01/2027, 31/02/2026'); setCfg('KPI_MULAI', '15/10/2026');
+  s = ctx.kpiSettings_();
+  assert.strictEqual(s.hours, 16.5);
+  assert.strictEqual(s.days.map(Number).join(''), '0111110');
+  jeq(Object.keys(s.libur).sort(), ['2026-12-25', '2027-01-01']);
+  assert.strictEqual(s.mulai, '2026-10-15');
+  assert.match(s.warn.join(' '), /TANGGAL_LIBUR "31\/02\/2026": Tanggal tidak valid/);
+  setCfg('TANGGAL_LIBUR', W(2026, 12, 25, 0)); setCfg('JAM_OPERASI_PER_HARI', 30); setCfg('KPI_MULAI', 'besok');
+  s = ctx.kpiSettings_();
+  jeq(Object.keys(s.libur), ['2026-12-25'], 'sel berisi tanggal (diubah Sheets jadi Date)');
+  assert.strictEqual(s.hours, 24);
+  assert.strictEqual(s.mulai, '');
+  assert.match(s.warn.join(' '), /JAM_OPERASI_PER_HARI "30" harus 1–24/);
+  assert.match(s.warn.join(' '), /KPI_MULAI "besok"/);
+  ['JAM_OPERASI_PER_HARI', 'HARI_OPERASI', 'TANGGAL_LIBUR', 'KPI_MULAI'].forEach(k => setCfg(k, ''));
+  assert.strictEqual(ctx.kpiSettings_().warn.length, 0);
+  const cfgKeys = ctx.readTable_('Config').map(r => r.Key);
+  ['JAM_OPERASI_PER_HARI', 'HARI_OPERASI', 'TANGGAL_LIBUR', 'KPI_MULAI'].forEach(k => assert.ok(cfgKeys.includes(k), k + ' ada di Config'));
+  assert.ok(ctx.headers_(ss.getSheetByName('Projects')).includes('Target MTBF (jam)'));
+});
+
+test('2.6 KPI tab + tutup bulan: angka = Rekap, Dashboard, tutup → terkunci walau data diedit, tutup ulang tercatat, Ringkasan & menu', () => {
+  ctx.setup();
+  const target = (b, mtbf) => { setRow('Projects', (r, h) => r[h.indexOf('Baterai')] === b, 'Target MTBF (jam)', mtbf); ctx.invalidateMaster_(); };
+  target('E22H', 100000);
+  let J;
+  as('budi@gmail.com', () => {
+    J = ctx.apiStart('L01', { baterai: 'E22H' }).open.id;
+    advance(25);
+    ctx.apiComplete(J, { ...done, tanpaPart: true, parts: [] });
+  });
+  const ym = ctx.ymOf_(new FakeDate()), y = ctx.yearOf_(new FakeDate()), M = ctx.monthOf_(new FakeDate());
+  assert.strictEqual(rec(J)['Stop line'], 'Ya', 'Corrective = stop line');
+  const built = ctx.buildKpi_();
+  assert.strictEqual(built.sheet, 'KPI ' + y);
+  const K = ss.getSheetByName('KPI ' + y);
+  assert.strictEqual(K.data[0][0], 'Bulan\n月份');
+  assert.strictEqual(K.data[0][8], 'MTBF (jam)\n平均故障间隔（小时）', 'kolom I = MTBF (dipakai Ringkasan)');
+  const plantRow = () => K.data.find(r => r[0] === ym && r[1] === 'Plant');
+  const P0 = plantRow();
+  assert.ok(P0, 'baris Plant bulan ini');
+  assert.strictEqual(P0[11], 'Berjalan');
+  assert.ok(hasFmt(K, 'setNumberFormat', '2,1:' + (K.data.length - 1) + 'x1', '@'), 'Bulan = teks');
+  // jumlah & MTTR Plant = Rekap bulan itu
+  const rekap = ctx.computeRekap_(y).months[M - 1];
+  assert.strictEqual(P0[3], rekap.mttrN);
+  near(P0[4], rekap.mttrSum / rekap.mttrN);
+  const proj = K.data.find(r => r[0] === ym && r[1] === 'Project' && r[2] === 'E22H');
+  assert.strictEqual(proj[9], 100000);
+  assert.strictEqual(proj[10], '✗ MTBF', 'target MTBF tidak tercapai');
+  assert.ok(K.data.some(r => r[0] === ym && r[1] === 'Line' && /^L01 · /.test(r[2])));
+  assert.ok(K.cfRules.some(r => r.calls.whenTextStartsWith === '✗'), 'Tercapai berwarna');
+
+  // Dashboard: KPI bulan berjalan (semua line, tidak ikut filter)
+  as('budi@gmail.com', () => {
+    const d = ctx.apiDashboard({ periode: 7, factory: 'F2' });
+    assert.strictEqual(d.kpiMonth.bulan, ym);
+    jeq(d.kpiMonth.rows.map(x => x.level).filter((v, i, a) => a.indexOf(v) === i), ['Plant', 'Project']);
+    assert.strictEqual(d.kpiMonth.rows[0].kerusakan, P0[3]);
+    assert.strictEqual(d.kpiMonth.prev, undefined, 'teknisi: tanpa info tutup bulan');
+    assert.ok(d.kpi.downtimeMin > 0 && d.kpi.stopN > 0, 'tile downtime');
+    assert.strictEqual(d.kpi.preventive, undefined);
+    throwsMsg(() => ctx.apiTutupBulan(ym), /tidak punya akses|Admin/);
+  });
+  as('owner@gmail.com', () => {
+    throwsMsg(() => ctx.apiTutupBulan(ym), /belum berakhir/);
+    throwsMsg(() => ctx.apiTutupBulan('2026-13'), /Bulan tidak valid/);
+  });
+
+  // pindah ke bulan berikutnya (hari ke-2)
+  const nowMs = new FakeDate().getTime(), nextStart = Date.UTC(y, M, 1) - 7 * 3600e3;
+  advance(Math.ceil((nextStart - nowMs) / 60000) + 36 * 60);
+  assert.notStrictEqual(ctx.ymOf_(new FakeDate()), ym);
+  ctx.invalidateMaster_();
+  as('owner@gmail.com', () => {
+    const d = ctx.apiDashboard({});
+    assert.strictEqual(d.kpiMonth.prev.bulan, ym, 'admin diingatkan menutup bulan lalu');
+    assert.strictEqual(d.kpiMonth.prev.closedIso, '');
+    assert.strictEqual(typeof d.kpiMonth.prev.reviews, 'number');
+    const res = ctx.apiTutupBulan(ym);
+    assert.strictEqual(res.reclosed, false);
+    assert.strictEqual(res.plant.kerusakan, P0[3]);
+    assert.ok(ctx.apiDashboard({}).kpiMonth.prev.closedIso, 'sudah ditutup');
+  });
+  const Ky = ss.getSheetByName('KPI ' + y), P1 = Ky.data.find(r => r[0] === ym && r[1] === 'Plant');
+  assert.match(P1[11], /^Ditutup \d\d\/\d\d\/\d{4} oleh owner$/);
+  assert.ok(P1[7] >= P0[7], 'ditutup setelah bulan berakhir: jam operasi sebulan penuh');
+  const snap = ctx.readTable_('KPI data').filter(r => r.Bulan === ym);
+  assert.ok(snap.length >= 3 && snap.every(r => r['Ditutup oleh'] === 'owner@gmail.com'));
+  assert.match(ctx.readTable_('Log').filter(e => e.Kejadian === 'tutup bulan').pop().Detail, new RegExp('^' + ctx.ymLabel_(ym) + ': ' + P0[3] + ' kerusakan, MTTR'));
+  assert.ok(ss.getSheetByName('KPI data').protections.length, 'KPI data diproteksi');
+
+  // data lama diedit setelah ditutup → KPI bulan itu tetap
+  setRow('Maintenance', (r) => r[0] === J, 'Total aktif (menit)', 9999);
+  ctx.buildKpi_(y);
+  jeq(ss.getSheetByName('KPI ' + y).data.find(r => r[0] === ym && r[1] === 'Plant').slice(3, 11), P1.slice(3, 11), 'terkunci');
+  // tutup ulang: angka baru + Log menyebut angka lama
+  as('owner@gmail.com', () => assert.strictEqual(ctx.apiTutupBulan(ym).reclosed, true));
+  assert.ok(ss.getSheetByName('KPI ' + y).data.find(r => r[0] === ym && r[1] === 'Plant')[4] > P0[4], 'angka baru dipakai');
+  assert.match(ctx.readTable_('Log').filter(e => e.Kejadian === 'tutup bulan').pop().Detail, /ditutup ulang; sebelumnya .*: \d+ kerusakan/);
+  assert.strictEqual(ctx.readTable_('KPI data').filter(r => r.Bulan === ym).length, snap.length, 'diganti, tidak menumpuk');
+  setRow('Maintenance', (r) => r[0] === J, 'Total aktif (menit)', 25);
+
+  // menu spreadsheet: kosong = bulan lalu; Cancel = tidak apa-apa
+  ui.answers = [null];
+  as('owner@gmail.com', () => ctx.menuTutupBulan());
+  ui.answers = [''];
+  as('owner@gmail.com', () => ctx.menuTutupBulan());
+  assert.match(ui.alerts.pop(), new RegExp('^' + ctx.ymLabel_(ym) + ' ditutup ulang\\.'));
+  ui.answers = [];
+
+  // Ringkasan: Downtime & MTBF (dari tab KPI) menggantikan Corrective / Preventive
+  ctx.rapikanTampilan_({});
+  const R = ring(), dt = findCell(R, /^Downtime \(jam\)/), mb = findCell(R, /^MTBF \(jam\)/);
+  assert.ok(dt && mb && !findCell(R, /^Preventive/));
+  const se = colL('Selesai'), mu = colL('Mulai'), sl = colL('Stop line');
+  assert.ok(R.data[dt.r][dt.c - 1].startsWith("=IFERROR(ROUND(SUM(FILTER('Maintenance'!" + se + '2:' + se + "-'Maintenance'!" + mu + '2:' + mu + ",'Maintenance'!" + sl + '2:' + sl + '="Ya"'));
+  assert.strictEqual(R.data[mb.r][mb.c - 1], '=IFERROR(INDEX(FILTER(INDIRECT("\'KPI "&YEAR($K$2)&"\'!I2:I"),INDIRECT("\'KPI "&YEAR($K$2)&"\'!A2:A")=YEAR($K$2)&"-"&TEXT(MONTH($K$2),"00"),' +
+    'INDIRECT("\'KPI "&YEAR($K$2)&"\'!B2:B")="Plant",INDIRECT("\'KPI "&YEAR($K$2)&"\'!I2:I")<>""),1),"–")');
+  assert.ok(findCell(R, /^Target MTBF/), 'tabel project: kolom MTBF & target MTBF');
+  assert.ok(findCell(ss.getSheetByName('Baca Saya'), new RegExp('^KPI ' + y + '$')), 'Baca Saya menjelaskan tab KPI');
+  target('E22H', '');
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

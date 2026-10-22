@@ -149,6 +149,11 @@ function refreshRekap() {
   });
   // Di luar lock: tab TPM (menerjemahkan teks baru; hasilnya disimpan dengan lock sendiri), lalu format & Ringkasan.
   try { buildTpm_(); } catch (e) { console.warn('TPM gagal (dicoba lagi besok / lewat Dashboard): ' + e); }
+  try {
+    var y = yearOf_(new Date());
+    buildKpi_(y);
+    if (monthOf_(new Date()) === 1) buildKpi_(y - 1);   // Januari: KPI Desember tahun lalu masih bisa ditutup
+  } catch (e) { console.warn('KPI gagal (dicoba lagi besok / lewat Dashboard): ' + e); }
   rapikanTampilan_({});
 }
 
@@ -547,6 +552,7 @@ function hapusDataTesting_(cutoff) {
       var sh = ss.getSheetByName(name);
       if (sh && /^Arsip /.test(name) && sh.getLastRow() < 2) ss.deleteSheet(sh);
     });
+    plan.counts.kpi = kpiReopen_(cutoff);   // KPI bulan tertutup yang berisi data testing dihitung ulang dari data tersisa
     resetHeaders_();
     var nowY = yearOf_(new Date()), years = {};
     years[nowY] = true;
@@ -570,8 +576,8 @@ function menuHapusDataTesting() {
   var r1 = ui.prompt('Hapus data testing',
     'Hapus PERMANEN pekerjaan maintenance yang DIMULAI SEBELUM tanggal (dd/mm/yyyy), mis. tanggal mulai pakai sungguhan.\n' +
     'Kosongkan = hapus SEMUA data maintenance.\n\n' +
-    'Ikut terhapus: Log, Pemakaian Sparepart, tab Arsip; Laporan & Rekap dibuat ulang.\n' +
-    'TIDAK dihapus: Users, Factory, Projects, Lines, Mesin, Sparepart, Pilihan, Form, Format Laporan, Catatan Panduan, Config.',
+    'Ikut terhapus: Log, Pemakaian Sparepart, tab Arsip; Laporan, Rekap, TPM & KPI dibuat ulang (bulan KPI yang sudah ditutup s/d tanggal itu dibuka lagi).\n' +
+    'TIDAK dihapus: Users, Factory, Projects, Lines, Sparepart, Pilihan, Form, Format Laporan, Catatan Panduan, Config.',
     ui.ButtonSet.OK_CANCEL);
   if (r1.getSelectedButton() !== ui.Button.OK) return;
   var cutoff = parseTanggalWib_(r1.getResponseText());
@@ -589,8 +595,10 @@ function menuHapusDataTesting() {
   var out = hapusDataTesting_(cutoff);
   var tpm = '';
   try { buildTpm_(); } catch (e) { tpm = ' Tab TPM gagal diperbarui (' + e.message + '): tekan Dashboard → Perbarui Laporan, Rekap & TPM.'; }
+  try { buildKpi_(); } catch (e) { tpm += ' Tab KPI gagal diperbarui (' + e.message + ').'; }
   ui.alert('Selesai: ' + out.maintenance + ' pekerjaan, ' + out.log + ' baris Log, ' + out.sparepart +
-    ' baris sparepart dihapus. Laporan, Rekap & TPM sudah dibuat ulang dari data yang tersisa.' + tpm);
+    ' baris sparepart dihapus. Laporan, Rekap, TPM & KPI sudah dibuat ulang dari data yang tersisa.' +
+    (out.kpi && out.kpi.length ? ' KPI yang dibuka lagi (tutup ulang setelah dicek): ' + out.kpi.map(ymLabel_).join(', ') + '.' : '') + tpm);
 }
 
 function menuArsipkanTahun() {

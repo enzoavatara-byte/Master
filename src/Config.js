@@ -27,7 +27,8 @@ var APP = {
     PENDING: 'Pending Work',
     TERJEMAHAN: 'Terjemahan',
     SARAN: 'Saran',
-    RENCANA: 'Rencana'
+    RENCANA: 'Rencana',
+    KPI_DATA: 'KPI data'
   },
 
   /** Sheet pengaturan yang dibaca ke cache master: edit di sini → cache dihapus. Edit sheet lain (Ringkasan, Laporan, …) tidak. */
@@ -39,7 +40,7 @@ var APP = {
     Users: ['Email', 'Nama', 'Peran', 'Aktif', 'Bahasa'],
     Factory: ['Factory ID', 'Nama', 'Lokasi', 'Aktif'],
     /** Satu baris per baterai/project. Sumber "baterai apa saja di factory ini" + status project. */
-    Projects: ['Factory ID', 'Baterai', 'Fase', 'Target MTTR (menit)', 'Catatan', 'Aktif'],
+    Projects: ['Factory ID', 'Baterai', 'Fase', 'Target MTTR (menit)', 'Catatan', 'Aktif', 'Target MTBF (jam)'],
     /** 2.6: satu baris = satu unit kerja = satu QR (mesin tidak dipilih lagi; nama mesin cukup ditulis di Nama Line).
      *  Proses = kelompok di atas line (kolom "Process" laporan). Baterai kosong = semua project di factory-nya.
      *  Kolom lama Alias, Grup (dan sheet Mesin) tidak dipakai lagi; boleh dihapus admin. */
@@ -76,7 +77,10 @@ var APP = {
       'Proses', 'Stop line', 'Jenis kerusakan', 'Detail masalah', 'Detail penyebab', 'Detail penanganan',
       'Nama PIC', 'Nama teknisi awal', 'Nama teknisi terlibat'
     ],
-    Log: ['Timestamp', 'Maintenance ID', 'Kejadian', 'User', 'Detail']
+    Log: ['Timestamp', 'Maintenance ID', 'Kejadian', 'User', 'Detail'],
+    /** KPI bulan yang sudah DITUTUP admin (2.6): salinan angka saat ditutup. Ditulis aplikasi, disembunyikan & diproteksi. */
+    'KPI data': ['Bulan', 'Level', 'Kunci', 'Nama', 'Kerusakan', 'MTTR (menit)', 'Target MTTR (menit)', 'Downtime (jam)', 'Jam operasi',
+      'MTBF (jam)', 'Target MTBF (jam)', 'Tercapai', 'Ditutup pada', 'Ditutup oleh']
   },
 
   DATE_COLUMNS: {
@@ -84,7 +88,8 @@ var APP = {
     Log: ['Timestamp'],
     'Pemakaian Sparepart': ['Tanggal'],
     Saran: ['Tanggal', 'Ditanggapi pada'],
-    Terjemahan: ['Diperbarui']
+    Terjemahan: ['Diperbarui'],
+    'KPI data': ['Ditutup pada']
   },
 
   LANGS: ['id', 'zh'],
@@ -130,7 +135,7 @@ var APP = {
   EVENTS: {
     START: 'start', PAUSE: 'pause', RESUME: 'resume', PENDING: 'pending', CONTINUE: 'lanjut',
     COMPLETE: 'complete', CANCEL: 'cancel', WARN: 'peringatan', CONFIRM: 'masih lanjut',
-    ABANDON: 'abandoned', REVIEW: 'review'
+    ABANDON: 'abandoned', REVIEW: 'review', TUTUP_BULAN: 'tutup bulan'
   },
 
   SYSTEM_USER: 'SYSTEM',
@@ -265,7 +270,11 @@ var APP = {
     TPM_MULAI: { value: '', description: 'Tab TPM: pekerjaan yang dimulai sejak tanggal ini (dd/mm/yyyy). Kosong = 1 Januari tahun ini' },
     TPM_TIPE: { value: 'Corrective', description: 'Tab TPM: tipe maintenance yang masuk (pisahkan dengan koma). Hanya yang sudah Completed' },
     TPM_JUDUL: { value: 'Statistical Analysis of Issues Reported from Production', description: 'Tab TPM: judul baris 6' },
-    TPM_PROJECT: { value: 'PROJECT NAME ATPU', description: 'Tab TPM: teks baris 3 (di atas nama project)' }
+    TPM_PROJECT: { value: 'PROJECT NAME ATPU', description: 'Tab TPM: teks baris 3 (di atas nama project)' },
+    JAM_OPERASI_PER_HARI: { value: 24, description: 'KPI MTBF: jam operasi per line per hari operasi (mis. 24 = 3 shift, 16 = 2 shift)' },
+    HARI_OPERASI: { value: 'Sen-Min', description: 'KPI MTBF: hari operasi, mis. "Sen-Min" (setiap hari), "Sen-Sab", atau "Sen,Sel,Rab,Kam,Jum"' },
+    TANGGAL_LIBUR: { value: '', description: 'KPI MTBF: tanggal tidak beroperasi (dd/mm/yyyy, pisahkan dengan koma), mis. 25/12/2026, 01/01/2027' },
+    KPI_MULAI: { value: '', description: 'KPI: dihitung sejak tanggal ini (dd/mm/yyyy), mis. tanggal aplikasi mulai dipakai. Kosong = awal bulan data pertama' }
   },
 
   LOCK_TIMEOUT_MS: 10000,

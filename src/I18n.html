@@ -233,7 +233,7 @@ I18N.zh = {
 
   // ---------- dashboard ----------
   '7 hari': '7 天', '30 hari': '30 天', '90 hari': '90 天', 'Tahun ini': '今年',
-  'MTTR & kesehatan mesin': 'MTTR 与设备状况', 'MTTR (Corrective)': 'MTTR（故障维修）', 'MTTR 7 hari (Corrective)': '近 7 天 MTTR（故障维修）',
+  'MTTR & kesehatan mesin': 'MTTR 与设备状况', 'MTTR, MTBF & kesehatan line': 'MTTR、MTBF 与产线状况', 'MTTR (Corrective)': 'MTTR（故障维修）', 'MTTR 7 hari (Corrective)': '近 7 天 MTTR（故障维修）',
   'MTTR ({x})': 'MTTR（{x}）', '{n} pekerjaan dihitung': '计入 {n} 项工作', '{d} total aktif': '有效时间合计 {d}',
   'tidak masuk MTTR': '不计入 MTTR', '{a} dihitung · {b} berjalan · {c} pending': '计入 {a} · 进行中 {b} · 挂起 {c}',
   'Corrective selesai': '完成的故障维修', 'Dihitung ke MTTR': '计入 MTTR', 'Sparepart manual': '手动备件', 'Preventive selesai': '完成的预防性维护',
@@ -251,11 +251,23 @@ I18N.zh = {
   '5 line tersering rusak': '故障最多的 5 条产线', '5 line terlama diperbaiki': '维修时间最长的 5 条产线',
   'Jumlah kerusakan di periode ini (termasuk yang masih berjalan). Paling menurunkan MTBF.': '此期间的故障次数（包括进行中的）。对 MTBF 影响最大。',
   'Total waktu aktif perbaikan di periode ini. Paling menaikkan MTTR.': '此期间维修有效时间合计。对 MTTR 影响最大。',
+  // KPI bulanan (2.6)
+  'Downtime stop line': '停线时间', '{n} pekerjaan stop line': '{n} 项停线工作', 'jam': '小时', '✓ Tercapai': '✓ 达标', '✗ {x} belum tercapai': '✗ {x} 未达标',
+  'target ≥ {v} {u}': '目标 ≥ {v} {u}', 'target ≤ {v} {u}': '目标 ≤ {v} {u}', 'KPI bulan ini · {m}': '本月 KPI · {m}',
+  'Semua line. MTBF = (jam operasi − downtime) ÷ jumlah kerusakan. Angka bisa berubah sampai bulan ditutup admin.': '所有产线。MTBF =（运行时间 − 停机时间）÷ 故障次数。管理员关账前数字可能变化。',
+  'tanpa kerusakan': '无故障', 'Kerusakan': '故障次数', 'Downtime': '停机时间', 'jam operasi {h}': '运行时间 {h}',
+  '{n}× rusak · downtime {d} jam · jam operasi {h}': '故障 {n} 次 · 停机 {d} 小时 · 运行 {h} 小时',
+  '{m} sudah ditutup {d} oleh {n}.': '{m} 已于 {d} 由 {n} 关账。', 'Tutup ulang': '重新关账', '{m} belum ditutup.': '{m} 尚未关账。',
+  '{n} pekerjaan bulan itu masih menunggu review': '该月仍有 {n} 项工作待审核', 'sebaiknya direview dulu.': '建议先审核。', 'Tutup bulan {m}': '关账 {m}',
+  'Angka KPI {m} dikunci: edit data lama sesudah ini tidak mengubahnya lagi. Tab KPI di Google Sheet ikut diperbarui.': '{m} 的 KPI 数字将被锁定：之后修改旧数据不再影响。Google 表格中的 KPI 标签页也会更新。',
+  'Sudah pernah ditutup: angka lama diganti angka sekarang, dan keduanya dicatat di Log.': '已关账过：旧数字将被当前数字替换，两者都记录在 Log 中。',
+  'Tutup bulan': '关账', '{m} ditutup.': '{m} 已关账。', '{n} pekerjaan masih menunggu review: tutup ulang setelah direview.': '{n} 项工作仍待审核：审核后请重新关账。',
   '{d} total': '合计 {d}', '{n}× rusak': '故障 {n} 次', 'rata-rata {m} mnt': '平均 {m} 分钟', 'Cari nama…': '搜索姓名…',
-  'Yang sering muncul sebaiknya dijadikan pilihan tetap di sheet <b>Pilihan</b> (atau <b>Mesin</b>) supaya teknisi cukup tap.':
-    '经常出现的内容建议加入 <b>Pilihan</b>（或 <b>Mesin</b>）表作为固定选项，技术员只需点选。',
+  'Yang sering muncul sebaiknya dijadikan pilihan tetap di sheet <b>Pilihan</b> supaya teknisi cukup tap.':
+    '经常出现的内容建议加入 <b>Pilihan</b> 表作为固定选项，技术员只需点选。',
   'Status project': '项目状态', 'Fase belum diisi': '未填写阶段', 'Belum ada data di periode ini.': '此期间暂无数据。',
-  'Laporan format Excel': 'Excel 格式报表', 'Perbarui Laporan, Rekap & TPM': '更新 Laporan、Rekap 和 TPM',
+  'Laporan format Excel': 'Excel 格式报表', 'Perbarui Laporan, Rekap & TPM': '更新 Laporan、Rekap 和 TPM', 'Perbarui Laporan, Rekap, TPM & KPI': '更新 Laporan、Rekap、TPM 和 KPI',
+  '✓ {s} diperbarui.': '✓ {s} 已更新。', 'KPI gagal: {e}': 'KPI 失败：{e}',
   'Tab <b>TPM &lt;project&gt;</b> (format Excel manager, 中文 + English) diperbarui tiap malam dan saat tombol ini ditekan.':
     '<b>TPM &lt;项目&gt;</b> 页（经理的 Excel 格式，中文 + English）每晚及点此按钮时更新。',
   '✓ TPM: {s}.': '✓ TPM：{s}。', 'TPM gagal: {e}': 'TPM 失败：{e}',

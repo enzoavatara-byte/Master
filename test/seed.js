@@ -39,6 +39,7 @@ P.data.slice(1).forEach(r => {
   const b = r[ph.indexOf('Baterai')];
   r[ph.indexOf('Fase')] = { VF7: 'Trial', Limo7: 'Mass Production', E22H: 'Mass Production', E245: 'Ramp-up' }[b];
   r[ph.indexOf('Target MTTR (menit)')] = { VF7: 45, Limo7: 30, E22H: 30, E245: 40 }[b];
+  r[ph.indexOf('Target MTBF (jam)')] = { VF7: 150, Limo7: 300, E22H: 200, E245: 100 }[b];   // KPI 2.6
 });
 ss.getSheetByName('Catatan Panduan').appendRow(rowOf('Catatan Panduan', { Untuk: 'Teknisi', Judul: 'Kunci panel listrik', Isi: 'Ambil di pos security Hall A.\nTulis nama & jam di buku kunci.', Urutan: 1, Aktif: 'Ya' }));
 const pid = (j, n, m) => ctx.partId_(j, n, m);

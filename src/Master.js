@@ -112,10 +112,11 @@ function buildMaster_() {
   md.projects = readOptional_(APP.SHEETS.PROJECTS).filter(function (p) {
     return isActiveRow_(p['Aktif']) && String(p['Baterai'] || '').trim();
   }).map(function (p) {
-    var t = Number(p['Target MTTR (menit)']);
+    var t = Number(p['Target MTTR (menit)']), tb = Number(String(p['Target MTBF (jam)'] == null ? '' : p['Target MTBF (jam)']).replace(',', '.'));
     return {
       factory: normLine_(p['Factory ID']), battery: String(p['Baterai']).trim(), fase: String(p['Fase'] || ''),
-      target: (isFinite(t) && t > 0) ? t : null, catatan: String(p['Catatan'] || '')
+      target: (isFinite(t) && t > 0) ? t : null, catatan: String(p['Catatan'] || ''),
+      targetMtbf: (p['Target MTBF (jam)'] !== '' && isFinite(tb) && tb > 0) ? tb : null   // 2.6: KPI MTBF (jam)
     };
   });
   md.projects.forEach(function (p) {

@@ -122,16 +122,16 @@ function tabPlan_(ss) {
     if (real && !seen[real]) { seen[real] = true; plan.push([real, grp, !!hide]); }
   };
   add(RINGKASAN_, 'baca'); add(BACA_, 'baca');
-  add(laporanName_(y), 'laporan'); add(rekapName_(y), 'laporan');
+  add(laporanName_(y), 'laporan'); add(rekapName_(y), 'laporan'); add(kpiName_(y), 'laporan');
   ss.getSheets().map(function (sh) { return sh.getName(); }).filter(function (n) { return n.indexOf(TPM_PREFIX_) === 0; }).sort()
     .forEach(function (n) { add(n, 'laporan'); });
   add(S.PENDING, 'laporan'); add(S.SARAN, 'laporan');
   add(S.MAINT, 'app'); add(S.PEMAKAIAN, 'app');
   [S.USERS, S.LINES, S.SPAREPART, S.OPTIONS].forEach(function (n) { add(n, 'atur'); });
   [S.PROJECTS, S.FACTORY, S.FORM, S.FORMAT, S.PANDUAN, S.CONFIG, S.RENCANA, S.MESIN].forEach(function (n) { add(n, 'atur', true); });   // Mesin: tidak dipakai lagi (2.6)
-  add(S.LOG, 'app', true); add(S.TERJEMAHAN, 'app', true);
+  add(S.LOG, 'app', true); add(S.TERJEMAHAN, 'app', true); add(S.KPI_DATA, 'app', true);
   var rest = ss.getSheets().map(function (sh) { return sh.getName(); }).filter(function (n) { return !seen[n]; });
-  rest.filter(function (n) { return /^(Laporan|Rekap) \d{4}$/.test(n); }).sort().reverse().forEach(function (n) { add(n, 'laporan', true); });
+  rest.filter(function (n) { return /^(Laporan|Rekap|KPI) \d{4}$/.test(n); }).sort().reverse().forEach(function (n) { add(n, 'laporan', true); });
   rest.filter(function (n) { return n.indexOf(S.MAINT + ' ') === 0; }).forEach(function (n) { add(n, 'app', true); });
   rest.filter(function (n) { return /^Arsip( Log| Sparepart)? \d{4}$/.test(n); }).sort().reverse().forEach(function (n) { add(n, 'arsip', true); });
   return plan;   // tab buatan admin sendiri tidak disentuh (tetap di belakang, tetap terlihat)
@@ -368,7 +368,7 @@ function buildRingkasan_(ss) {
     return "'" + APP.SHEETS.MAINT + "'!" + L + '2:' + L;
   };
   var ST = R('Status'), MU = R('Mulai'), SE = R('Selesai'), SJ = R('Status sejak'), AK = R('Total aktif (menit)'), MM = R('Masuk MTTR');
-  var TI = R('Tipe'), BA = R('Baterai'), JE = R('Jenis kerusakan'), SL = R('Stop line'), TG = R('Tenggat'), RV = R('Status review');
+  var BA = R('Baterai'), JE = R('Jenis kerusakan'), SL = R('Stop line'), TG = R('Tenggat'), RV = R('Status review');
   var LI = R('Line'), PIC = R('Nama PIC'), TT = R('Yang tertunda');
   // Sel bantu (kolom K, disembunyikan): K1 tanggal tampil, K2 awal bulan, K3 awal bulan berikutnya.
   var D = '$K$1', B0 = '$K$2', B1 = '$K$3';
@@ -402,9 +402,9 @@ function buildRingkasan_(ss) {
 
   var r = 6;
   var section = function (text) { put(r, 2, text); fmt.push(['section', r]); r++; };
-  var kpis = function (items) {   // 4 kotak, masing-masing 2 kolom
+  var kpis = function (items) {   // 4 kotak, masing-masing 2 kolom; it[2] = format angka (bawaan "0")
     items.forEach(function (it, i) { put(r, 2 + i * 2, it[0]); put(r + 1, 2 + i * 2, it[1]); });
-    fmt.push(['kpi', r, items.length]);
+    fmt.push(['kpi', r, items.length, items.map(function (it) { return it[2] || '0'; })]);
     r += 3;
   };
   section('HARI INI 今天  ·  tanggal yang dipilih');
@@ -423,14 +423,20 @@ function buildRingkasan_(ss) {
     ['Perlu review 待审核', '=COUNTIF(' + RV + ',"' + APP.REVIEW.NEEDED + '")']
   ]);
   section('="BULAN 本月  ·  "&TEXT(' + B0 + ',"mmmm yyyy")');
-  var types = mttrTypes_();
-  var corr = types.map(function (t) { return done(B0, B1, ',' + TI + ',"' + t + '"'); }).concat([done(B0, B1, ',' + TI + ',""')]).join('+');
-  var isDefault = types.length === 1 && types[0] === 'corrective';
+  // 2.6: MTBF dibaca dari tab "KPI <tahun>" (dihitung aplikasi; bulan yang sudah ditutup = angka yang dikunci).
+  var KP = function (col) { return 'INDIRECT("\'' + KPI_PREFIX_ + '"&YEAR(' + B0 + ')&"\'!' + col + '2:' + col + '")'; };
+  var YM = 'YEAR(' + B0 + ')&"-"&TEXT(MONTH(' + B0 + '),"00")';
+  var kpiCell = function (level, nama) {
+    return '=IFERROR(INDEX(FILTER(' + KP('I') + ',' + KP('A') + '=' + YM + ',' + KP('B') + '="' + level + '"' + (nama ? ',' + KP('C') + '=' + nama : '') +
+      ',' + KP('I') + '<>""),1),"–")';
+  };
   kpis([
     ['Selesai 完成', '=' + done(B0, B1)],
     ['MTTR (menit) 平均修复时间', mttr(B0, B1)],
-    [isDefault ? 'Corrective 故障维修' : 'Masuk MTTR (' + types.join(', ') + ')', '=' + corr],
-    [isDefault ? 'Preventive 预防性维护' : 'Tipe lain 其他类型', '=' + done(B0, B1) + '-(' + corr + ')']
+    // Downtime = Mulai → Selesai pekerjaan stop line (sama dengan KPI & "Durasi stop line" Laporan)
+    ['Downtime (jam) 停机时间', '=IFERROR(ROUND(SUM(FILTER(' + SE + '-' + MU + ',' + SL + '="' + APP.YES + '",' + MM + '="' + APP.MTTR.YES + '",' +
+      SE + '>=' + B0 + ',' + SE + '<' + B1 + '))*24,1),0)', '0.0'],
+    ['MTBF (jam) 平均故障间隔', kpiCell(KPI_LEVEL_.PLANT), '0.0']
   ]);
 
   // status pekerjaan yang dimulai bulan ini (kotak berwarna = arti warna di semua tab)
@@ -447,7 +453,7 @@ function buildRingkasan_(ss) {
 
   // per project
   put(r, 2, 'Per project bulan ini  ·  本月各项目'); fmt.push(['sub', r]); r++;
-  ['Baterai 电池项目', 'Selesai 完成', 'MTTR (menit) 平均修复时间', 'Target 目标', 'Hasil 结果'].forEach(function (t, i) { put(r, 2 + i, t); });
+  ['Baterai 电池项目', 'Selesai 完成', 'MTTR (menit) 平均修复时间', 'Target MTTR 目标', 'MTBF (jam) 平均故障间隔', 'Target MTBF 目标', 'Hasil 结果'].forEach(function (t, i) { put(r, 2 + i, t); });
   var pHead = r; r++;
   var seenBat = {}, projects = md.projects.filter(function (p) { if (seenBat[p.battery]) return false; seenBat[p.battery] = true; return true; });
   projects.forEach(function (p) {
@@ -456,11 +462,18 @@ function buildRingkasan_(ss) {
     put(r, 3, '=' + done(B0, B1, ',' + BA + ',' + q));
     put(r, 4, mttr(B0, B1, ',' + BA + '=' + q));
     put(r, 5, p.target == null ? '' : p.target);
-    put(r, 6, '=IF(OR(NOT(ISNUMBER(D' + r + ')),NOT(ISNUMBER(E' + r + '))),"",IF(D' + r + '<=E' + r + ',"✓ Sesuai target 达标","▲ Di atas target 超标"))');
+    put(r, 6, kpiCell(KPI_LEVEL_.PROJECT, q));
+    var tb = md.projects.filter(function (x) { return x.battery === p.battery && x.targetMtbf != null; })[0];
+    put(r, 7, tb ? tb.targetMtbf : '');
+    // ✓ jika semua target yang terisi tercapai (MTTR ≤ target, MTBF ≥ target); kosong jika belum ada angka / target
+    var ok = function (a, t, ge) { return 'OR(NOT(ISNUMBER(' + a + r + ')),NOT(ISNUMBER(' + t + r + ')),' + a + r + (ge ? '>=' : '<=') + t + r + ')'; };
+    var none = function (a, t) { return 'OR(NOT(ISNUMBER(' + a + r + ')),NOT(ISNUMBER(' + t + r + ')))'; };
+    put(r, 8, '=IF(AND(' + none('D', 'E') + ',' + none('F', 'G') + '),"",IF(AND(' + ok('D', 'E') + ',' + ok('F', 'G', true) + '),"✓ Sesuai target 达标","▲ Belum sesuai target 未达标"))');
+    fmt.push(['num', r, 6, 1, '0.0']); fmt.push(['num', r, 7, 1, '0.0']);
     r++;
   });
   if (!projects.length) { put(r, 2, '(belum ada project di sheet Projects)'); r++; }
-  fmt.push(['table', pHead, r - 1, 5]);
+  fmt.push(['table', pHead, r - 1, 7]);
   r++;
 
   // jenis kerusakan (selesai bulan ini), urut terbanyak → grafik batang
@@ -546,7 +559,7 @@ function buildRingkasan_(ss) {
       for (var i = 0; i < f[2]; i++) {
         var c0 = 2 + i * 2;
         sh.getRange(A(f[1], c0, f[1], c0 + 1)).merge().setFontColor(TEMA_.muted).setFontSize(11).setHorizontalAlignment('center').setWrap(true);
-        sh.getRange(A(f[1] + 1, c0, f[1] + 1, c0 + 1)).merge().setFontSize(24).setFontWeight('bold').setHorizontalAlignment('center').setNumberFormat('0');
+        sh.getRange(A(f[1] + 1, c0, f[1] + 1, c0 + 1)).merge().setFontSize(24).setFontWeight('bold').setHorizontalAlignment('center').setNumberFormat(f[3][i]);
         sh.getRange(A(f[1], c0, f[1] + 1, c0 + 1))
           .setBorder(true, true, true, true, null, null, '#D0D7E2', SpreadsheetApp.BorderStyle.SOLID);
       }
@@ -583,8 +596,8 @@ function buildRingkasan_(ss) {
     .setRanges([sh.getRange(A(nowRow + 1, 6, nowRow + 1, 7))]).build());
   rules.push(SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThan(0).setBackground(TEMA_.review[0]).setFontColor(TEMA_.review[1])
     .setRanges([sh.getRange(A(nowRow + 1, 8, nowRow + 1, 9))]).build());
-  rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextStartsWith('✓').setFontColor(TEMA_.status.Completed[1]).setBold(true).setRanges([sh.getRange(pHead + 1, 6, Math.max(1, projects.length), 1)]).build());
-  rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextStartsWith('▲').setFontColor(TEMA_.late).setBold(true).setRanges([sh.getRange(pHead + 1, 6, Math.max(1, projects.length), 1)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextStartsWith('✓').setFontColor(TEMA_.status.Completed[1]).setBold(true).setRanges([sh.getRange(pHead + 1, 8, Math.max(1, projects.length), 1)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextStartsWith('▲').setFontColor(TEMA_.late).setBold(true).setRanges([sh.getRange(pHead + 1, 8, Math.max(1, projects.length), 1)]).build());
   sh.setConditionalFormatRules(rules);
 
   // ---- grafik: satu warna (jumlah), angka ada di tabel sebelahnya ----
@@ -642,6 +655,8 @@ function buildBacaSaya_(ss) {
     [T.baca, BACA_, 'Penjelasan ini.\n本说明。', 'Tidak\n否'],
     [T.laporan, laporanName_(y), 'Laporan format Excel (Form Stop Line). Satu baris = satu pekerjaan. Untuk dikirim ke atasan.\nExcel 格式报表（停线表）。一行 = 一项工作。', 'Tidak: dibuat ulang otomatis. Salah isi → perbaiki di tab Maintenance.\n否：自动重建。请在 Maintenance 中修改。'],
     [T.laporan, rekapName_(y), 'Jumlah pekerjaan & MTTR per bulan.\n每月工作数量和 MTTR。', 'Tidak (otomatis)\n否（自动）'],
+    [T.laporan, kpiName_(y), 'KPI bulanan: kerusakan, MTTR, downtime, jam operasi, MTBF per Plant / Project / Line + target (✓ / ✗). Bulan yang sudah "Ditutup" admin = angka terkunci.\n每月 KPI：故障次数、MTTR、停机时间、运行时间、MTBF（工厂 / 项目 / 产线）及目标。已关账月份数字锁定。',
+      'Tidak: dihitung aplikasi (tiap malam, Dashboard, tutup bulan). Jam operasi & target → Config / Projects.\n否：自动计算。'],
     [T.laporan, TPM_PREFIX_ + '<project>', 'Format Excel TPM manager (中文 + English): masalah Corrective yang selesai. Copy baris 9 ke bawah ke Excel manager.\nTPM 格式（中英文）：已完成的故障维修。复制第 9 行以下到经理的 Excel。',
       'Tidak: dibuat ulang tiap malam & lewat Dashboard. Salah isi → perbaiki di Maintenance / Pilihan.\n否：每晚自动重建。'],
     [T.laporan, APP.SHEETS.PENDING, 'Pekerjaan yang tertunda (pending). Merah = lewat tenggat.\n挂起的工作。红色 = 已逾期。', 'Tidak (otomatis)\n否（自动）'],
@@ -654,10 +669,11 @@ function buildBacaSaya_(ss) {
     [T.atur, N(APP.SHEETS.OPTIONS), 'Isi pilihan di form (masalah, penyebab, …) + nama 中文 / English + Discipline TPM per jenis kerusakan.\n表单选项（现象、原因 …）、中英文名称及 TPM 范围。', 'Ya (admin)\n可以（管理员）']
   ];
   var hidden = [
-    [T.atur, N(APP.SHEETS.PROJECTS) + ', ' + N(APP.SHEETS.FACTORY), 'Project baterai & target MTTR; daftar factory.\n电池项目和 MTTR 目标；工厂列表。'],
+    [T.atur, N(APP.SHEETS.PROJECTS) + ', ' + N(APP.SHEETS.FACTORY), 'Project baterai & target MTTR / MTBF (KPI); daftar factory.\n电池项目和 MTTR / MTBF 目标；工厂列表。'],
     [T.atur, N(APP.SHEETS.FORM) + ', ' + N(APP.SHEETS.FORMAT), 'Pertanyaan form aplikasi; kolom tab Laporan.\n应用表单问题；报表列。'],
     [T.atur, N(APP.SHEETS.CONFIG) + ', ' + N(APP.SHEETS.PANDUAN) + ', ' + N(APP.SHEETS.RENCANA), 'Aturan (jam peringatan, nama aplikasi…); catatan & rencana di Panduan aplikasi.\n规则；应用指南中的说明和计划。'],
     [T.app, APP.SHEETS.LOG + ', ' + APP.SHEETS.TERJEMAHAN, 'Riwayat setiap tombol; hasil terjemahan (boleh dikoreksi).\n每次操作记录；翻译结果（可修改）。'],
+    [T.app, APP.SHEETS.KPI_DATA, 'Salinan KPI bulan yang sudah ditutup admin (jangan diedit).\n已关账月份的 KPI 副本（请勿编辑）。'],
     [T.app, APP.SHEETS.MAINT + ' <baterai>', 'Data Maintenance per baterai (otomatis).\n按电池项目的维修数据（自动）。'],
     [T.arsip, 'Arsip <tahun>, Laporan/Rekap tahun lalu', 'Data tahun sebelumnya.\n往年数据。']
   ];

@@ -427,8 +427,8 @@ function apiDashboard(f) {
   var all = allRows.filter(function (r) { return matchFilter_(md, r, filt, c.names); });
   var inPeriod = all.filter(function (r) { return r['Mulai'] instanceof Date && r['Mulai'] >= from; });
 
-  var kpi = { mttr: null, mttrN: 0, corrective: 0, preventive: 0, activeMin: 0, cancelled: 0, abandoned: 0,
-    openNow: 0, pendingNow: 0, overdueNow: 0 };
+  var kpi = { mttr: null, mttrN: 0, corrective: 0, activeMin: 0, cancelled: 0, abandoned: 0,
+    openNow: 0, pendingNow: 0, overdueNow: 0, downtimeMin: 0, stopN: 0 };
   var sum = 0;
   var byLine = {}, byTech = {}, byProblem = {}, byOther = {}, byJenis = {};
   var mttrTypes = mttrTypes_();
@@ -442,8 +442,10 @@ function apiDashboard(f) {
     if (st === APP.STATUS.CANCELLED) { kpi.cancelled++; return; }
     if (st === APP.STATUS.ABANDONED) kpi.abandoned++;
     if (st === APP.STATUS.COMPLETED) {
-      if (!tipe || mttrTypes.indexOf(tipe.toLowerCase()) !== -1) kpi.corrective++; else kpi.preventive++;
+      if (!tipe || mttrTypes.indexOf(tipe.toLowerCase()) !== -1) kpi.corrective++;
       kpi.activeMin += min;
+      // Downtime (2.6) = Mulai → Selesai pekerjaan stop line, sama dengan KPI & "Durasi stop line" Laporan
+      if (r['Stop line'] === APP.YES && r['Selesai'] instanceof Date) { kpi.downtimeMin += (r['Selesai'].getTime() - r['Mulai'].getTime()) / 60000; kpi.stopN++; }
     }
     if (counted) { sum += min; kpi.mttrN++; }
     // Frekuensi: semua pekerjaan non-cancel (termasuk yang masih berjalan/pending) = seberapa sering line (unit) bermasalah.
@@ -455,13 +457,14 @@ function apiDashboard(f) {
     }
     if (r['Masalah']) inc_(byProblem, String(r['Masalah']), min, counted);
     if (st === APP.STATUS.COMPLETED && r['Jenis kerusakan']) inc_(byJenis, String(r['Jenis kerusakan']), min, counted);
-    ['Nama Mesin', 'Masalah', 'Penyebab', 'Penanganan', 'Yang tertunda', 'Alasan cancel'].forEach(function (col) {
+    ['Masalah', 'Penyebab', 'Penanganan', 'Yang tertunda', 'Alasan cancel'].forEach(function (col) {
       var v = String(r[col] || '');
       if (v.indexOf(APP.OTHER_PREFIX) === 0) inc_(byOther, col + ' → ' + v.slice(APP.OTHER_PREFIX.length).trim().toLowerCase(), 0, false);
     });
   });
   kpi.mttr = kpi.mttrN ? round2_(sum / kpi.mttrN) : null;
   kpi.activeMin = round2_(kpi.activeMin);
+  kpi.downtimeMin = round2_(kpi.downtimeMin);
   all.forEach(function (r) {
     if (isOpen_(r)) kpi.openNow++;
     if (r['Status'] === APP.STATUS.PENDING) {
@@ -547,6 +550,8 @@ function apiDashboard(f) {
     parts: topList_(byPart, 10, function (out, o) { out.qty = o.qty; out.jenis = o.jenis; }),
     others: topList_(byOther, 10),
     projects: projects,
+    // KPI bulan berjalan (2.6): semua line, tidak ikut filter & periode (sama dengan tab KPI <tahun>)
+    kpiMonth: kpiDashboard_(user, allRows, md, c.now, c.names),
     warnings: warnings,
     mttrTypes: String(getConfig_('MTTR_TIPE'))
   };
@@ -562,10 +567,12 @@ function apiBuildReports(year) {
   requireUser_([APP.ROLES.ADMIN]);
   var y = year ? checkYear_(year) : yearOf_(new Date());
   var built = withLock_(function () { return { lap: buildLaporan_(y), rek: buildRekap_(y) }; });   // tidak bentrok dengan sinkron langsung
-  var lap = built.lap, rek = built.rek, tpm = null, tpmError = '';
+  var lap = built.lap, rek = built.rek, tpm = null, tpmError = '', kpi = null, kpiError = '';
   try { tpm = buildTpm_(); } catch (e) { tpmError = String(e && e.message || e); }
+  try { kpi = buildKpi_(y); } catch (e) { kpiError = String(e && e.message || e); }
   return { year: y, laporan: lap.sheet, rows: lap.rows, rekap: rek.sheet, spreadsheetUrl: SpreadsheetApp.getActive().getUrl(),
-    tpm: tpm ? tpm.sheets : [], tpmUntranslated: tpm ? tpm.untranslated : 0, tpmWarn: tpm ? tpm.warn : '', tpmError: tpmError };
+    tpm: tpm ? tpm.sheets : [], tpmUntranslated: tpm ? tpm.untranslated : 0, tpmWarn: tpm ? tpm.warn : '', tpmError: tpmError,
+    kpi: kpi ? kpi.sheet : '', kpiWarn: kpi ? kpi.warn : '', kpiError: kpiError };
 }
 
 // ---------- Saran teknisi → admin ----------
