@@ -502,13 +502,13 @@ function buildRingkasan_(ss) {
     return '=IFERROR(QUERY(FILTER({' + LI + ',' + MU + ',' + AK + '},' + MU + '>=' + B0 + ',' + MU + '<' + B1 + ',' + ST + '<>"' + APP.STATUS.CANCELLED + '",' + LI + '<>""),"select Col1, count(Col2), sum(Col3)/60, avg(Col3) group by Col1 order by ' + order +
       ' limit 5 label Col1 \'\', count(Col2) \'\', sum(Col3)/60 \'\', avg(Col3) \'\'",0),"–")';
   };
-  put(r, 2, top5('count(Col2) desc, sum(Col3) desc'));
-  put(r, 6, top5('sum(Col3) desc, count(Col2) desc'));
+  // ORDER BY hanya boleh memakai kolom yang ada di SELECT (Google: COL_IN_ORDER_MUST_BE_IN_SELECT) → sum(Col3)/60, bukan sum(Col3)
+  put(r, 2, top5('count(Col2) desc, sum(Col3)/60 desc'));
+  put(r, 6, top5('sum(Col3)/60 desc, count(Col2) desc'));
   r += 5;
   fmt.push(['table', tHead, r - 1, 4, 2]);
   fmt.push(['table', tHead, r - 1, 4, 6]);
-  fmt.push(['num', tHead + 1, 4, 5, '0.0']); fmt.push(['num', tHead + 1, 5, 5, '0']);
-  fmt.push(['num', tHead + 1, 8, 5, '0.0']); fmt.push(['num', tHead + 1, 9, 5, '0']);
+  [[3, '0'], [4, '0.0'], [5, '0'], [7, '0'], [8, '0.0'], [9, '0']].forEach(function (c) { fmt.push(['num', tHead + 1, c[0], 5, c[1]]); });
   r++;
 
   // masih terbuka sekarang (rumus FILTER memanjang ke bawah: selalu paling bawah)

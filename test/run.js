@@ -1411,8 +1411,15 @@ test('2.6 Top 5 dua daftar per line: tersering (jumlah) & terlama (total waktu a
   const base = "=IFERROR(QUERY(FILTER({'Maintenance'!" + li + '2:' + li + ",'Maintenance'!" + mu + '2:' + mu + ",'Maintenance'!" + ak + '2:' + ak +
     "},'Maintenance'!" + mu + '2:' + mu + ">=$K$2,'Maintenance'!" + mu + '2:' + mu + "<$K$3,'Maintenance'!" + st + '2:' + st + '<>"Cancelled"';
   assert.ok(fF.startsWith(base), fF.slice(0, 160));
-  assert.ok(fF.includes('order by count(Col2) desc, sum(Col3) desc limit 5'));
-  assert.ok(fL.startsWith(base) && fL.includes('order by sum(Col3) desc, count(Col2) desc limit 5'));
+  assert.ok(fF.includes('order by count(Col2) desc, sum(Col3)/60 desc limit 5'));
+  assert.ok(fL.startsWith(base) && fL.includes('order by sum(Col3)/60 desc, count(Col2) desc limit 5'));
+  // Google QUERY: setiap kolom ORDER BY harus persis ada di SELECT (diuji di Google Sheets asli: sum(Col3) ditolak jika SELECT berisi sum(Col3)/60)
+  R.data.flat().concat(Object.values(R.formulas)).filter(f => typeof f === 'string' && f.includes('QUERY(')).forEach(f => {
+    const q = /"select (.*?) group by .*? order by (.*?) limit/.exec(f);
+    if (!q) return;
+    const sel = q[1].split(',').map(x => x.trim());
+    q[2].split(',').map(x => x.trim().replace(/ (desc|asc)$/, '')).forEach(o => assert.ok(sel.includes(o), 'ORDER BY ' + o + ' ada di SELECT: ' + sel.join(' | ')));
+  });
 });
 
 test('2.5.1 tabel: Maintenance belang + filter + status berwarna; kolom teknis disembunyikan; aturan warna admin tetap; idempotent', () => {
@@ -1554,7 +1561,7 @@ test('2.5.1 locale: en_US → rumus koma; Indonesia (desimal koma) → ; dan \\ 
     assert.strictEqual(cellOf(R, 'K1'), '=IF(ISNUMBER($C$4);INT($C$4);TODAY())');
     jeq(fs_.filter(f => bareCommas(f)), [], 'tidak ada koma pemisah tersisa');
     assert.ok(fs_.some(f => /^=SORT\(\{"Elektrikal 电气"\\COUNTIFS\(/.test(f)), 'array: kolom dipisah \\');
-    assert.ok(fs_.some(f => f.includes('"select Col1, count(Col2), sum(Col3)/60, avg(Col3) group by Col1 order by count(Col2) desc, sum(Col3) desc limit 5')), 'teks QUERY tidak diubah');
+    assert.ok(fs_.some(f => f.includes('"select Col1, count(Col2), sum(Col3)/60, avg(Col3) group by Col1 order by count(Col2) desc, sum(Col3)/60 desc limit 5')), 'teks QUERY tidak diubah');
     const pw = ss.getSheetByName('Pending Work').formulas.A2;
     assert.ok(pw.includes("{'Maintenance'!A2:A\\ ") && !bareCommas(pw), 'Pending Work: ' + pw.slice(0, 60));
     assert.ok(!bareCommas(ss.getSheetByName('Maintenance VF7').formulas.A1));
