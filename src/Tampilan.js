@@ -112,6 +112,45 @@ function menuTampilkanSemuaTab() {
   SpreadsheetApp.getActive().getSheets().forEach(function (sh) { if (sh.isSheetHidden()) sh.showSheet(); });
 }
 
+// ---------- tab per project yang boleh dimatikan / dihapus admin (2.6.1) ----------
+
+/**
+ * "TPM <project>" dan "Maintenance <project>" hanya hasil, jadi admin boleh mematikannya. Config[key] = project yang
+ * dimatikan (pisahkan koma, huruf besar/kecil bebas) atau "Semua". Tab yang pernah dibuat aplikasi (DocumentProperties)
+ * lalu hilang = dihapus admin → project itu ditulis ke Config + Log dan tidak dibuat lagi; nyalakan lagi = hapus namanya
+ * dari Config. Project yang dimatikan → tab bernama persis itu dihapus (tab yang diganti nama admin tidak disentuh).
+ * @param {string} key kunci Config
+ * @param {function(string):string} nameOf baterai → nama tab
+ * @param {string[]} bats baterai yang biasanya punya tab
+ * @return {{on: string[], all: boolean, done: function()}} on = baterai yang tabnya dibuat; done() setelah tab dibuat
+ */
+function projectTabs_(key, nameOf, bats) {
+  var ss = SpreadsheetApp.getActive(), props = PropertiesService.getDocumentProperties(), pk = 'MTTR_TABS_' + key;
+  var made = [];
+  try { made = JSON.parse(props.getProperty(pk) || '[]') || []; } catch (e) { made = []; }
+  var raw = String(getConfig_(key) || '').trim(), all = /^semua$/i.test(raw);
+  var off = all ? [] : raw.split(/[,;\n]/).map(function (x) { return x.trim().toLowerCase(); }).filter(String);
+  var isOff = function (b) { return all || off.indexOf(String(b).toLowerCase()) !== -1; };
+  var gone = all ? [] : bats.filter(function (b) { return !isOff(b) && made.indexOf(nameOf(b)) !== -1 && !ss.getSheetByName(nameOf(b)); });
+  if (gone.length) {
+    var val = (raw ? raw + ', ' : '') + gone.join(', ');
+    setConfig_(key, val);
+    log_(new Date(), key, 'tab dimatikan', currentEmail_() || 'SYSTEM', 'Tab ' + gone.map(nameOf).join(', ') + ' dihapus → Config ' + key + ' = ' + val +
+      '. Hapus namanya dari Config untuk membuat tabnya lagi.');
+    off = off.concat(gone.map(function (b) { return b.toLowerCase(); }));
+  }
+  var on = bats.filter(function (b) { return !isOff(b); });
+  bats.map(nameOf).concat(made).forEach(function (n) {
+    if (on.some(function (b) { return nameOf(b) === n; })) return;
+    var sh = ss.getSheetByName(n);
+    if (sh && ss.getSheets().length > 1) ss.deleteSheet(sh);
+  });
+  return {
+    on: on, all: all,
+    done: function () { props.setProperty(pk, JSON.stringify(on.map(nameOf).filter(function (n) { return !!ss.getSheetByName(n); }))); }
+  };
+}
+
 // ---------- tab: warna, urutan, sembunyikan ----------
 
 /** @return {Array<[string,string,boolean]>} [nama tab, kelompok warna, disembunyikan], urutan = urutan tampil */
@@ -122,7 +161,11 @@ function tabPlan_(ss) {
     if (real && !seen[real]) { seen[real] = true; plan.push([real, grp, !!hide]); }
   };
   add(RINGKASAN_, 'baca'); add(BACA_, 'baca');
-  add(laporanName_(y), 'laporan'); add(rekapName_(y), 'laporan'); add(kpiName_(y), 'laporan');
+  add(laporanName_(y), 'laporan');
+  var md = masterData_();   // Maintenance <baterai> = Laporan per project (2.6.1): tepat setelah Laporan
+  (md.allBatteries.length ? md.allBatteries : APP.PROJECT_DEFAULTS.map(function (p) { return p[1]; }))
+    .forEach(function (b) { add(S.MAINT + ' ' + b, 'laporan'); });
+  add(rekapName_(y), 'laporan'); add(kpiName_(y), 'laporan');
   ss.getSheets().map(function (sh) { return sh.getName(); }).filter(function (n) { return n.indexOf(TPM_PREFIX_) === 0; }).sort()
     .forEach(function (n) { add(n, 'laporan'); });
   add(S.PENDING, 'laporan'); add(S.SARAN, 'laporan');
@@ -654,11 +697,13 @@ function buildBacaSaya_(ss) {
     [T.baca, RINGKASAN_, 'Angka hari ini, sekarang, dan bulan ini + grafik. Ganti tanggal di sel kuning.\n今天、现在和本月的数据与图表。在黄色单元格中更改日期。', 'Hanya sel tanggal (kuning)\n只改黄色日期格'],
     [T.baca, BACA_, 'Penjelasan ini.\n本说明。', 'Tidak\n否'],
     [T.laporan, laporanName_(y), 'Laporan format Excel (Form Stop Line). Satu baris = satu pekerjaan. Untuk dikirim ke atasan.\nExcel 格式报表（停线表）。一行 = 一项工作。', 'Tidak: dibuat ulang otomatis. Salah isi → perbaiki di tab Maintenance.\n否：自动重建。请在 Maintenance 中修改。'],
+    [T.laporan, APP.SHEETS.MAINT + ' <baterai>', 'Laporan per project: sama dengan ' + laporanName_(y) + ', hanya baris project itu (No. 1..n), selalu terbaru.\n按项目的报表：与 ' + laporanName_(y) + ' 相同，只显示该项目，自动更新。',
+      'Tidak: salah isi → perbaiki di Maintenance. Boleh dihapus: tidak dibuat lagi (Config TAB_BATERAI_DIMATIKAN).\n否。可删除，不再生成。'],
     [T.laporan, rekapName_(y), 'Jumlah pekerjaan & MTTR per bulan.\n每月工作数量和 MTTR。', 'Tidak (otomatis)\n否（自动）'],
     [T.laporan, kpiName_(y), 'KPI bulanan: kerusakan, MTTR, downtime, jam operasi, MTBF per Plant / Project / Line + target (✓ / ✗). Bulan yang sudah "Ditutup" admin = angka terkunci.\n每月 KPI：故障次数、MTTR、停机时间、运行时间、MTBF（工厂 / 项目 / 产线）及目标。已关账月份数字锁定。',
       'Tidak: dihitung aplikasi (tiap malam, Dashboard, tutup bulan). Jam operasi & target → Config / Projects.\n否：自动计算。'],
     [T.laporan, TPM_PREFIX_ + '<project>', 'Format Excel TPM manager (中文 + English): masalah Corrective yang selesai. Copy baris 9 ke bawah ke Excel manager.\nTPM 格式（中英文）：已完成的故障维修。复制第 9 行以下到经理的 Excel。',
-      'Tidak: dibuat ulang tiap malam & lewat Dashboard. Salah isi → perbaiki di Maintenance / Pilihan.\n否：每晚自动重建。'],
+      'Tidak: dibuat ulang tiap malam & lewat Dashboard. Salah isi → perbaiki di Maintenance / Pilihan. Boleh dihapus: tidak dibuat lagi (Config TPM_DIMATIKAN).\n否：每晚自动重建。可删除，不再生成。'],
     [T.laporan, APP.SHEETS.PENDING, 'Pekerjaan yang tertunda (pending). Merah = lewat tenggat.\n挂起的工作。红色 = 已逾期。', 'Tidak (otomatis)\n否（自动）'],
     [T.laporan, APP.SHEETS.SARAN, 'Saran dari teknisi. Tanggapi lewat aplikasi (💡 Saran).\n技术员的建议。请在应用中回复。', 'Status & Tanggapan boleh\n可改状态和回复'],
     [T.app, APP.SHEETS.MAINT, 'Semua data pekerjaan (data asli aplikasi). Kolom email & waktu sistem disembunyikan.\n所有维修原始数据。邮箱和系统时间列已隐藏。', 'Hanya admin, untuk memperbaiki salah isi\n仅管理员修正错误'],
@@ -674,7 +719,6 @@ function buildBacaSaya_(ss) {
     [T.atur, N(APP.SHEETS.CONFIG) + ', ' + N(APP.SHEETS.PANDUAN) + ', ' + N(APP.SHEETS.RENCANA), 'Aturan (jam peringatan, nama aplikasi…); catatan & rencana di Panduan aplikasi.\n规则；应用指南中的说明和计划。'],
     [T.app, APP.SHEETS.LOG + ', ' + APP.SHEETS.TERJEMAHAN, 'Riwayat setiap tombol; hasil terjemahan (boleh dikoreksi).\n每次操作记录；翻译结果（可修改）。'],
     [T.app, APP.SHEETS.KPI_DATA, 'Salinan KPI bulan yang sudah ditutup admin (jangan diedit).\n已关账月份的 KPI 副本（请勿编辑）。'],
-    [T.app, APP.SHEETS.MAINT + ' <baterai>', 'Data Maintenance per baterai (otomatis).\n按电池项目的维修数据（自动）。'],
     [T.arsip, 'Arsip <tahun>, Laporan/Rekap tahun lalu', 'Data tahun sebelumnya.\n往年数据。']
   ];
   var g = [];

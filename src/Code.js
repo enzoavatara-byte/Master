@@ -286,7 +286,7 @@ function setup() {
   var hasChange = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'onMasterChange'; });
   if (!hasChange) ScriptApp.newTrigger('onMasterChange').forSpreadsheet(ss).onChange().create(); // hapus/sisip baris → cache dihapus
   // Lock: setup boleh dijalankan saat teknisi sedang bekerja tanpa bentrok dengan sinkron laporan per aksi.
-  withLock_(function () { buildRekap_(yearOf_(new Date())); buildLaporan_(yearOf_(new Date())); });
+  withLock_(function () { buildRekap_(yearOf_(new Date())); buildLaporan_(yearOf_(new Date()), { forceBaterai: true }); });
   // Di luar lock (terjemahan baru disimpan dengan lock sendiri). Gagal di sini tidak menggagalkan setup.
   var tpmErr = '';
   try { buildTpm_(); } catch (e) { tpmErr = 'TPM: ' + (e && e.message || e); console.warn(tpmErr); }
@@ -374,21 +374,9 @@ function migrateTr261_() {
 function buildDerivedSheets_(ss) {
   var mh = headers_(ss.getSheetByName(APP.SHEETS.MAINT));
   var col = function (name) { return colLetter_(mh.indexOf(name) + 1); };
-  var lastCol = colLetter_(mh.length);
   var src = "'" + APP.SHEETS.MAINT + "'!";
 
-  var md = masterData_();
-  var batteries = md.allBatteries.length ? md.allBatteries : APP.PROJECT_DEFAULTS.map(function (p) { return p[1]; });
-  batteries.forEach(function (bat) {
-    var sh = prepDerived_(ss, APP.SHEETS.MAINT + ' ' + bat);
-    var c = col('Baterai');
-    sh.getRange('A1').setFormula(fx_('=FILTER(' + src + 'A:' + lastCol + ', (ROW(' + src + 'A:A)=1)+(' + src + c + ':' + c + '="' + bat.replace(/"/g, '') + '"))'));
-    APP.DATE_COLUMNS.Maintenance.forEach(function (h) {
-      var i = mh.indexOf(h) + 1;
-      if (i > 0) sh.getRange(2, i, sh.getMaxRows() - 1, 1).setNumberFormat(DATE_FMT_);
-    });
-  });
-
+  // Tab "Maintenance <baterai>" sejak 2.6.1 = Laporan per project, dibangun bersama Laporan (buildLaporanBaterai_).
   var pw = prepDerived_(ss, APP.SHEETS.PENDING);
   var head = ['Maintenance ID', 'Line', 'Baterai', 'Yang tertunda', 'Tenggat', 'Teknisi terakhir', 'Lama pending (jam)'];
   pw.getRange(1, 1, 1, head.length).setValues([head]).setFontWeight('bold');

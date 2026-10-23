@@ -5,7 +5,10 @@ Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spr
 
 ## 2.6.1 — perbaikan dari uji di Apps Script asli
 Ditemukan saat 2.6 dijalankan di Apps Script & Google Sheets asli (spreadsheet uji kosong, 104 pekerjaan berbeda-beda → Laporan 100 baris).
-Ganti `Auth`, `Code`, `Config`, `Master`, `Translate`, Run `setup`, New version.
+Ganti `Auth`, `Code`, `Config`, `Master`, `Translate`, `Rekap`, `Tampilan`, `Tpm`, Run `setup`, New version.
+
+- **Tab `Maintenance <baterai>` = laporan per project** (nama tetap): tampilan sama dengan `Laporan <tahun>` (judul, kolom `Format Laporan`, warna, belang, warna Kondisi perbaikan), hanya baris project itu, No. 1..n. Sebelumnya 42 kolom data mentah, tersembunyi, dan format manual hilang tiap `setup`. Isinya rumus ke tab Laporan: baris yang ditulis tiap aksi langsung ikut, tombol teknisi tidak lebih lambat, trigger malam tidak menulis ulang bila tidak ada yang berubah. Hanya tahun berjalan (seperti Laporan). Terlihat, tepat setelah Laporan. Lebar kolom yang diatur admin bertahan.
+- **Tab per project boleh dihapus / dimatikan**: tab `TPM <project>` atau `Maintenance <baterai>` yang dihapus admin tidak dibuat lagi; aplikasi menulis project itu di `Config` → `TPM_DIMATIKAN` / `TAB_BATERAI_DIMATIKAN` dan di `Log`. Nyalakan lagi = hapus namanya dari Config. `Semua` = tidak ada tab sama sekali (TPM: tanpa baca data & Google Translate). Nama project salah ketik → peringatan di Dashboard admin. Tab yang diganti nama tidak disentuh.
 
 - **Terjemahan Inggris di tab TPM salah (bug sejak 2.5.2).** Teks Indonesia dan 中文 dikirim ke Google Translate dalam satu panggilan dengan deteksi bahasa otomatis; Google menganggap seluruhnya 中文, sehingga teks Indonesia kembali utuh atau rusak di bagian *(English)*. Contoh nyata: "lampu indikator mati" → "Laminator mati", "Kabel sensor putus di konektor" → "Sensor sensor putus di konektor", "pintu safety tidak terkunci" tetap Indonesia. Arah ke 中文 dan dari 中文 tidak terpengaruh. Sekarang satu panggilan = satu bahasa asal yang disebut jelas (ada huruf Han = 中文, selain itu Indonesia).
   - `setup` sekali: sel `en` hasil Google untuk teks non-中文 di tab `Terjemahan` dikosongkan (koreksi admin dan arah lain tetap); tab TPM menerjemahkan ulang pada pembangunan berikutnya (maks 300 teks per bahasa sekali jalan, sisanya malam berikutnya).
@@ -13,7 +16,7 @@ Ganti `Auth`, `Code`, `Config`, `Master`, `Translate`, Run `setup`, New version.
 - **Email ditulis dua kali di `Users`**: peran diambil dari baris pertama tetapi nama dari baris terakhir (terlihat: "Ditutup … oleh <nama baris lain>"). Sekarang peran & nama dari baris yang sama: baris **aktif** pertama (baris lama yang dinonaktifkan tidak lagi mengunci orang itu). Dashboard admin & pesan `setup` memberi peringatan; pilihan PIC tidak dobel.
 
 **Uji di Apps Script asli** (`test/seed-uji.js` + `test/gas/Uji.js`, hanya untuk spreadsheet uji): data dari kode yang sama di atas mock, lalu `ujiIsiData` / `ujiPeriksa` / `ujiAlur` membandingkan hasil runtime asli sel per sel. Ronde 1 (2.6.0): Laporan 100 baris, Rekap, KPI per bulan × Plant / Project / Line, tutup bulan, Ringkasan (tanpa error, Downtime & MTBF = KPI, kedua Top 5), trigger & ID tab cocok dengan hitungan mock; bug terjemahan dan email ganda di atas ditemukan dari isi tab `Terjemahan` & `KPI`. `ujiIsiData` butuh 336 dtk (setup di spreadsheet kosong + setup ulang 104 pekerjaan), dekat batas 360 dtk Apps Script → uji dipecah dan hasil ditulis per bagian.
-- Test lokal: penerjemah palsu kini meniru Google (satu bahasa asal per panggilan; deteksi otomatis + huruf Han = 中文 semua). Dengan kode 2.6.0, 4 test langsung gagal. 88 test.
+- Test lokal: penerjemah palsu kini meniru Google (satu bahasa asal per panggilan; deteksi otomatis + huruf Han = 中文 semua). Dengan kode 2.6.0, 4 test langsung gagal. 90 test; jumlah panggilan aksi teknisi tidak berubah.
 
 ## 2.6.0 — revisi uji lapangan + KPI MTTR & MTBF bulanan
 Gabungan revisi uji lapangan (`Improvement_2.6.md`) dan seluruh rencana 2.5.3 (statistik & download): cukup satu kali salin file.

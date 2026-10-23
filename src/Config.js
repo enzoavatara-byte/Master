@@ -271,6 +271,8 @@ var APP = {
     TPM_TIPE: { value: 'Corrective', description: 'Tab TPM: tipe maintenance yang masuk (pisahkan dengan koma). Hanya yang sudah Completed' },
     TPM_JUDUL: { value: 'Statistical Analysis of Issues Reported from Production', description: 'Tab TPM: judul baris 6' },
     TPM_PROJECT: { value: 'PROJECT NAME ATPU', description: 'Tab TPM: teks baris 3 (di atas nama project)' },
+    TPM_DIMATIKAN: { value: '', description: 'Project tanpa tab TPM (pisahkan koma), mis. E245. Semua = tab TPM tidak dibuat sama sekali (tanpa Google Translate). Tab TPM dihapus → project itu ditulis di sini otomatis; hapus namanya dari sini untuk membuat tabnya lagi' },
+    TAB_BATERAI_DIMATIKAN: { value: '', description: 'Project tanpa tab "Maintenance <baterai>" (laporan per project), pisahkan koma. Semua = tidak ada. Tab dihapus → project itu ditulis di sini otomatis; hapus namanya dari sini untuk membuat tabnya lagi' },
     JAM_OPERASI_PER_HARI: { value: 24, description: 'KPI MTBF: jam operasi per line per hari operasi (mis. 24 = 3 shift, 16 = 2 shift)' },
     HARI_OPERASI: { value: 'Sen-Min', description: 'KPI MTBF: hari operasi, mis. "Sen-Min" (setiap hari), "Sen-Sab", atau "Sen,Sel,Rab,Kam,Jum"' },
     TANGGAL_LIBUR: { value: '', description: 'KPI MTBF: tanggal tidak beroperasi (dd/mm/yyyy, pisahkan dengan koma), mis. 25/12/2026, 01/01/2027' },
@@ -292,6 +294,16 @@ function getConfig_(key) {
   var cfg = masterData_().config || {};
   var v = cfg[key];
   return (v === '' || v === null || v === undefined) ? def : v;
+}
+
+/** Tulis satu nilai Config (baris Key; ditambah jika belum ada). Cache master dibuang. */
+function setConfig_(key, value) {
+  var sh = sheet_(APP.SHEETS.CONFIG), v = sh.getDataRange().getValues(), h = v[0].map(function (x) { return String(x).trim(); });
+  var ck = h.indexOf('Key'), cv = h.indexOf('Value'), at = -1;
+  for (var i = 1; i < v.length && at < 0; i++) if (String(v[i][ck]).trim() === key) at = i + 1;
+  if (at > 0) sh.getRange(at, cv + 1).setValue(value);
+  else appendObj_(APP.SHEETS.CONFIG, { 'Key': key, 'Value': value, 'Keterangan': APP.CONFIG_DEFAULTS[key] ? APP.CONFIG_DEFAULTS[key].description : '' });
+  invalidateMaster_();
 }
 
 function getHours_(key) {

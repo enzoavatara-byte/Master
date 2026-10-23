@@ -89,7 +89,7 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 ## 2. Upgrade
 
 ### Ke 2.6.1 (dari 2.6.0)
-Ganti `Auth`, `Code`, `Config`, `Master`, `Translate` (Script). **Run `setup`** (sekali: terjemahan Inggris lama yang salah di tab `Terjemahan` dikosongkan; koreksi admin tidak disentuh; tab TPM menerjemahkan ulang malam berikutnya atau lewat Dashboard → Perbarui). Lalu New version. Tidak ada izin baru.
+Ganti `Auth`, `Code`, `Config`, `Master`, `Translate`, `Rekap`, `Tampilan`, `Tpm` (Script). **Run `setup`**: terjemahan Inggris lama yang salah di tab `Terjemahan` dikosongkan sekali (koreksi admin tidak disentuh; tab TPM menerjemahkan ulang malam berikutnya atau lewat Dashboard → Perbarui); tab `Maintenance <baterai>` diganti format laporan per project dan ditampilkan setelah Laporan; 2 kunci Config baru (`TPM_DIMATIKAN`, `TAB_BATERAI_DIMATIKAN`). Lalu New version. Tidak ada izin baru.
 
 ### Ke 2.6.1 (dari 2.5.2)
 
@@ -106,7 +106,8 @@ Ganti `Auth`, `Code`, `Config`, `Master`, `Translate` (Script). **Run `setup`** 
    - field `Selesai · PIC tambahan`, kolom `Projects → Target MTBF (jam)`, 4 kunci `Config` KPI, sheet tersembunyi `KPI data`, tab `KPI <tahun>`;
    - mencatat ID tab pengaturan (setelah ini nama tab boleh diganti). **Ganti nama tab baru boleh setelah `setup` 2.6 jalan**, bukan sebelumnya;
    - jika sheet `Mesin` berisi data, pesan setup menyebut jumlahnya: buat baris `Lines` sendiri untuk mesin yang perlu QR sendiri, lalu cetak QR-nya;
-   - terjemahan Inggris lama dari Google di tab `Terjemahan` dikosongkan sekali (2.6.1, lihat CHANGELOG); pesan setup menyebut jumlahnya.
+   - terjemahan Inggris lama dari Google di tab `Terjemahan` dikosongkan sekali (2.6.1, lihat CHANGELOG); pesan setup menyebut jumlahnya;
+   - tab `Maintenance <baterai>` menjadi laporan per project (2.6.1) dan terlihat setelah `Laporan <tahun>`.
 3. Isi `Projects` → `Target MTBF (jam)` dan `Config` → `JAM_OPERASI_PER_HARI`, `HARI_OPERASI`, `TANGGAL_LIBUR`, `KPI_MULAI` (tanggal aplikasi mulai dipakai sungguhan).
 4. Deploy → Manage deployments → ✏️ → **New version**. Tidak ada izin baru.
 5. QR **line** lama tetap berfungsi. QR **mesin** lama membuka line-nya (tanpa memilih mesin). Kalau mesin dijadikan baris `Lines` sendiri, cetak QR barunya dari Dashboard → QR.
@@ -269,6 +270,8 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
 - Kolom terakhir tab Laporan (tersembunyi, "ID sistem …") adalah kunci baris untuk sinkron. Jangan dihapus; kalau terhapus, aksi berikutnya membangun ulang tab.
 - Jangan edit tab Laporan/Rekap (ditulis ulang). Perbaiki datanya di `Maintenance`.
 - Untuk dikirim: klik kanan tab → **Copy to → New spreadsheet** → File → Download → Microsoft Excel.
+- **`Maintenance <baterai>`** (2.6.1) = laporan per project: judul, kolom, warna & belang sama dengan `Laporan <tahun>`, hanya baris project itu, No. 1..n. Isinya rumus ke tab Laporan (selalu terbaru, tombol teknisi tidak lebih lambat), jadi **hanya tahun berjalan**. Butuh kolom `Project` aktif di `Format Laporan`. Jangan diedit; lebar kolom boleh diatur (bertahan).
+- **Tab per project boleh dihapus** (2.6.1): hapus tab `TPM <project>` atau `Maintenance <baterai>` → tidak dibuat lagi; saat Perbarui / malam / `setup` aplikasi menulis nama project itu di `Config` → `TPM_DIMATIKAN` / `TAB_BATERAI_DIMATIKAN` (+ `Log`). Nyalakan lagi = hapus namanya dari Config. `Semua` = tidak ada tab sama sekali (TPM: tanpa Google Translate, trigger malam lebih cepat). Tab yang diganti nama tidak disentuh (cara menyimpan salinan).
 - **`TPM <project>`** (2.5.2) = format Excel TPM manager ("Statistical Analysis of Issues Reported from Production"): kotak Status Overview (COUNTIF per Discipline), Total tasks, judul kolom baris 8,
   data mulai **B9**: No · Machine · Issue Description · Root Cause · Solution · End Time · Discipline · Responsibility · Date · Notes. Satu tab per project.
   - Isi: pekerjaan `TPM_TIPE` (default Corrective) yang **Completed**, dimulai sejak `TPM_MULAI` (kosong = 1 Januari), urut waktu mulai. Sumber: Machine = mesin (atau line), Issue = Masalah + detail, Root Cause = Penyebab + detail,
@@ -288,7 +291,7 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
   Ukuran: Jumlah + **Pareto** (biru = ±80% total), MTTR, Downtime, MTBF (line/proses/project). Dasar = kerusakan yang sudah selesai (sama dengan KPI). Tap batang → daftar pekerjaan → Detail.
 - **Download Riwayat** (Riwayat → ⬇ Download): pekerjaan yang dimulai di periode + filter & status Riwayat; teknisi = pekerjaannya sendiri, admin "Semua" = semua. Kolom = tab Laporan. File **.xlsx** (tanggal asli, sparepart ke bawah, judul dibekukan, filter), maks 5000 baris. Library Excel (ExcelJS 4.4.0) dimuat dari CDN saat dipakai; gagal → CSV.
 - **Hapus data testing** (sebelum mulai pakai sungguhan): menu → **Hapus data testing…** → tanggal mulai pakai (dd/mm/yyyy; kosong = semua) → cek jumlah → ketik `HAPUS`.
-  Menghapus permanen pekerjaan yang dimulai sebelum tanggal itu dari `Maintenance`, `Log`, `Pemakaian Sparepart` dan tab Arsip (termasuk sheet yang diproteksi), lalu membangun ulang Laporan, Rekap, TPM & KPI. Bulan KPI yang sudah ditutup s/d tanggal itu dibuka lagi (tutup ulang setelah dicek). Tab per baterai & `Pending Work` ikut bersih (rumus). Sheet master tidak disentuh.
+  Menghapus permanen pekerjaan yang dimulai sebelum tanggal itu dari `Maintenance`, `Log`, `Pemakaian Sparepart` dan tab Arsip (termasuk sheet yang diproteksi), lalu membangun ulang Laporan, Rekap, TPM & KPI. Bulan KPI yang sudah ditutup s/d tanggal itu dibuka lagi (tutup ulang setelah dicek). Tab `Maintenance <baterai>` & `Pending Work` ikut bersih (rumus). Sheet master tidak disentuh.
   Menghapus baris langsung di tab Laporan/Rekap **tidak bisa**: tab itu selalu dibuat ulang dari `Maintenance`. Backup dulu (File → Make a copy); bisa dikembalikan lewat File → Version history.
 - **Arsip** (awal tahun, menu → Arsipkan data tahun lalu): pekerjaan final + Log + **pemakaian sparepart** pindah ke `Arsip <tahun>`, `Arsip Log <tahun>`, `Arsip Sparepart <tahun>`.
   Laporan tahun itu tetap utuh karena ikut membaca tab arsip.

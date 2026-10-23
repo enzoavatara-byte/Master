@@ -211,7 +211,9 @@ function ujiPeriksa() {
   });
   safe('Spreadsheet', function () {
     var names = ss.getSheets().map(function (s) { return s.getName(); }).filter(function (n) { return n.indexOf(UJI_SHEET_) !== 0; });
-    ok('Urutan tab', names.slice(0, 5).join(' | ') === ['Ringkasan', 'Baca Saya', laporanName_(y), rekapName_(y), kpiName_(y)].join(' | '), names.slice(0, 8).join(' | '));
+    var batTabs = masterData_().allBatteries.map(function (b) { return APP.SHEETS.MAINT + ' ' + b; });
+    var want = ['Ringkasan', 'Baca Saya', laporanName_(y)].concat(batTabs, [rekapName_(y), kpiName_(y)]);
+    ok('Urutan tab (Maintenance <baterai> setelah Laporan)', names.slice(0, want.length).join(' | ') === want.join(' | '), names.slice(0, want.length + 2).join(' | '));
     var tr = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); }).sort();
     ok('Trigger terpasang', ['checkTimeouts', 'onMasterChange', 'refreshRekap'].every(function (h) { return tr.indexOf(h) !== -1; }), tr.join(', '));
     var ids = JSON.parse(PropertiesService.getDocumentProperties().getProperty('MTTR_SHEET_IDS') || '{}');
@@ -223,6 +225,27 @@ function ujiPeriksa() {
     var emails = readTable_(APP.SHEETS.USERS).map(function (r) { return String(r['Email']).trim().toLowerCase(); }).filter(String);
     var dup = emails.filter(function (e, i) { return emails.indexOf(e) !== i; });
     ok('Users: tanpa email ganda, pelaksana = Admin', !dup.length && getCurrentUser_().role === APP.ROLES.ADMIN, (dup.join(', ') || emails.length + ' email') + ' · ' + me + ' = ' + getCurrentUser_().role);
+  });
+  // FILTER dihitung Sheets asli (mock tidak bisa): isi tab per baterai = baris Laporan project itu, No. 1..n
+  safe('Maintenance <baterai>', function () {
+    var cols = masterData_().report, src = cols.map(function (c) { return c.sumber; }), w = cols.length;
+    var pj = src.indexOf('Project'), no = src.indexOf('NO');
+    var L = ss.getSheetByName(laporanName_(y)).getDataRange().getDisplayValues();
+    masterData_().allBatteries.forEach(function (bat) {
+      var sh = ss.getSheetByName(APP.SHEETS.MAINT + ' ' + bat);
+      if (!ok(APP.SHEETS.MAINT + ' ' + bat + ': tab ada & terlihat', sh && !sh.isSheetHidden(), sh ? String(sh.getRange(1, 1).getValue()) : 'tidak ada')) return;
+      var d = sh.getDataRange().getDisplayValues(), errs = [];
+      d.forEach(function (r, i) { r.forEach(function (x, j) { if (/^#(N\/A|VALUE!|REF!|ERROR!|NAME\?|DIV\/0!|NUM!)/.test(x)) errs.push(colLetter_(j + 1) + (i + 1) + ' ' + x); }); });
+      var exp = L.slice(2).filter(function (r) { return r[pj] === bat; }), act = d.slice(2).filter(function (r) { return r.some(String); }), bad = [];
+      exp.forEach(function (e, k) {
+        for (var j = 0; j < w; j++) {
+          var want = j === no ? String(k + 1) : e[j], got = act[k] ? act[k][j] : '(tidak ada)';
+          if (String(got) !== String(want) && bad.length < 6) bad.push('baris ' + (k + 1) + ' kolom ' + colLetter_(j + 1) + ': harap "' + want + '" ≠ "' + got + '"');
+        }
+      });
+      ok(APP.SHEETS.MAINT + ' ' + bat + ': isi = Laporan (hanya ' + bat + ', No. 1..n), tanpa error', !errs.length && act.length === exp.length && !bad.length,
+        act.length + ' baris (harap ' + exp.length + ')' + (errs.length ? ' · error: ' + errs.slice(0, 5).join(', ') : '') + (bad.length ? '\n' + bad.join('\n') : ''));
+    });
   });
   safe('Terjemahan', function () {
     var T = readTable_(APP.SHEETS.TERJEMAHAN), seen = {}, dobel = [];
@@ -344,6 +367,19 @@ function ujiAlur() {
     var L = findSheet_('Lines', ss), lv = L.getDataRange().getValues();
     rewriteKeeping_(L, lv, function (row) { return row[0] !== 'UJI'; });
     resetHeaders_(); invalidateMaster_(); resetMaster_();
+  });
+  safe('Tab per project boleh dihapus', function () {
+    var t = tpmName_('E245'), b = APP.SHEETS.MAINT + ' E245', n0 = readTable_(APP.SHEETS.LOG).filter(function (e) { return e['Kejadian'] === 'tab dimatikan'; }).length;
+    [t, b].forEach(function (n) { var sh = ss.getSheetByName(n); if (sh) ss.deleteSheet(sh); });
+    timed('Perbarui setelah hapus 2 tab (TPM + Laporan)', function () { buildTpm_(); return withLock_(function () { return buildLaporan_(y); }); });
+    resetMaster_();
+    var n1 = readTable_(APP.SHEETS.LOG).filter(function (e) { return e['Kejadian'] === 'tab dimatikan'; }).length;
+    ok('Hapus ' + t + ' & ' + b + ' → tidak dibuat lagi, tercatat di Config & Log', !ss.getSheetByName(t) && !ss.getSheetByName(b) &&
+      /E245/.test(String(getConfig_('TPM_DIMATIKAN'))) && /E245/.test(String(getConfig_('TAB_BATERAI_DIMATIKAN'))) && n1 - n0 === 2,
+      'TPM_DIMATIKAN = "' + getConfig_('TPM_DIMATIKAN') + '" · TAB_BATERAI_DIMATIKAN = "' + getConfig_('TAB_BATERAI_DIMATIKAN') + '" · Log +' + (n1 - n0));
+    setConfig_('TPM_DIMATIKAN', ''); setConfig_('TAB_BATERAI_DIMATIKAN', '');
+    timed('Perbarui setelah dinyalakan lagi', function () { buildTpm_(); return withLock_(function () { return buildLaporan_(y); }); });
+    ok('Config dikosongkan → kedua tab dibuat lagi', !!ss.getSheetByName(t) && !!ss.getSheetByName(b), '');
   });
   // Sama dengan refreshRekap (trigger malam), per tahap: mana yang mahal bila data setahun?
   safe('Bangun ulang seperti trigger malam', function () {

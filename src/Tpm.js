@@ -168,19 +168,26 @@ function tpmTranslate_(texts, lang, stats) {
  * @return {{sheets: Array<{sheet:string, rows:number}>, from: Date, untranslated: number, warn: string}}
  */
 function buildTpm_() {
-  var md = masterData_(), names = userNameMap_(), ss = SpreadsheetApp.getActive();
-  var f = tpmFrom_(), data = tpmRows_(f.date), ask = { zh: {}, en: {} };
-  var specs = data.rows.map(function (r) { return tpmSpec_(md, r, data.usage[String(r['Maintenance ID'])] || [], names, ask); });
+  var md = masterData_(), names = userNameMap_(), ss = SpreadsheetApp.getActive(), f = tpmFrom_();
+  var own = md.projects.map(function (p) { return p.battery; });
+  if (/^semua$/i.test(String(getConfig_('TPM_DIMATIKAN') || '').trim())) {   // dimatikan total: tanpa baca data & terjemahan
+    projectTabs_('TPM_DIMATIKAN', tpmName_, own).done();
+    return { sheets: [], from: f.date, untranslated: 0, warn: '', off: true };
+  }
+  var data = tpmRows_(f.date), ask = { zh: {}, en: {} };
+  var tabs = projectTabs_('TPM_DIMATIKAN', tpmName_, uniq_(own.concat(data.rows.map(function (r) { return String(r['Baterai']).trim(); }))));
+  var rows = data.rows.filter(function (r) { return tabs.on.indexOf(String(r['Baterai']).trim()) !== -1; });   // terjemahkan yang dipakai saja
+  var specs = rows.map(function (r) { return tpmSpec_(md, r, data.usage[String(r['Maintenance ID'])] || [], names, ask); });
   // Kuota habis / batas per pembangunan → teks tetap asli; diterjemahkan di pembangunan berikutnya (stats.left = jumlahnya).
   var stats = { left: 0 };
   var zhMap = tpmTranslate_(Object.keys(ask.zh), 'zh', stats), enMap = tpmTranslate_(Object.keys(ask.en), 'en', stats);
-  var bats = uniq_(md.projects.map(function (p) { return p.battery; }).concat(specs.map(function (sp) { return sp.bat; })));
-  var sheets = bats.map(function (bat) {
+  var sheets = tabs.on.map(function (bat) {
     var mine = specs.filter(function (sp) { return sp.bat === bat; });
     writeTpmSheet_(ss, bat, mine.map(function (sp, i) { return tpmRow_(sp, i, zhMap, enMap); }), f.date);
     return { sheet: tpmName_(bat), rows: mine.length };
   });
-  return { sheets: sheets, from: f.date, untranslated: stats.left, warn: f.warn || '' };
+  tabs.done();
+  return { sheets: sheets, from: f.date, untranslated: stats.left, warn: f.warn || '', off: false };
 }
 
 /** Satu tab TPM, ditulis ulang penuh: header baris 1–8 seperti Excel manager, data dari B9. */
@@ -248,9 +255,11 @@ function styleTpm_(sh, last) {
 
 /** Ringkasan hasil untuk pesan menu / log. */
 function tpmSummary_(res) {
+  if (res.off) return 'Tab TPM dimatikan: Config TPM_DIMATIKAN = Semua. Kosongkan nilainya untuk membuat tab TPM lagi.';
   var lines = res.sheets.map(function (s) { return '• ' + s.sheet + ': ' + s.rows + ' baris'; });
   return 'Tab TPM diperbarui (' + getConfig_('TPM_TIPE') + ' selesai sejak ' + Utilities.formatDate(res.from, APP.TZ, 'dd/MM/yyyy') + '):\n' +
     (lines.join('\n') || '• (belum ada project di sheet Projects)') +
+    (String(getConfig_('TPM_DIMATIKAN') || '').trim() ? '\nTanpa tab TPM (Config TPM_DIMATIKAN): ' + getConfig_('TPM_DIMATIKAN') : '') +
     (res.warn ? '\n\n⚠ ' + res.warn : '') +
     (res.untranslated ? '\n\n' + res.untranslated + ' teks belum diterjemahkan (batas sekali jalan / kuota Google Translate), tampil teks asli. Jalankan lagi nanti; tiap malam juga otomatis.' : '') +
     '\n\nCara pakai: buka tab TPM <project> → blok sel B' + TPM_ROW0_ + ' sampai baris terakhir kolom K → Copy → paste di Excel manager.' +

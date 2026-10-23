@@ -194,6 +194,14 @@ function buildMaster_() {
     var k = String(r['Key'] || '').trim();
     if (k) md.config[k] = r['Value'];
   });
+  ['TPM_DIMATIKAN', 'TAB_BATERAI_DIMATIKAN'].forEach(function (k) {   // nama project salah ketik → tab tetap dibuat
+    var v = String(md.config[k] || '').trim();
+    if (!v || /^semua$/i.test(v)) return;
+    var known = md.allBatteries.map(function (b) { return b.toLowerCase(); });
+    v.split(/[,;\n]/).map(function (x) { return x.trim(); }).filter(String).forEach(function (x) {
+      if (known.indexOf(x.toLowerCase()) === -1) warnings.push('Config ' + k + ': project "' + x + '" tidak ada di sheet Projects (cek ejaan).');
+    });
+  });
   md.spareparts = readSpareparts_(warnings, opts);
   md.report = readReportFormat_(warnings);
   md.rencana = readOptional_(APP.SHEETS.RENCANA).filter(function (r) {

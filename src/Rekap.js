@@ -320,7 +320,8 @@ function laporanValue_(src, r, i, used, md, names) {
 }
 
 /** Buat/perbarui tab "Laporan <tahun>" sesuai sheet Format Laporan (default = Excel bang Risky). */
-function buildLaporan_(year) {
+/** @param {{forceBaterai?: boolean}=} opts forceBaterai = tab Maintenance <baterai> selalu dibangun ulang (setup) */
+function buildLaporan_(year, opts) {
   year = checkYear_(year);
   var md = masterData_(), names = userNameMap_();
   var cols = md.report;
@@ -352,7 +353,67 @@ function buildLaporan_(year) {
     if (c.sumber === 'Tanggal' && fmtRows > 1) sh.getRange(3, j + 1, fmtRows - 1, 1).setNumberFormat('dd/mm/yyyy');
   });
   styleLaporan_(sh, cols, fmtRows);
+  if (year === yearOf_(new Date())) {
+    var counts = {};
+    data.rows.forEach(function (r) { var b = String(r['Baterai']).trim(); counts[b] = (counts[b] || 0) + 1; });
+    buildLaporanBaterai_(year, cols, counts, !!(opts && opts.forceBaterai));
+  }
   return { year: year, sheet: laporanName_(year), rows: data.rows.length };
+}
+
+var LAP_BAT_KEY_ = 'MTTR_LAP_BAT';   // DocumentProperties: {baterai: {sig, upto}} tab Maintenance <baterai> terakhir dibangun
+
+/**
+ * Tab "Maintenance <baterai>" (2.6.1) = Laporan per project: judul, kolom, warna & belang sama dengan Laporan <tahun>,
+ * hanya baris project itu, No. 1..n. Isinya rumus FILTER ke tab Laporan, jadi baris yang ditulis tiap aksi langsung ikut
+ * tanpa tulisan tambahan. Dibangun ulang hanya jika format / tahun / judul / locale berubah, tab hilang, atau baris hampir
+ * melewati area berformat (force: selalu). Lebar kolom tidak disentuh (atur sekali, bertahan).
+ * @param {Object<string,number>} counts baris Laporan per baterai
+ */
+function buildLaporanBaterai_(year, cols, counts, force) {
+  var md = masterData_(), ss = SpreadsheetApp.getActive();
+  var nameOf = function (b) { return APP.SHEETS.MAINT + ' ' + b; };
+  var bats = md.allBatteries.length ? md.allBatteries : APP.PROJECT_DEFAULTS.map(function (p) { return p[1]; });
+  var tabs = projectTabs_('TAB_BATERAI_DIMATIKAN', nameOf, bats);
+  var props = PropertiesService.getDocumentProperties(), memo = {};
+  try { memo = JSON.parse(props.getProperty(LAP_BAT_KEY_) || '{}') || {}; } catch (e) { memo = {}; }
+  var w = Math.max(1, cols.length), lap = "'" + laporanName_(year) + "'!", judul = String(getConfig_('LAPORAN_JUDUL') || '');
+  var pj = cols.map(function (c) { return c.sumber; }).indexOf('Project');
+  var sig = [laporanName_(year), lapKeyHeader_(cols), judul, fxMode_()].join('|');
+  tabs.on.forEach(function (bat) {
+    var n = counts[bat] || 0, m = memo[bat];
+    if (!force && m && m.sig === sig && n + 50 <= m.upto && ss.getSheetByName(nameOf(bat))) return;
+    var fmtRows = 1 + n + LAP_SPARE_;   // header + baris project + cadangan (sama dengan Laporan)
+    var sh = prepDerived_(ss, nameOf(bat));
+    if (sh.getMaxRows() < fmtRows + 1) sh.insertRowsAfter(sh.getMaxRows(), fmtRows + 1 - sh.getMaxRows());
+    if (sh.getMaxColumns() < w) sh.insertColumnsAfter(sh.getMaxColumns(), w - sh.getMaxColumns());
+    var title = [judul + ' · ' + bat + ' · ' + year], q = String(bat).replace(/"/g, '');
+    while (title.length < w) title.push('');
+    var row = cols.map(function () { return ''; });
+    if (pj < 0) row[0] = 'Aktifkan kolom Project di sheet Format Laporan supaya tab ini terisi.';
+    else {
+      var P = colLetter_(pj + 1), proj = lap + P + '3:' + P;
+      for (var j = 0; j < w;) {
+        if (cols[j].sumber === 'NO') { row[j] = fx_('=IFERROR(SEQUENCE(COUNTIF(' + proj + ', "' + q + '")), "")'); j++; continue; }
+        var k = j;
+        while (k + 1 < w && cols[k + 1].sumber !== 'NO') k++;
+        row[j] = fx_('=IFERROR(FILTER(' + lap + colLetter_(j + 1) + '3:' + colLetter_(k + 1) + ', ' + proj + '="' + q + '"), "")');
+        j = k + 1;
+      }
+    }
+    sh.getRange(1, 1, 1, sh.getMaxColumns()).breakApart();   // jumlah kolom bisa berubah (Format Laporan)
+    sh.getRange(1, 1, 2, w).setValues([title, cols.map(function (c) { return c.kolom; })]);
+    sh.getRange(3, 1, 1, w).setFormulas([row]);
+    sh.getRange(1, 1, 1, w).merge().setFontWeight('bold');
+    sh.getRange(2, 1, 1, w).setFontWeight('bold');
+    sh.getRange(2, 1, fmtRows, w).setWrap(true);
+    sh.setFrozenRows(2);
+    cols.forEach(function (c, j) { if (c.sumber === 'Tanggal') sh.getRange(3, j + 1, fmtRows - 1, 1).setNumberFormat('dd/mm/yyyy'); });
+    styleLaporan_(sh, cols, fmtRows);
+    memo[bat] = { sig: sig, upto: fmtRows };
+  });
+  props.setProperty(LAP_BAT_KEY_, JSON.stringify(memo));
+  tabs.done();
 }
 
 // ---------- Arsip ----------

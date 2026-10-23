@@ -41,7 +41,7 @@ test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempot
   jeq(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Tipe Maintenance').map(r => r.Nilai), ['Corrective'], '2.6: Preventive dihapus');
   jeq(triggers.map(t => t.getHandlerFunction()).sort(), ['checkTimeouts', 'onMasterChange', 'refreshRekap'], 'trigger tidak dobel');
   assert.strictEqual(triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every, 'hari:1@1', 'bangun ulang penuh tiap malam');
-  assert.strictEqual(ctx.readTable_('Config').length, 18);
+  assert.strictEqual(ctx.readTable_('Config').length, 20);
   assert.strictEqual(ctx.readTable_('Users')[0].Peran, 'Admin');
   jeq(ctx.readTable_('Projects').map(p => p['Factory ID'] + ':' + p.Baterai), ['F1:VF7', 'F1:Limo7', 'F2:E22H', 'F2:E245']);
   assert.strictEqual(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Masalah').length, 5, 'pilihan tidak terduplikasi');
@@ -49,8 +49,15 @@ test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempot
   assert.strictEqual(ctx.readTable_('Sparepart').length, 11, 'katalog contoh sekali saja');
   assert.strictEqual(ctx.readTable_('Format Laporan').length, 22);
   jeq(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Jenis Kerusakan').map(r => r.Nilai), ['Elektrikal', 'Mekanikal', 'Pneumatik', 'Program', 'Operasional', 'Produk', 'MES']);
-  const f = ss.getSheetByName('Maintenance E22H').formulas.A1;
-  assert.match(f, /^=FILTER\('Maintenance'!A:AP, \(ROW\('Maintenance'!A:A\)=1\)\+\('Maintenance'!C:C="E22H"\)\)$/);
+  // 2.6.1: Maintenance <baterai> = Laporan per project (rumus FILTER ke tab Laporan, No. 1..n per project)
+  const B = ss.getSheetByName('Maintenance E22H'), lapH = ss.getSheetByName('Laporan 2026').data[1];
+  jeq(B.data[1], lapH.slice(0, lapH.length - 1), 'header = Laporan tanpa kolom kunci');
+  assert.match(String(B.data[0][0]), / · E22H · 2026$/);
+  const fB = B.data[2].filter(v => typeof v === 'string' && v[0] === '=');
+  assert.strictEqual(B.data[2][0], '=IFERROR(SEQUENCE(COUNTIF(\'Laporan 2026\'!C3:C, "E22H")), "")', 'kolom NO = 1..n');
+  assert.strictEqual(B.data[2][1], '=IFERROR(FILTER(\'Laporan 2026\'!B3:' + ctx.colLetter_(lapH.length - 1) + ', \'Laporan 2026\'!C3:C="E22H"), "")');
+  assert.strictEqual(fB.length, 2);
+  assert.strictEqual(B.frozenRows, 2);
   const p = ss.getSheetByName('Pending Work').formulas.A2;
   assert.match(p, /'Maintenance'!D2:D="Pending"/);
   assert.match(p, /NOW\(\)-'Maintenance'!U2:U/);
@@ -1348,11 +1355,13 @@ test('2.5.1 setup: Ringkasan & Baca Saya paling depan, warna tab per kelompok, t
   assert.strictEqual(ctx.setup(), 'Setup selesai.', 'tampilan tanpa masalah');
   const y = ctx.yearOf_(new FakeDate()), names = ss.getSheets().map(s => s.getName());
   const TPM = ['TPM E22H', 'TPM E245', 'TPM Limo7', 'TPM VF7'];
-  jeq(names.slice(0, 13), ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'Rekap ' + y, 'KPI ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart']);
+  const BAT = ['Maintenance VF7', 'Maintenance Limo7', 'Maintenance E22H', 'Maintenance E245'];
+  jeq(names.slice(0, 17), ['Ringkasan', 'Baca Saya', 'Laporan ' + y, ...BAT, 'Rekap ' + y, 'KPI ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart']);
   const shown = ss.getSheets().filter(s => !s.isSheetHidden()).map(s => s.getName());
-  jeq(shown, ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'Rekap ' + y, 'KPI ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart', 'Users', 'Lines', 'Sparepart', 'Pilihan']);
+  jeq(shown, ['Ringkasan', 'Baca Saya', 'Laporan ' + y, ...BAT, 'Rekap ' + y, 'KPI ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart', 'Users', 'Lines', 'Sparepart', 'Pilihan']);
   assert.strictEqual(ss.getSheetByName('TPM VF7').tabColor, ctx.TEMA_.tab.laporan);
-  for (const n of ['Log', 'Terjemahan', 'Config', 'Form', 'Maintenance VF7', 'KPI data']) assert.ok(ss.getSheetByName(n).isSheetHidden(), n + ' disembunyikan');
+  assert.strictEqual(ss.getSheetByName('Maintenance VF7').tabColor, ctx.TEMA_.tab.laporan, '2.6.1: laporan per project terlihat, kelompok laporan');
+  for (const n of ['Log', 'Terjemahan', 'Config', 'Form', 'KPI data']) assert.ok(ss.getSheetByName(n).isSheetHidden(), n + ' disembunyikan');
   ss.getSheets().filter(s => /^(Laporan|Rekap) \d{4}$/.test(s.getName()) && !s.getName().endsWith(' ' + y))
     .forEach(s => assert.ok(s.isSheetHidden(), s.getName() + ' (tahun lain) disembunyikan'));
   assert.strictEqual(ss.getSheetByName('Ringkasan').tabColor, ctx.TEMA_.tab.baca);
@@ -1564,12 +1573,14 @@ test('2.5.1 locale: en_US → rumus koma; Indonesia (desimal koma) → ; dan \\ 
     assert.ok(fs_.some(f => f.includes('"select Col1, count(Col2), sum(Col3)/60, avg(Col3) group by Col1 order by count(Col2) desc, sum(Col3)/60 desc limit 5')), 'teks QUERY tidak diubah');
     const pw = ss.getSheetByName('Pending Work').formulas.A2;
     assert.ok(pw.includes("{'Maintenance'!A2:A\\ ") && !bareCommas(pw), 'Pending Work: ' + pw.slice(0, 60));
-    assert.ok(!bareCommas(ss.getSheetByName('Maintenance VF7').formulas.A1));
+    ctx.buildLaporan_(ctx.yearOf_(new FakeDate()));   // sidik berisi locale → tab per baterai ditulis ulang
+    const fb = ss.getSheetByName('Maintenance VF7').data[2].filter(v => typeof v === 'string' && v[0] === '=');
+    assert.ok(fb.length >= 2 && fb.every(f => !bareCommas(f) && f.includes(';')), 'tab baterai: ' + fb.join(' | '));
     const late = ss.getSheetByName('Maintenance').cfRules.map(r => r.calls.whenFormulaSatisfied).filter(Boolean);
     assert.ok(late.length && late.every(f => !bareCommas(f)), 'aturan warna: ' + late.join(' | '));
   } finally {
     ss.locale = 'en_US'; ctx.FX_MODE_ = null;
-    ctx.buildDerivedSheets_(ss); ctx.rapikanTampilan_({ full: true });
+    ctx.buildDerivedSheets_(ss); ctx.rapikanTampilan_({ full: true }); ctx.buildLaporan_(ctx.yearOf_(new FakeDate()));
   }
 });
 
@@ -1753,10 +1764,14 @@ test('2.5.2 TPM ikut: Dashboard "Perbarui Laporan, Rekap & TPM" (admin), trigger
   assert.ok(out.tpm.some(s => s.sheet === 'TPM VF7' && s.rows > 0) && out.tpmError === '', JSON.stringify(out.tpm));
   ss.deleteSheet(tpm('VF7'));
   ctx.refreshRekap();
-  assert.ok(tpm('VF7'), 'trigger malam membuat ulang');
-  ss.deleteSheet(tpm('VF7'));
+  assert.ok(!tpm('VF7'), '2.6.1: tab yang dihapus admin tidak dibuat lagi oleh trigger malam');
+  assert.strictEqual(ctx.getConfig_('TPM_DIMATIKAN'), 'VF7', 'dicatat di Config');
+  assert.ok(ctx.readTable_('Log').some(e => e.Kejadian === 'tab dimatikan' && /TPM VF7/.test(e.Detail)), 'dicatat di Log');
   ctx.menuTpm();
-  assert.ok(tpm('VF7') && /Tab TPM diperbarui/.test(ui.alerts[ui.alerts.length - 1]), 'menu');
+  assert.ok(!tpm('VF7') && /TPM_DIMATIKAN\): VF7/.test(ui.alerts[ui.alerts.length - 1]), 'menu: tetap mati, pesan menyebut Config');
+  cfgSet('TPM_DIMATIKAN', ''); ctx.invalidateMaster_();
+  ctx.menuTpm();
+  assert.ok(tpm('VF7') && /Tab TPM diperbarui/.test(ui.alerts[ui.alerts.length - 1]), 'nama dihapus dari Config → dibuat lagi');
   as('dewi@gmail.com', () => throwsMsg(() => ctx.menuTpm(), /tidak punya akses/));
   ss.locale = 'in_ID'; ctx.FX_MODE_ = null;
   try {
@@ -2183,6 +2198,71 @@ test('2.6.1 Users: email ditulis dua kali → peran & nama dari baris yang sama 
     ctx.invalidateMaster_();
   }
   assert.strictEqual(as('budi@gmail.com', () => ctx.getCurrentUser_()).name, ctx.readTable_('Users').find(r => r.Email === 'budi@gmail.com').Nama);
+});
+
+test('2.6.1 tab Maintenance <baterai> = Laporan per project: sama dengan Laporan, malam tanpa tulis ulang, format berubah → dibangun ulang', () => {
+  const y = ctx.yearOf_(new FakeDate()), lap = ss.getSheetByName('Laporan ' + y);
+  ctx.buildLaporan_(y);
+  const B = ss.getSheetByName('Maintenance VF7'), cols = ctx.masterData_().report;
+  jeq(B.data[1], lap.data[1].slice(0, cols.length), 'header sama');
+  const tg = cols.findIndex(c => c.sumber === 'Tanggal') + 1;
+  const n = lap.data.slice(2).filter(r => r[2] === 'VF7').length;
+  assert.ok(hasFmt(B, 'setNumberFormat', '3,' + tg + ':' + (n + ctx.LAP_SPARE_) + 'x1', 'dd/mm/yyyy'), 'Tanggal dd/mm/yyyy');
+  assert.ok(B.getBandings().length === 1 && B.tabColor === ctx.TEMA_.tab.laporan, 'belang & warna tab seperti Laporan');
+  const w0 = B.formulaWrites || 0;
+  ctx.refreshRekap();
+  assert.strictEqual(ss.getSheetByName('Maintenance VF7').formulaWrites || 0, w0, 'malam: tidak ada yang berubah → tidak ditulis ulang');
+  // Format Laporan diubah admin → sidik beda → dibangun ulang dengan judul kolom baru
+  const stName = ctx.readTable_('Format Laporan').find(r => r.Sumber === 'Station').Kolom;
+  setRow('Format Laporan', (r, h) => r[h.indexOf('Sumber')] === 'Station', 'Kolom', 'Station 工位 (uji)');
+  ctx.invalidateMaster_();
+  ctx.buildLaporan_(y);
+  assert.ok(ss.getSheetByName('Maintenance VF7').data[1].includes('Station 工位 (uji)'), 'judul kolom ikut');
+  setRow('Format Laporan', (r, h) => r[h.indexOf('Sumber')] === 'Project', 'Aktif', 'Tidak');
+  ctx.invalidateMaster_(); ctx.buildLaporan_(y);
+  assert.match(String(ss.getSheetByName('Maintenance VF7').data[2][0]), /Aktifkan kolom Project/, 'tanpa kolom Project → pesan, bukan rumus salah');
+  setRow('Format Laporan', (r, h) => r[h.indexOf('Sumber')] === 'Project', 'Aktif', 'Ya');
+  setRow('Format Laporan', (r, h) => r[h.indexOf('Sumber')] === 'Station', 'Kolom', stName);
+  ctx.invalidateMaster_(); ctx.buildLaporan_(y);
+  assert.match(String(ss.getSheetByName('Maintenance VF7').data[2][1]), /^=IFERROR\(FILTER\(/);
+  assert.ok(ss.getSheetByName('Maintenance VF7').data[1].includes(stName), 'Format Laporan dikembalikan');
+});
+
+test('2.6.1 tab per project boleh dihapus / dimatikan: TPM & Maintenance <baterai> tidak dibuat lagi, Config + Log, nyalakan lagi, "Semua", nama salah', () => {
+  const bat = (b) => ss.getSheetByName('Maintenance ' + b);
+  ctx.setup();
+  ss.deleteSheet(bat('E245'));
+  ctx.refreshRekap();
+  assert.ok(!bat('E245'), 'dihapus → tidak dibuat lagi');
+  assert.strictEqual(ctx.getConfig_('TAB_BATERAI_DIMATIKAN'), 'E245');
+  assert.ok(ctx.readTable_('Log').some(e => e.Kejadian === 'tab dimatikan' && /Maintenance E245/.test(e.Detail)));
+  ctx.setup();
+  assert.ok(!bat('E245'), 'setup juga tidak membuatnya lagi');
+  cfgSet('TAB_BATERAI_DIMATIKAN', 'E245, limo7'); ctx.invalidateMaster_();
+  ctx.buildLaporan_(ctx.yearOf_(new FakeDate()));
+  assert.ok(!bat('Limo7') && bat('VF7'), 'diisi manual (huruf kecil) → tab buatan aplikasi dihapus');
+  cfgSet('TAB_BATERAI_DIMATIKAN', ''); ctx.invalidateMaster_();
+  ctx.refreshRekap();
+  assert.ok(bat('E245') && bat('Limo7'), 'nama dihapus dari Config → dibuat lagi');
+  // tab yang diganti nama admin = salinan miliknya: tidak disentuh
+  bat('E22H').setName('Salinan E22H');
+  ctx.refreshRekap();
+  assert.ok(ss.getSheetByName('Salinan E22H') && !bat('E22H') && ctx.getConfig_('TAB_BATERAI_DIMATIKAN') === 'E22H');
+  ss.deleteSheet(ss.getSheetByName('Salinan E22H'));
+  cfgSet('TAB_BATERAI_DIMATIKAN', ''); ctx.invalidateMaster_(); ctx.refreshRekap();
+  assert.ok(bat('E22H'));
+  // TPM "Semua": tanpa baca data & tanpa Google Translate, semua tab TPM dihapus
+  cfgSet('TPM_DIMATIKAN', 'Semua'); ctx.invalidateMaster_();
+  LA.calls = 0;
+  const res = ctx.buildTpm_();
+  assert.ok(res.off && !res.sheets.length && LA.calls === 0, 'mati total');
+  assert.ok(!ss.getSheets().some(s => /^TPM /.test(s.getName())), 'tab TPM dihapus');
+  assert.match(ctx.tpmSummary_(res), /TPM_DIMATIKAN = Semua/);
+  cfgSet('TPM_DIMATIKAN', 'VF 7'); ctx.invalidateMaster_();
+  assert.ok(as('owner@gmail.com', () => ctx.apiDashboard({ periode: 30 })).warnings.some(x => /TPM_DIMATIKAN: project "VF 7" tidak ada/.test(x)), 'salah ketik → peringatan');
+  cfgSet('TPM_DIMATIKAN', ''); ctx.invalidateMaster_();
+  ctx.buildTpm_();
+  ['VF7', 'Limo7', 'E22H', 'E245'].forEach(b => assert.ok(tpm(b), 'TPM ' + b + ' kembali'));
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));
