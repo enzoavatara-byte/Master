@@ -72,6 +72,7 @@ function onOpen() {
     .addItem('Perbarui tab TPM (format Excel manager)', 'menuTpm')
     .addItem('Perbarui tab KPI (MTTR & MTBF)', 'menuKpi')
     .addItem('Tutup bulan KPI…', 'menuTutupBulan')
+    .addItem('Masukkan Input Manual…', 'menuInputManual')
     .addItem('Arsipkan data tahun lalu…', 'menuArsipkanTahun')
     .addItem('Hapus data testing…', 'menuHapusDataTesting')
     .addSeparator()
@@ -218,6 +219,7 @@ function setup() {
   migrateDiscipline_();   // 2.5.2: Jenis kerusakan Operasional / Produk / MES + kolom Discipline (tab TPM)
   var notes = migrate26_(ss);   // 2.6: field mesin, Preventive, review Pending
   notes = notes.concat(migrateTr261_());   // 2.6.1: terjemahan Inggris lama yang salah dibuat ulang
+  notes = notes.concat(migrateCancel261_());   // 2.6.1: Cancel tanpa review → antrian lama dibersihkan
 
   if (readTable_(APP.SHEETS.FACTORY).length === 0) {
     APP.FACTORY_DEFAULTS.forEach(function (f) {
@@ -365,6 +367,30 @@ function migrateTr261_() {
   TR_MEMO_ = null;
   props.setProperty('MTTR_TR_EN_261', new Date().toISOString());
   return n ? [n + ' terjemahan Inggris lama (tab Terjemahan) dikosongkan karena sering salah sebelum 2.6.1; tab TPM menerjemahkan ulang otomatis.'] : [];
+}
+
+/**
+ * 2.6.1: review Cancel dihapus (satu-satunya keputusan dulu "Setujui"; Cancelled tidak pernah masuk MTTR). Cancelled yang
+ * masih "Perlu review" ditandai Direview oleh SYSTEM, sekaligus per kolom. Aman dijalankan berulang.
+ * @return {string[]} catatan untuk admin
+ */
+function migrateCancel261_() {
+  var sh = sheet_(APP.SHEETS.MAINT), v = sh.getDataRange().getValues(), h = v[0].map(function (x) { return String(x).trim(); });
+  var c = function (n) { return h.indexOf(n); }, cs = c('Status'), cr = c('Status review'), cb = c('Direview oleh'), ct = c('Direview pada'), cn = c('Catatan review');
+  if (cs < 0 || cr < 0 || v.length < 2) return [];
+  var now = new Date(), n = 0;
+  v.slice(1).forEach(function (r) {
+    if (r[cs] !== APP.STATUS.CANCELLED || r[cr] !== APP.REVIEW.NEEDED) return;
+    r[cr] = APP.REVIEW.DONE; n++;
+    if (cb >= 0) r[cb] = APP.SYSTEM_USER;
+    if (ct >= 0) r[ct] = now;
+    if (cn >= 0) r[cn] = '2.6.1: review Cancel dihapus (otomatis)';
+  });
+  if (!n) return [];
+  [cr, cb, ct, cn].filter(function (k) { return k >= 0; }).forEach(function (k) {
+    sh.getRange(2, k + 1, v.length - 1, 1).setValues(v.slice(1).map(function (r) { return [r[k]]; }));
+  });
+  return [n + ' pekerjaan Cancelled keluar dari antrian review (sejak 2.6.1 Cancel tidak perlu review).'];
 }
 
 /**

@@ -41,7 +41,7 @@ test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempot
   jeq(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Tipe Maintenance').map(r => r.Nilai), ['Corrective'], '2.6: Preventive dihapus');
   jeq(triggers.map(t => t.getHandlerFunction()).sort(), ['checkTimeouts', 'onMasterChange', 'refreshRekap'], 'trigger tidak dobel');
   assert.strictEqual(triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every, 'hari:1@1', 'bangun ulang penuh tiap malam');
-  assert.strictEqual(ctx.readTable_('Config').length, 20);
+  assert.strictEqual(ctx.readTable_('Config').length, 21);
   assert.strictEqual(ctx.readTable_('Users')[0].Peran, 'Admin');
   jeq(ctx.readTable_('Projects').map(p => p['Factory ID'] + ':' + p.Baterai), ['F1:VF7', 'F1:Limo7', 'F2:E22H', 'F2:E245']);
   assert.strictEqual(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Masalah').length, 5, 'pilihan tidak terduplikasi');
@@ -215,7 +215,7 @@ test('cancel: alasan wajib dari daftar, Lainnya butuh catatan, teknisi lain dito
   const r = rec(C);
   assert.strictEqual(r.Status, 'Cancelled');
   assert.strictEqual(r['Masuk MTTR'], 'Tidak');
-  assert.strictEqual(r['Status review'], 'Perlu review');
+  assert.strictEqual(r['Status review'], '', '2.6.1: Cancel langsung final, tanpa review');
   assert.match(ctx.readTable_('Log').slice(-1)[0].Detail, /oleh Admin/);
 });
 
@@ -279,7 +279,7 @@ test('EMAIL_PERINGATAN = Tidak → cukup banner, tanpa email', () => {
   as('budi@gmail.com', () => ctx.apiCancel(F, 'Masalah hilang sendiri'));
 });
 
-test('review (2.6): hanya admin; Pending tidak masuk review (Cek dihapus); Admin putuskan Cancelled/Abandoned', () => {
+test('review (2.6.1): hanya admin; Pending & Cancelled tidak masuk review; Admin putuskan Abandoned', () => {
   let P;
   as('andi@gmail.com', () => {
     P = ctx.apiStart('L03', 'E22H').open.id;
@@ -296,13 +296,12 @@ test('review (2.6): hanya admin; Pending tidak masuk review (Cek dihapus); Admin
     const list = ctx.apiListReview().items;
     assert.ok(!list.some(i => i.id === P), 'Pending tidak di antrean review');
     throwsMsg(() => ctx.apiReview(P, { action: 'CEK' }), /tidak ada di antrian/);
-    assert.ok(list.length >= 2);
-    assert.strictEqual(list[0].status, 'Abandoned', 'Abandoned paling atas');
+    assert.ok(list.length >= 1 && list.every(i => i.status === 'Abandoned'), '2.6.1: hanya Abandoned');
     throwsMsg(() => ctx.apiReview(D, { action: 'HITUNG', activeMin: 60 }), /Catatan review wajib/);
     throwsMsg(() => ctx.apiReview(D, { action: 'HITUNG', activeMin: 99999, note: 'x' }), /Menit aktif/);
     ctx.apiReview(D, { action: 'HITUNG', activeMin: 90, note: 'Konfirmasi teknisi: selesai jam 12' });
-    const cancelled = list.find(i => i.status === 'Cancelled');
-    ctx.apiReview(cancelled.id, { action: 'SETUJU' });
+    const cancelled = ctx.readTable_('Maintenance').find(r => r.Status === 'Cancelled');
+    throwsMsg(() => ctx.apiReview(cancelled['Maintenance ID'], { action: 'SETUJU' }), /tidak ada di antrian/);
   });
   const r = rec(D);
   assert.strictEqual(r['Masuk MTTR'], 'Ya');
@@ -743,10 +742,10 @@ test('2.2 laporan: kolom & isi sama dengan Excel (stop line 1/0, durasi, part ke
   assert.strictEqual(a['Jenis Kerusakan'], 'Mekanikal');
   assert.strictEqual(a['Fenomena Kerusakan'], 'Sensor error – Conveyor A stop');
   assert.strictEqual(a['Alasan Kerusakan'], 'Komponen aus');
-  assert.strictEqual(a['Jenis Sparepart'], 'Elektrikal\nMekanikal', 'satu part per baris, bukan ;');
-  assert.strictEqual(a['Nama Sparepart'], 'Fuse\nBearing');
-  assert.strictEqual(a['Model Sparepart'], '10A\n6205-2RS');
-  assert.strictEqual(a['Jumlah Sparepart'], '1\n2');
+  assert.strictEqual(a['Jenis Sparepart'], '① Elektrikal\n② Mekanikal', 'satu part per baris, bukan ;  (2.6.1: bernomor sama di tiap kolom)');
+  assert.strictEqual(a['Nama Sparepart'], '① Fuse\n② Bearing');
+  assert.strictEqual(a['Model Sparepart'], '① 10A\n② 6205-2RS');
+  assert.strictEqual(a['Jumlah Sparepart'], '① 1\n② 2');
   assert.strictEqual(a['Kondisi Perbaikan'], 'Selesai');
   assert.strictEqual(a['Karyawan Perbaikan'], 'Dewi', 'nama, bukan email');
   const b = lapRow(2026, r => r.Station === 'Cell Retreatment 2')[0];
@@ -870,7 +869,7 @@ U.appendRow(rowOf('Users', { Email: 'eko@gmail.com', Nama: 'Eko', Peran: 'Teknis
 const rekapDone = () => ss.getSheetByName('Rekap 2026').data[16][1];   // baris Total, kolom "Pekerjaan selesai"
 const rowById = (id) => lapRow(2026, r => r._id === id)[0];
 
-test('2.2.2 langsung: Mulai/Pause/Selesai/Cancel memperbarui Laporan & Rekap tanpa bangun ulang penuh, hasil = bangun ulang penuh', () => {
+test('2.2.2 langsung: Mulai/Pause/Selesai/Cancel memperbarui Laporan tanpa bangun ulang penuh (2.6.1: Rekap tiap malam), hasil = bangun ulang penuh', () => {
   as('sari@gmail.com', () => ctx.apiBuildReports());
   const origL = ctx.buildLaporan_, origR = ctx.buildRekap_;
   let full = 0, live;
@@ -891,9 +890,9 @@ test('2.2.2 langsung: Mulai/Pause/Selesai/Cancel memperbarui Laporan & Rekap tan
     as('dewi@gmail.com', () => ctx.apiComplete(id, sel('Sensor error', { parts: [{ id: FUSE, qty: 3 }, { manual: true, jenis: 'Pneumatik', nama: 'Fitting L', qty: 1 }] })));
     const a = rowById(id);
     assert.strictEqual(a['Kondisi Perbaikan'], 'Selesai');
-    assert.strictEqual(a['Nama Sparepart'], 'Fuse\nFitting L');
-    assert.strictEqual(a['Jumlah Sparepart'], '3\n1');
-    assert.strictEqual(rekapDone(), doneBefore + 1, 'Rekap langsung bertambah');
+    assert.strictEqual(a['Nama Sparepart'], '① Fuse\n② Fitting L');
+    assert.strictEqual(a['Jumlah Sparepart'], '① 3\n② 1');
+    assert.strictEqual(rekapDone(), doneBefore, '2.6.1: Rekap (tersembunyi) tidak ditulis per tombol');
     // Cancel di tengah → barisnya hilang, NO diurutkan ulang
     as('eko@gmail.com', () => { c1 = ctx.apiStart('L10', { baterai: 'E22H' }).open.id; });
     as('dewi@gmail.com', () => { c2 = ctx.apiStart('L11', { baterai: 'E245' }).open.id; });
@@ -910,6 +909,8 @@ test('2.2.2 langsung: Mulai/Pause/Selesai/Cancel memperbarui Laporan & Rekap tan
   }
   ctx.resetMaster_(); ctx.buildLaporan_(2026);
   jeq(lap(2026).rows, live, 'hasil sinkron langsung sama dengan bangun ulang penuh');
+  ctx.refreshRekap();
+  assert.ok(rekapDone() >= 1, 'Rekap dibangun malam');
 });
 
 test('2.2.2 langsung: Format Laporan diubah → aksi berikutnya membangun ulang dengan format baru; LAPORAN_LANGSUNG = Tidak → tab tidak disentuh', () => {
@@ -1356,9 +1357,10 @@ test('2.5.1 setup: Ringkasan & Baca Saya paling depan, warna tab per kelompok, t
   const y = ctx.yearOf_(new FakeDate()), names = ss.getSheets().map(s => s.getName());
   const TPM = ['TPM E22H', 'TPM E245', 'TPM Limo7', 'TPM VF7'];
   const BAT = ['Maintenance VF7', 'Maintenance Limo7', 'Maintenance E22H', 'Maintenance E245'];
-  jeq(names.slice(0, 17), ['Ringkasan', 'Baca Saya', 'Laporan ' + y, ...BAT, 'Rekap ' + y, 'KPI ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart']);
+  jeq(names.slice(0, 15), ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'KPI ' + y, ...BAT, ...TPM, 'Saran', 'Maintenance', 'Pemakaian Sparepart']);
   const shown = ss.getSheets().filter(s => !s.isSheetHidden()).map(s => s.getName());
-  jeq(shown, ['Ringkasan', 'Baca Saya', 'Laporan ' + y, ...BAT, 'Rekap ' + y, 'KPI ' + y, ...TPM, 'Pending Work', 'Saran', 'Maintenance', 'Pemakaian Sparepart', 'Users', 'Lines', 'Sparepart', 'Pilihan']);
+  jeq(shown, ['Ringkasan', 'Baca Saya', 'Laporan ' + y, 'KPI ' + y, ...BAT, ...TPM, 'Saran', 'Maintenance', 'Pemakaian Sparepart', 'Input Manual', 'Users', 'Lines', 'Sparepart', 'Pilihan']);
+  ['Rekap ' + y, 'Pending Work'].forEach(n => assert.ok(ss.getSheetByName(n).isSheetHidden(), '2.6.1: ' + n + ' tetap dibuat, disembunyikan'));
   assert.strictEqual(ss.getSheetByName('TPM VF7').tabColor, ctx.TEMA_.tab.laporan);
   assert.strictEqual(ss.getSheetByName('Maintenance VF7').tabColor, ctx.TEMA_.tab.laporan, '2.6.1: laporan per project terlihat, kelompok laporan');
   for (const n of ['Log', 'Terjemahan', 'Config', 'Form', 'KPI data']) assert.ok(ss.getSheetByName(n).isSheetHidden(), n + ' disembunyikan');
@@ -1691,12 +1693,15 @@ test('2.5.2 TPM: tab per project, judul & kotak Status Overview persis Excel man
   assert.strictEqual(a[7], 'Tono');
   assert.ok(a[8] instanceof FakeDate && a[8].getTime() === rec(T1).Mulai.getTime(), 'Date = waktu mulai');
   assert.match(rec(T1).Catatan, /^\[\d\d\/\d\d \d\d:\d\d Tono\] Cek ulang besok$/);
-  assert.strictEqual(a[9], '[zh-CN] Cek ulang besok\n([en] Cek ulang besok)', 'Notes ← Catatan, tanpa cap waktu');
+  const hm = (d) => ctx.Utilities.formatDate(d, 'Asia/Jakarta', 'HH:mm'), dur = (r) => Math.round((r.Selesai - r.Mulai) / 60000);
+  assert.strictEqual(a[9], '开始：' + hm(rec(T1).Mulai) + '，影响时长：' + dur(rec(T1)) + '分钟\n(Start: ' + hm(rec(T1).Mulai) + '; Downtime: ' + dur(rec(T1)) + ' min)\n' +
+    '[zh-CN] Cek ulang besok\n([en] Cek ulang besok)', '2.6.1: Notes = mulai & downtime (format manager), lalu Catatan tanpa cap waktu');
   assert.strictEqual(b[2], '工单无法下发\n([en] 工单无法下发)', 'teks Mandarin tidak diterjemahkan ke 中文 lagi');
   assert.strictEqual(b[6], 'MES');
   assert.strictEqual(b[7], 'Li Wei, Tono', '2.6: Responsibility = semua PIC, termasuk PIC tambahan');
-  assert.strictEqual(b[9], '', 'tanpa catatan');
-  assert.ok(hasFmt(S, 'setNumberFormat', '9,7:' + rows.length + 'x1', 'h:mm') && hasFmt(S, 'setNumberFormat', '9,10:' + rows.length + 'x1', 'yyyy-mm-dd'));
+  assert.strictEqual(b[9].split('\n').length, 2, 'tanpa catatan: hanya mulai & downtime');
+  assert.match(b[9], /^开始：\d\d:\d\d，影响时长：\d+分钟\n\(Start: \d\d:\d\d; Downtime: \d+ min\)$/);
+  assert.ok(hasFmt(S, 'setNumberFormat', '9,7:' + rows.length + 'x1', 'h:mm') && hasFmt(S, 'setNumberFormat', '9,10:' + rows.length + 'x1', 'm"月"d"日"'), 'Date seperti Excel manager: 10月22日');
   assert.match(cellOf(tpm('Kosong'), 'D9'), /^Belum ada pekerjaan Corrective selesai sejak 01\/01\//, 'project tanpa data: tab tetap ada');
   assert.ok(!ss.getSheetByName('Maintenance').data.some(r => r[0] === open && r[3] !== 'Aktif'), 'data tidak diubah');
 
@@ -2263,6 +2268,176 @@ test('2.6.1 tab per project boleh dihapus / dimatikan: TPM & Maintenance <batera
   cfgSet('TPM_DIMATIKAN', ''); ctx.invalidateMaster_();
   ctx.buildTpm_();
   ['VF7', 'Limo7', 'E22H', 'E245'].forEach(b => assert.ok(tpm(b), 'TPM ' + b + ' kembali'));
+});
+
+test('2.6.1 Laporan mudah dibaca: sparepart ①② (1 part tanpa nomor), Catatan tanpa cap, jam teks, rata & tanpa pindah baris, lebar sekali per format', () => {
+  const y = ctx.yearOf_(new FakeDate());
+  let id;
+  as('dewi@gmail.com', () => {
+    id = ctx.apiStart('L10', { baterai: 'E22H' }).open.id;
+    advance(25);
+    const x = sel('Sensor error', { parts: [{ id: FUSE, qty: 2 }, { manual: true, jenis: 'Mekanikal', nama: 'Bearing', model: '6205', qty: 1 }] });
+    x.values.Catatan = 'Cek lagi minggu depan';
+    ctx.apiComplete(id, x);
+  });
+  ctx.buildLaporan_(y);
+  const a = lapRow(y, r => r._id === id)[0];
+  assert.strictEqual(a['Nama Sparepart'], '① Fuse\n② Bearing');
+  assert.strictEqual(a['Model Sparepart'], '① 10A\n② 6205');
+  assert.strictEqual(a['Jumlah Sparepart'], '① 2\n② 1');
+  assert.strictEqual(a['Catatan'], 'Cek lagi minggu depan', 'tanpa [dd/MM HH:mm Nama]');
+  assert.match(rec(id).Catatan, /^\[\d\d\/\d\d \d\d:\d\d Dewi\] Cek lagi minggu depan$/, 'cap tetap di Maintenance');
+  const one = lapRow(y, r => r['Nama Sparepart'] && !/①/.test(r['Nama Sparepart']))[0];
+  assert.ok(one && typeof one['Jumlah Sparepart'] === 'number', '1 part: tanpa nomor, jumlah tetap angka');
+  const L = ss.getSheetByName('Laporan ' + y), cols = ctx.masterData_().report, col = (src) => cols.findIndex(c => c.sumber === src) + 1;
+  const n = L.data.length - 2;
+  ['Jam mulai', 'Jam selesai'].forEach(c => assert.ok(L.fmt.some(f => f[0] === 'setNumberFormat' && f[1] === '3,' + col(c) + ':' + (n + ctx.LAP_SPARE_) + 'x1' && f[2][0] === '@'), c + ' teks (07.30 tidak jadi 7.3)'));
+  const A = (src) => ctx.colLetter_(col(src)) + '3:' + ctx.colLetter_(col(src)) + (n + 2 + ctx.LAP_SPARE_);
+  assert.ok(L.fmt.some(f => f[0] === 'setWrapStrategy' && f[1] === A('Nama sparepart') && f[2][0] === 'CLIP'), 'sparepart tanpa pindah baris');
+  assert.ok(L.fmt.some(f => f[0] === 'setHorizontalAlignment' && f[1] === A('Tanggal') && f[2][0] === 'center'), 'kolom pendek rata tengah');
+  assert.strictEqual(L.widths[col('Masalah + detail')], 240);
+  assert.strictEqual(L.widths[col('Nama sparepart')], 170);
+  L.setColumnWidth(col('Catatan'), 333);   // admin mengubah lebar → dibiarkan
+  ctx.buildLaporan_(y);
+  assert.strictEqual(L.widths[col('Catatan')], 333, 'lebar dari admin tidak ditimpa');
+  assert.strictEqual(ss.getSheetByName('Maintenance E22H').widths[col('Masalah + detail')], 240, 'tab per baterai ikut');
+  // TPM Solution: >1 part = satu baris bernomor per part
+  ctx.buildTpm_();
+  const t = tpmData('E22H').find(r => /Bearing 6205 ×1/.test(r[4]));
+  assert.ok(t && /备件 Spare parts:\n① Fuse 10A ×2\n② Bearing 6205 ×1$/.test(t[4]), String(t && t[4]));
+});
+
+test('2.6.1 pangkas: Cancel tanpa review (antrian lama dibersihkan setup), Dashboard menandai cancel >30 menit, tutup bulan otomatis', () => {
+  // antrian Cancel lama (sebelum 2.6.1) → setup menandai Direview oleh SYSTEM
+  const old = ctx.readTable_('Maintenance').find(r => r.Status === 'Cancelled');
+  setRow('Maintenance', (r, h) => r[0] === old['Maintenance ID'], 'Status review', 'Perlu review');
+  const msg = as('owner@gmail.com', () => ctx.setup());
+  assert.match(msg, /Cancelled keluar dari antrian review/);
+  const after = rec(old['Maintenance ID']);
+  assert.ok(after['Status review'] === 'Direview' && after['Direview oleh'] === 'SYSTEM', JSON.stringify(after['Status review']));
+  assert.doesNotMatch(as('owner@gmail.com', () => ctx.setup()), /antrian review/, 'sekali saja');
+  // cancel setelah lama bekerja → terlihat di kartu KPI admin
+  let id;
+  as('dewi@gmail.com', () => { id = ctx.apiStart('L11', { baterai: 'E245' }).open.id; });
+  advance(35);
+  as('dewi@gmail.com', () => ctx.apiCancel(id, 'Input ganda'));
+  assert.strictEqual(rec(id)['Status review'], '');
+  const k = as('owner@gmail.com', () => ctx.apiDashboard({ periode: 30 })).kpiMonth;
+  assert.ok(k.audit.cancelLong >= 1 && k.autoDay === 5, JSON.stringify(k.audit));
+  // tutup bulan otomatis
+  const t0 = clock.now, now = new FakeDate(), y = ctx.yearOf_(now), m = ctx.monthOf_(now);
+  const pk = m === 1 ? ctx.ymKey_(y - 1, 12) : ctx.ymKey_(y, m - 1);
+  clock.now = Date.UTC(+pk.slice(0, 4), +pk.slice(5) - 1, 15, 2, 0, 0);   // satu pekerjaan di bulan lalu
+  let pid;
+  as('dewi@gmail.com', () => { pid = ctx.apiStart('L11', { baterai: 'E245' }).open.id; });
+  advance(20);
+  as('dewi@gmail.com', () => ctx.apiComplete(pid, sel('Sensor error', { tanpaPart: true })));
+  clock.now = t0;
+  ctx.kpiReopen_();
+  const day = +ctx.Utilities.formatDate(new FakeDate(), 'Asia/Jakarta', 'dd');
+  cfgSet('KPI_TUTUP_OTOMATIS', 0); ctx.invalidateMaster_();
+  assert.strictEqual(ctx.kpiTutupOtomatis_(), '', '0 = mati');
+  if (day < 28) { cfgSet('KPI_TUTUP_OTOMATIS', day + 1); ctx.invalidateMaster_(); assert.strictEqual(ctx.kpiTutupOtomatis_(), '', 'belum tanggalnya'); }
+  cfgSet('KPI_TUTUP_OTOMATIS', 1); ctx.invalidateMaster_();
+  setRow('Maintenance', (r, h) => r[0] === pid, 'Status', 'Abandoned');
+  setRow('Maintenance', (r, h) => r[0] === pid, 'Status review', 'Perlu review');
+  assert.strictEqual(ctx.kpiTutupOtomatis_(), '', 'ada Abandoned menunggu review → tidak ditutup');
+  setRow('Maintenance', (r, h) => r[0] === pid, 'Status', 'Completed');
+  setRow('Maintenance', (r, h) => r[0] === pid, 'Status review', '');
+  assert.strictEqual(ctx.kpiTutupOtomatis_(), pk, 'ditutup otomatis');
+  assert.strictEqual(ctx.kpiClosed_()[pk].by, 'system');
+  assert.ok(ctx.readTable_('Log').some(e => e['Maintenance ID'] === 'KPI ' + pk && /otomatis/.test(e.Detail)));
+  assert.strictEqual(ctx.kpiTutupOtomatis_(), '', 'tidak dobel');
+  ctx.buildKpi_(+pk.slice(0, 4));
+  const st = ss.getSheetByName('KPI ' + pk.slice(0, 4)).data.find(r => r[0] === pk && r[1] === 'Plant');
+  assert.match(String(st[11]), / oleh otomatis$/);
+  cfgSet('KPI_TUTUP_OTOMATIS', 5); ctx.invalidateMaster_();
+});
+
+test('2.6.1 Input Manual: periksa → konfirmasi → Maintenance / Pemakaian / Log / Laporan; baris salah diberi alasan; tidak dobel; hanya Admin', () => {
+  as('owner@gmail.com', () => ctx.setup());
+  const M = ss.getSheetByName('Input Manual');
+  jeq(M.data[0].slice(0, 15), ['Tanggal', 'Jam mulai', 'Jam selesai', 'Line', 'Baterai', 'Stop line', 'Jenis kerusakan', 'Masalah', 'Penyebab',
+    'Penanganan', 'Sparepart', 'PIC', 'PIC tambahan', 'Catatan', 'Hasil']);
+  assert.ok(M.fmt.some(f => f[0] === 'setNote' && f[1] === '1,8:1x1' && /setelah tanda –/.test(f[2][0])), 'catatan cara isi di judul');
+  assert.ok(M.fmt.some(f => f[0] === 'setNumberFormat' && /^2,1:/.test(f[1]) && f[2][0] === '@'), 'tanggal = teks (tidak ditafsir locale)');
+  const tech = ctx.readTable_('Users').filter(u => u.Peran === 'Teknisi' && u.Aktif === 'Ya' && u.Nama);
+  const A = tech[0], B = tech[1];
+  const day = (n) => new FakeDate(new FakeDate().getTime() + n * 86400000);
+  const dmy = (d) => ctx.Utilities.formatDate(d, 'Asia/Jakarta', 'dd/MM/yyyy'), ymd = (d) => ctx.Utilities.formatDate(d, 'Asia/Jakarta', 'yyyy-MM-dd');
+  const add = (o) => M.appendRow(rowOf('Input Manual', o));
+  const ok1 = { Tanggal: dmy(day(-2)), 'Jam mulai': '22:10', 'Jam selesai': '00:40', Line: 'L10', Baterai: 'e22h', 'Stop line': 'ya',
+    'Jenis kerusakan': 'elektrikal', Masalah: 'Sensor error – kabel putus di konektor', Penyebab: 'Komponen aus', Penanganan: 'Ganti part',
+    Sparepart: 'Fuse 10A x2; Bearing 6205-2RS', PIC: A.Nama, 'PIC tambahan': B.Email, Catatan: 'Dari laporan WeChat' };
+  add(ok1);
+  add({ ...ok1, Line: 'LX9' });
+  add({ ...ok1, 'Jam mulai': '08:00', PIC: 'Orang Asing' });
+  add({ ...ok1, Tanggal: dmy(day(2)), 'Jam mulai': '09:00' });
+  add({ ...ok1, 'Jam mulai': '10:00', Masalah: '' });
+  add({ ...ok1, 'Jam mulai': '11:00', 'Jenis kerusakan': 'Listrik' });
+  add({ Tanggal: ymd(day(-2)), 'Jam mulai': '7.30', 'Jam selesai': '0815', Line: 'L11', Baterai: 'E245', 'Stop line': 'Tidak', 'Jenis kerusakan': 'Mekanikal',
+    Masalah: 'Robot macet total', Penyebab: 'Komponen aus', Penanganan: 'Ganti part', PIC: A.Email });
+  const n0 = ctx.readTable_('Maintenance').length;
+  as(A.Email, () => throwsMsg(() => ctx.apiInputManual({}), /tidak punya akses/));
+  const chk = as('owner@gmail.com', () => ctx.apiInputManual({ periksa: true }));
+  assert.ok(chk.ok === 2 && chk.bad === 5, chk.summary);
+  assert.strictEqual(ctx.readTable_('Maintenance').length, n0, 'periksa = tidak menulis data');
+  const hasil = () => ctx.readTable_('Input Manual').map(r => String(r.Hasil));
+  const h1 = hasil();
+  assert.match(h1[1], /^✗ Line "LX9" tidak ada/);
+  assert.match(h1[2], /^✗ PIC "Orang Asing" tidak ada/);
+  assert.match(h1[3], /^✗ Jam selesai di masa depan/);
+  assert.match(h1[4], /^✗ .*wajib/);
+  assert.match(h1[5], /^✗ Jenis kerusakan "Listrik" tidak ada di daftar/);
+  assert.ok(h1[0] === '' && h1[6] === '', 'baris benar belum ditandai sebelum dimasukkan');
+  const res = as('owner@gmail.com', () => ctx.apiInputManual({}));
+  assert.strictEqual(res.ok, 2, res.summary);
+  const r1 = rec(res.ids[0]), r2 = rec(res.ids[1]);
+  assert.strictEqual(r1.Status, 'Completed');
+  assert.strictEqual(r1['Total aktif (menit)'], 150, '22:10 → 00:40 = lewat tengah malam');
+  assert.strictEqual(ctx.Utilities.formatDate(r1.Mulai, 'Asia/Jakarta', 'yyyy-MM-dd HH:mm'), ymd(day(-2)) + ' 22:10');
+  assert.strictEqual(r1.Baterai, 'E22H');
+  assert.strictEqual(r1['Stop line'], 'Ya');
+  assert.ok(r1.Masalah === 'Sensor error' && r1['Detail masalah'] === 'kabel putus di konektor', 'pilihan + detail dipisah dari "–"');
+  assert.strictEqual(r1['Jenis kerusakan'], 'Elektrikal');
+  assert.ok(r1['Teknisi terlibat'].includes(A.Email) && r1['Teknisi terlibat'].includes(B.Email) && r1['Teknisi awal'] === A.Email);
+  assert.match(r1.Catatan, new RegExp('^\\[\\d\\d/\\d\\d 00:40 ' + A.Nama + '\\] Dari laporan WeChat$'), 'cap = jam selesai + nama PIC');
+  assert.strictEqual(r1['Input manual oleh'], 'owner@gmail.com');
+  assert.strictEqual(r1['Masuk MTTR'], 'Ya');
+  assert.strictEqual(r2.Masalah, 'Lainnya: Robot macet total', 'teks bebas = Lainnya');
+  assert.ok(r2['Stop line'] === 'Tidak' && r2.Part === 'Tidak ada pergantian' && r2['Total aktif (menit)'] === 45, '7.30 → 0815');
+  const use = ctx.readTable_('Pemakaian Sparepart').filter(u => u['Maintenance ID'] === res.ids[0]);
+  jeq(use.map(u => [u['Nama Sparepart'], u.Jumlah, u.Manual]), [['Fuse', 2, 'Tidak'], ['Bearing', 1, 'Tidak']], 'sparepart dari katalog');
+  const log = ctx.readTable_('Log').filter(e => res.ids.includes(e['Maintenance ID']));
+  assert.ok(log.length === 2 && log.every(e => e.Kejadian === 'input manual' && e.User === 'owner@gmail.com'));
+  const y = ctx.yearOf_(r1.Mulai);
+  assert.ok(lapRow(y, r => r._id === res.ids[0]).length === 1, 'Laporan langsung diperbarui');
+  const h2 = hasil();
+  assert.ok(new RegExp('^✓ ' + res.ids[0]).test(h2[0]) && new RegExp('^✓ ' + res.ids[1]).test(h2[6]));
+  const again = as('owner@gmail.com', () => ctx.apiInputManual({ periksa: true }));
+  assert.strictEqual(again.ok, 0, 'baris ✓ dilewati');
+  add(ok1);   // baris sama diketik lagi
+  as('owner@gmail.com', () => ctx.apiInputManual({ periksa: true }));
+  assert.match(hasil().slice(-1)[0], new RegExp('^✗ Sudah ada: ' + res.ids[0]));
+  // batas per jalan
+  const keep = ctx.MANUAL_MAX_;
+  ctx.MANUAL_MAX_ = 1;
+  try { assert.ok(as('owner@gmail.com', () => ctx.apiInputManual({ periksa: true })).more >= 1); } finally { ctx.MANUAL_MAX_ = keep; }
+  // menu spreadsheet: periksa → tanya → NO = tidak ada yang ditulis, YES = dimasukkan
+  add({ ...ok1, 'Jam mulai': '12:00', 'Jam selesai': '12:30' });
+  const n1 = ctx.readTable_('Maintenance').length;
+  ui.yesNo = ['NO'];
+  as('owner@gmail.com', () => ctx.menuInputManual());
+  assert.strictEqual(ctx.readTable_('Maintenance').length, n1, 'konfirmasi NO → tidak ditulis');
+  assert.match(ui.alerts.slice(-1)[0], /Masukkan 1 pekerjaan/);
+  ui.yesNo = ['YES'];
+  as('owner@gmail.com', () => ctx.menuInputManual());
+  assert.strictEqual(ctx.readTable_('Maintenance').length, n1 + 1, 'YES → dimasukkan');
+  assert.match(ui.alerts.slice(-1)[0], /1 pekerjaan dimasukkan/);
+  // Dashboard admin: porsi input manual bulan ini
+  const k = as('owner@gmail.com', () => ctx.apiDashboard({ periode: 30 })).kpiMonth;
+  const inMonth = res.ids.filter(id => ctx.ymOf_(rec(id).Selesai) === k.bulan).length;
+  assert.ok(k.audit.manual >= inMonth && k.audit.done >= k.audit.manual, JSON.stringify(k.audit));
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

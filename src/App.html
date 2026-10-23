@@ -10,7 +10,7 @@
   var EVENT_LABEL = {
     'start': 'Mulai', 'pause': 'Pause', 'resume': 'Lanjut kerja', 'pending': 'Pending', 'lanjut': 'Pending dilanjutkan',
     'complete': 'Selesai', 'cancel': 'Cancel', 'peringatan': 'Peringatan', 'masih lanjut': 'Konfirmasi masih lanjut',
-    'abandoned': 'Abandoned', 'review': 'Review'
+    'abandoned': 'Abandoned', 'review': 'Review', 'input manual': 'Input manual', 'tab dimatikan': 'Tab dimatikan', 'tutup bulan': 'Tutup bulan'
   };
 
   function emptyFilter() { return { factory: '', proses: '', baterai: '', line: '' }; }
@@ -1010,7 +1010,7 @@
   }
 
   function cancelSheet(r) {
-    var s = openSheet('<h2>Cancel maintenance</h2><p class="small muted">Record masuk review Admin dan tidak dihitung ke MTTR.</p><div class="stack">' +
+    var s = openSheet('<h2>Cancel maintenance</h2><p class="small muted">Tidak dihitung ke MTTR. Alasan tercatat di Riwayat.</p><div class="stack">' +
       formHtml('Cancel') + '<button class="btn danger-ghost" id="x-save">Konfirmasi cancel</button></div>');
     bindForm(s);
     $('x-save').onclick = function () {
@@ -1773,13 +1773,20 @@
       }).join('') + '</div>';
     }
     (k.warn || []).forEach(function (w) { html += '<p class="tiny" style="color:var(--warn);margin:8px 0 0">' + esc(w) + '</p>'; });
+    var au = k.audit;
+    if (au && (au.cancelLong || au.manual)) {
+      html += '<p class="tiny muted" style="margin:8px 0 0">' + [
+        au.cancelLong ? esc(t('{n} cancel setelah >30 menit kerja (cek alasannya di Riwayat)', { n: au.cancelLong })) : '',
+        au.manual ? esc(t('{n} dari {m} pekerjaan selesai = input manual', { n: au.manual, m: au.done })) : ''].filter(String).join(' · ') + '</p>';
+    }
     var p = k.prev;
     if (p) {
       var pl = monthLabel(p.bulan, p.label);
       html += '<div style="margin-top:12px">' + (p.closedIso
-        ? '<p class="tiny muted" style="margin:0">' + esc(t('{m} sudah ditutup {d} oleh {n}.', { m: pl, d: fmtShort(p.closedIso), n: p.closedBy })) +
+        ? '<p class="tiny muted" style="margin:0">' + esc(t('{m} sudah ditutup {d} oleh {n}.', { m: pl, d: fmtShort(p.closedIso), n: p.closedBy === 'otomatis' ? t('otomatis') : p.closedBy })) +
           ' <button type="button" class="link" id="d-close" data-ym="' + esc(p.bulan) + '" data-label="' + esc(pl) + '" data-re="1">' + esc(t('Tutup ulang')) + '</button></p>'
         : '<div class="alert warn" style="margin-bottom:10px">' + esc(t('{m} belum ditutup.', { m: pl })) +
+          (k.autoDay ? ' ' + esc(t('Ditutup otomatis tanggal {d} bila tidak ada review.', { d: k.autoDay })) : '') +
           (p.reviews ? ' <b>' + esc(t('{n} pekerjaan bulan itu masih menunggu review', { n: p.reviews })) + '</b> — ' + esc(t('sebaiknya direview dulu.')) : '') + '</div>' +
           '<button type="button" class="btn navy" id="d-close" data-ym="' + esc(p.bulan) + '" data-label="' + esc(pl) + '">' + esc(t('Tutup bulan {m}', { m: pl })) + '</button>') + '</div>';
     }

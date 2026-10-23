@@ -105,23 +105,26 @@ class Sheet {
     if (this.ss && this.ss.sheets.some(x => x !== this && x.name === n)) throw new Error('Nama tab "' + n + '" sudah dipakai');
     this.name = n; return this;
   }
-  getLastRow() {
+  getLastRow() { return this._last(); }
+  _last() {   // dipakai mock sendiri (appendRow) tanpa terhitung sebagai panggilan Sheets di perf.js
     let n = this.data.length;
     while (n > 0 && this.data[n - 1].every(v => v === '' || v === undefined || v === null)) n--;
     return n;
   }
   getLastColumn() { return this.data.reduce((m, r) => Math.max(m, r.length), 0); }
-  getMaxRows() { return 1000; }
+  // Seperti Sheets: tab baru 1000 baris; getRange di luar batas = error (appendRow menambah baris sendiri).
+  getMaxRows() { return Math.max(this.maxRows || 1000, this.data.length); }
   getMaxColumns() { return Math.max(26, this.getLastColumn()); }
   hideColumns(c, n) { this.hidden = this.hidden || new Set(); for (let i = 0; i < (n || 1); i++) this.hidden.add(c + i); }
   showColumns() { this.hidden = new Set(); }
-  deleteRow(r) { this.data.splice(r - 1, 1); }
+  deleteRow(r) { const m = this.getMaxRows(); this.data.splice(r - 1, 1); this.maxRows = Math.max(1, m - 1); }
   getRange(r, c, nr, nc) {
     if (typeof r === 'string') { const rg = new Range(this, 1, 1, 1, 1); rg.a1 = r; return rg; }
+    if (r + (nr || 1) - 1 > this.getMaxRows()) throw new Error('Those rows are out of bounds. (' + this.name + ' baris ' + (r + (nr || 1) - 1) + ' > ' + this.getMaxRows() + ')');
     return new Range(this, r, c, nr || 1, nc || 1);
   }
   getDataRange() { return new Range(this, 1, 1, this.getLastRow(), this.getLastColumn()); }
-  appendRow(row) { this.data.push(row.slice()); }
+  appendRow(row) { this.data.length = this._last(); this.data.push(row.slice()); }
   setFrozenRows(n) { this.frozenRows = n; }
   setFrozenColumns(n) { this.frozenCols = n; }
   clear() { this.data = []; this.formulas = {}; this.fmt = []; }
@@ -147,7 +150,12 @@ class Sheet {
   setColumnWidth(c, w) { this.widths[c] = w; return this; }
   setRowHeight(r, h) { (this.heights = this.heights || {})[r] = h; return this; }
   setHiddenGridlines() { return this; }
-  insertRowsAfter() { return this; }
+  getRangeList(a1s) {   // RangeList: setiap setX diteruskan ke tiap range (dicatat di sh.fmt seperti biasa)
+    const rs = a1s.map(a => this.getRange(a));
+    const p = new Proxy({}, { get: (_, k) => (...a) => { rs.forEach(r => r[k] && r[k](...a)); return p; } });
+    return p;
+  }
+  insertRowsAfter(after, n) { this.maxRows = this.getMaxRows() + n; this.inserted = (this.inserted || 0) + n; return this; }
   newChart() { return recorder('chart'); }
   insertChart(c) { this.charts.push(c); }
   getCharts() { return this.charts.slice(); }
@@ -222,11 +230,12 @@ const ctx = {
     newDataValidation: () => recorder('dv'),
     RecalculationInterval: { HOUR: 'HOUR' },
     getUi: () => ({ createMenu: (name) => { ui.menus.push(name); return { addItem() { return this; }, addSeparator() { return this; }, addToUi() {} }; },
-      alert: (msg) => { (ui.alerts = ui.alerts || []).push(msg); return 'OK'; },
+      // alert(pesan) atau alert(judul, pesan, tombol); YES_NO dijawab dari ui.yesNo ('YES' / 'NO', habis = NO)
+      alert: (a, b, c) => { (ui.alerts = ui.alerts || []).push(b === undefined ? a : b); return c === 'YES_NO' ? ((ui.yesNo || []).shift() || 'NO') : 'OK'; },
       // jawaban prompt diambil dari ui.answers (null / habis = Cancel)
       prompt: (title) => { (ui.asked = ui.asked || []).push(title); const a = (ui.answers || []).shift();
         return { getSelectedButton: () => (a == null ? 'CANCEL' : 'OK'), getResponseText: () => (a == null ? '' : a) }; },
-      ButtonSet: { OK_CANCEL: 'OK_CANCEL' }, Button: { OK: 'OK', CANCEL: 'CANCEL' } })
+      ButtonSet: { OK_CANCEL: 'OK_CANCEL', OK: 'OK', YES_NO: 'YES_NO' }, Button: { OK: 'OK', CANCEL: 'CANCEL', YES: 'YES', NO: 'NO' } })
   },
   Session: { getActiveUser: () => ({ getEmail: () => user.email }) },
   LockService: {

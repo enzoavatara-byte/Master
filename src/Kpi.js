@@ -220,6 +220,7 @@ function writeKpiSnapshot_(key, list, now, email) {
   var all = keep.concat(fresh);
   if (vals.length > 1) sh.getRange(2, 1, vals.length - 1, Math.max(w, vals[0].length)).clearContent();
   if (all.length) {
+    ensureRows_(sh, all.length + 1, 200);
     sh.getRange(2, 1, all.length, 1).setNumberFormat('@');   // "2026-09" tetap teks, tidak diubah Sheets jadi tanggal
     sh.getRange(2, 1, all.length, w).setValues(all);
   }
@@ -243,7 +244,7 @@ function kpiReopen_(cutoff) {
 /** Pekerjaan bulan itu yang masih menunggu review admin (bisa mengubah Masuk MTTR). */
 function kpiReviewsOpen_(rows, key) {
   return rows.filter(function (r) {
-    if (r['Status review'] !== APP.REVIEW.NEEDED) return false;
+    if (r['Status review'] !== APP.REVIEW.NEEDED || r['Status'] !== APP.STATUS.ABANDONED) return false;   // 2.6.1: Cancel tanpa review
     var d = finalDate_(r);
     return !!d && ymOf_(d) === key;
   }).length;
@@ -283,7 +284,7 @@ function buildKpi_(year) {
   var nz = function (v) { return v == null ? '' : v; };
   months.forEach(function (m) {
     var key = ymKey_(year, m), c = closed[key];
-    var status = c ? 'Ditutup ' + (c.at instanceof Date ? Utilities.formatDate(c.at, APP.TZ, 'dd/MM/yyyy') : String(c.at || '')) + ' oleh ' + (names[c.by] || c.by)
+    var status = c ? 'Ditutup ' + (c.at instanceof Date ? Utilities.formatDate(c.at, APP.TZ, 'dd/MM/yyyy') : String(c.at || '')) + ' oleh ' + closerName_(names, c.by)
       : (key === cur ? 'Berjalan' : 'Belum ditutup');
     (c ? c.rows : computeKpi_(year, m, rows, md, s, now)).forEach(function (x) {
       data.push([x.bulan, x.level, x.nama, x.kerusakan, nz(x.mttr), nz(x.targetMttr), x.downtime, x.jamOperasi, nz(x.mtbf), nz(x.targetMtbf), x.tercapai, status]);
@@ -300,6 +301,7 @@ function writeKpiSheet_(sh, data) {
   sh.setConditionalFormatRules([]);
   sh.getRange(1, 1, 1, w).setValues([head]);
   if (data.length) {
+    ensureRows_(sh, data.length + 1, 50);
     sh.getRange(2, 1, data.length, 1).setNumberFormat('@');   // Bulan "2026-09" = teks (dicari rumus Ringkasan)
     sh.getRange(2, 1, data.length, w).setValues(data);
   }
@@ -325,6 +327,11 @@ function writeKpiSheet_(sh, data) {
 /** Admin: kunci angka KPI satu bulan yang sudah lewat. Tutup ulang = salinan diganti, nilai lama → baru dicatat di Log. */
 function apiTutupBulan(ym) {
   var user = requireUser_([APP.ROLES.ADMIN]);
+  return kpiTutup_(ym, user.email, '');
+}
+
+/** Tutup bulan (admin lewat apiTutupBulan, atau trigger malam = SYSTEM lewat kpiTutupOtomatis_). */
+function kpiTutup_(ym, email, note) {
   var key = String(ym || '').trim(), m = /^(\d{4})-(\d{2})$/.exec(key);
   if (!m || Number(m[2]) < 1 || Number(m[2]) > 12) throw new Error('Bulan tidak valid: "' + key + '" (format yyyy-mm, mis. 2026-09).');
   var year = checkYear_(Number(m[1])), month = Number(m[2]), now = new Date();
@@ -333,18 +340,42 @@ function apiTutupBulan(ym) {
   var res = withLock_(function () {
     var closed = kpiClosed_(), before = closed[key], rows = rekapRows_(year);
     var list = computeKpi_(year, month, rows, md, s, now);
-    writeKpiSnapshot_(key, list, now, user.email);
-    closed[key] = { rows: list, at: now, by: user.email };
+    writeKpiSnapshot_(key, list, now, email);
+    closed[key] = { rows: list, at: now, by: String(email).toLowerCase() };
     saveKpiClosedIndex_(closed);
     var plantOf = function (l) { return l.filter(function (x) { return x.level === KPI_LEVEL_.PLANT; })[0]; };
     var plant = plantOf(list);
-    log_(now, 'KPI ' + key, APP.EVENTS.TUTUP_BULAN, user.email, ymLabel_(key) + ': ' + kpiBrief_(plant) +
+    log_(now, 'KPI ' + key, APP.EVENTS.TUTUP_BULAN, email, ymLabel_(key) + ': ' + kpiBrief_(plant) + (note ? ' · ' + note : '') +
       (before ? ' · ditutup ulang; sebelumnya' + (before.at instanceof Date ? ' (' + Utilities.formatDate(before.at, APP.TZ, 'dd/MM/yyyy HH:mm') + ')' : '') +
         ': ' + kpiBrief_(plantOf(before.rows)) : ''));
     return { plant: plant, reclosed: !!before, reviews: kpiReviewsOpen_(rows, key) };
   });
   var built = buildKpi_(year);
   return { bulan: key, label: ymLabel_(key), plant: res.plant, reclosed: res.reclosed, reviews: res.reviews, sheet: built.sheet, warn: built.warn };
+}
+
+/**
+ * Trigger malam (2.6.1): bulan lalu ditutup otomatis mulai tanggal Config KPI_TUTUP_OTOMATIS (0 = mati), hanya jika belum
+ * ditutup, ada datanya, dan tidak ada Abandoned bulan itu yang menunggu review (angkanya masih bisa berubah).
+ * @return {string} bulan yang ditutup, '' jika tidak
+ */
+function kpiTutupOtomatis_(now) {
+  now = now || new Date();
+  var day = Math.floor(Number(getConfig_('KPI_TUTUP_OTOMATIS')));
+  if (!(day >= 1 && day <= 28) || Number(Utilities.formatDate(now, APP.TZ, 'dd')) < day) return '';
+  var y = yearOf_(now), mo = monthOf_(now), pk = mo === 1 ? ymKey_(y - 1, 12) : ymKey_(y, mo - 1);
+  if (kpiClosed_()[pk]) return '';
+  var rows = rekapRows_(Number(pk.slice(0, 4))), s = kpiSettings_();
+  if (s.mulai && s.mulai.slice(0, 7) > pk) return '';
+  if (!rows.some(function (r) { var d = finalDate_(r); return !!d && ymOf_(d) === pk; }) || kpiReviewsOpen_(rows, pk)) return '';
+  kpiTutup_(pk, APP.SYSTEM_USER, 'otomatis (Config KPI_TUTUP_OTOMATIS = ' + day + ')');
+  return pk;
+}
+
+/** Nama penutup bulan untuk tampilan: SYSTEM = "otomatis". */
+function closerName_(names, by) {
+  by = String(by || '').toLowerCase();
+  return by === APP.SYSTEM_USER.toLowerCase() ? 'otomatis' : (names[by] || by);
 }
 
 /** Kartu KPI Dashboard: bulan berjalan (Plant + project) dari baris Maintenance yang sudah dibaca. Admin: status bulan lalu. */
@@ -359,8 +390,16 @@ function kpiDashboard_(user, rows, md, now, names) {
     var c = idx[pk];
     var hasData = rows.some(function (r) { var d = finalDate_(r); return !!d && ymOf_(d) === pk; });
     if (c || (hasData && !(s.mulai && s.mulai.slice(0, 7) > pk))) {
-      out.prev = { bulan: pk, label: ymLabel_(pk), closedIso: c ? c[0] : '', closedBy: c ? (names[c[1]] || c[1]) : '', reviews: kpiReviewsOpen_(rows, pk) };
+      out.prev = { bulan: pk, label: ymLabel_(pk), closedIso: c ? c[0] : '', closedBy: c ? closerName_(names, c[1]) : '', reviews: kpiReviewsOpen_(rows, pk) };
     }
+    out.autoDay = Math.max(0, Math.floor(Number(getConfig_('KPI_TUTUP_OTOMATIS')) || 0));
+    // 2.6.1: yang patut dicek admin (pengganti review Cancel): cancel setelah lama bekerja, dan porsi input manual
+    var cur = function (r) { var d = finalDate_(r); return !!d && ymOf_(d) === key; };
+    var done = rows.filter(function (r) { return r['Status'] === APP.STATUS.COMPLETED && cur(r); });
+    out.audit = {
+      cancelLong: rows.filter(function (r) { return r['Status'] === APP.STATUS.CANCELLED && cur(r) && Number(r['Total aktif (menit)'] || 0) >= 30; }).length,
+      manual: done.filter(function (r) { return String(r['Input manual oleh'] || '').trim() !== ''; }).length, done: done.length
+    };
   }
   return out;
 }

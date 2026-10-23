@@ -182,7 +182,7 @@ I18N.zh = {
   'Tanpa alasan': '无原因', 'Pekerjaan tertunda': '挂起工作', 'Simpan pending': '保存为挂起', 'Shift berikutnya': '下一班',
   'Besok': '明天', 'Pilih tanggal': '选择日期', 'Pekerjaan yang sudah dilakukan wajib diisi.': '必须填写已完成的工作。',
   'Satu form. Pekerjaan ini akan muncul di tab Pending untuk semua teknisi.': '只需一张表单。此工作将显示在所有技术员的“挂起”页。',
-  'Konfirmasi cancel': '确认取消', 'Record masuk review Admin dan tidak dihitung ke MTTR.': '记录将进入管理员审核，不计入 MTTR。',
+  'Konfirmasi cancel': '确认取消', 'Tidak dihitung ke MTTR. Alasan tercatat di Riwayat.': '不计入 MTTR。原因记录在历史中。',
   'Tulis alasan…': '填写原因…',
 
   // ---------- selesai & sparepart ----------
@@ -275,7 +275,11 @@ I18N.zh = {
   'Semua line. MTBF = (jam operasi − downtime) ÷ jumlah kerusakan. Angka bisa berubah sampai bulan ditutup admin.': '所有产线。MTBF =（运行时间 − 停机时间）÷ 故障次数。管理员关账前数字可能变化。',
   'tanpa kerusakan': '无故障', 'Kerusakan': '故障次数', 'Downtime': '停机时间', 'jam operasi {h}': '运行时间 {h}',
   '{n}× rusak · downtime {d} jam · jam operasi {h}': '故障 {n} 次 · 停机 {d} 小时 · 运行 {h} 小时',
-  '{m} sudah ditutup {d} oleh {n}.': '{m} 已于 {d} 由 {n} 关账。', 'Tutup ulang': '重新关账', '{m} belum ditutup.': '{m} 尚未关账。',
+  '{m} sudah ditutup {d} oleh {n}.': '{m} 已于 {d} 由 {n} 关账。', 'otomatis': '系统自动',
+  'Ditutup otomatis tanggal {d} bila tidak ada review.': '若无待审核项，将于 {d} 日自动关账。',
+  '{n} cancel setelah >30 menit kerja (cek alasannya di Riwayat)': '{n} 项在工作 30 分钟以上后取消（请在历史中查看原因）',
+  '{n} dari {m} pekerjaan selesai = input manual': '{m} 项已完成工作中有 {n} 项为手动录入',
+  'Input manual': '手动录入', 'Tab dimatikan': '标签页已停用', 'Tutup ulang': '重新关账', '{m} belum ditutup.': '{m} 尚未关账。',
   '{n} pekerjaan bulan itu masih menunggu review': '该月仍有 {n} 项工作待审核', 'sebaiknya direview dulu.': '建议先审核。', 'Tutup bulan {m}': '关账 {m}',
   'Angka KPI {m} dikunci: edit data lama sesudah ini tidak mengubahnya lagi. Tab KPI di Google Sheet ikut diperbarui.': '{m} 的 KPI 数字将被锁定：之后修改旧数据不再影响。Google 表格中的 KPI 标签页也会更新。',
   'Sudah pernah ditutup: angka lama diganti angka sekarang, dan keduanya dicatat di Log.': '已关账过：旧数字将被当前数字替换，两者都记录在 Log 中。',

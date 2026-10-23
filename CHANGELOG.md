@@ -5,7 +5,25 @@ Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spr
 
 ## 2.6.1 — perbaikan dari uji di Apps Script asli
 Ditemukan saat 2.6 dijalankan di Apps Script & Google Sheets asli (spreadsheet uji kosong, 104 pekerjaan berbeda-beda → Laporan 100 baris).
-Ganti `Auth`, `Code`, `Config`, `Master`, `Translate`, `Rekap`, `Tampilan`, `Tpm`, Run `setup`, New version.
+Buat file Script `Manual`; ganti `Api`, `Auth`, `Code`, `Config`, `Db`, `Kpi`, `Maintenance`, `Master`, `Rekap`, `Tampilan`, `Tpm`, `Translate` (Script) dan `App`, `I18n` (HTML). Run `setup`, New version.
+
+**Bug yang ditemukan di runtime / skala asli**
+- **Tombol Selesai bisa gagal setelah ±1 tahun pemakaian.** Tulisan sekaligus ke baris di bawah baris terakhir (`Pemakaian Sparepart`, Laporan, Terjemahan, Arsip, KPI data) tidak menambah baris sheet; tab baru hanya 1000 baris dan Apps Script menolak range di luar batas. Begitu `Pemakaian Sparepart` mencapai 1000 baris, **Selesai dengan sparepart gagal**; Laporan dengan >±700 pekerjaan setahun juga gagal dibangun. Sekarang baris ditambah otomatis (`ensureRows_`). Mock test kini menolak range di luar batas seperti Sheets asli.
+- **Jam di Laporan berubah jadi angka**: "07.30" ditulis sebagai teks tetapi Sheets mengubahnya jadi `7.3` (dan "10.00" jadi `10`). Kolom Jam sekarang berformat teks sebelum ditulis.
+
+**Lebih mudah dibaca**
+- Laporan (juga `Maintenance <baterai>` & Download): >1 sparepart diberi nomor sama **① ②** di kolom Jenis / Nama / Model / Jumlah (1 part tanpa nomor), kolom sparepart tidak pindah baris supaya ① sejajar; Catatan tanpa cap `[dd/MM HH:mm Nama]` (cap tetap di Maintenance & Riwayat); lebar kolom per isi (dipasang sekali per format; ubahan admin bertahan), kolom pendek rata tengah.
+- TPM: **Notes** = `开始：22:10，影响时长：20分钟` + `(Start: 22:10; Downtime: 20 min)` seperti Excel manager, lalu catatan teknisi; **Date** tampil `10月22日`; Solution dengan >1 part = satu baris bernomor per part.
+- Tab terlihat lebih sedikit: `Rekap` (angka utama ada di KPI) dan `Pending Work` (ada di Ringkasan & tab Pending aplikasi) disembunyikan; `KPI` langsung setelah Laporan.
+
+**Input Manual (admin)**: tab baru `Input Manual` untuk pekerjaan yang tidak tercatat lewat aplikasi (riwayat WeChat, HP mati, lupa scan). Ketik baris sederhana (tanggal, jam, line, jenis, masalah – detail, penyebab, penanganan, sparepart "Fuse 10A x2; Bearing", PIC + PIC tambahan, catatan) → menu **Masukkan Input Manual…** → periksa → "n benar, m salah. Masukkan n?" → Ya. Aturan sama dengan aplikasi; hasil per baris di kolom Hasil (✓ ID / ✗ alasan); pekerjaan sama tidak dobel; ditandai `Input manual oleh` + Log; Dashboard admin menampilkan porsi input manual bulan ini.
+
+**Dipangkas (mengurangi kerja tanpa keputusan)**
+- **Review Cancel dihapus**: satu-satunya keputusan dulu "Setujui", dan Cancelled tidak pernah masuk MTTR. Cancel langsung final (alasan tetap di Riwayat & Log); review hanya untuk Abandoned. `setup` membersihkan antrian lama. Dashboard admin menampilkan "cancel setelah >30 menit kerja" (yang patut dicek).
+- **Tutup bulan otomatis** tanggal `KPI_TUTUP_OTOMATIS` (5) oleh trigger malam bila tidak ada Abandoned menunggu review ("oleh otomatis"; 0 = manual). Tutup ulang tetap bisa.
+- **Rekap tidak ditulis per tombol** (tab tersembunyi; dibangun malam / Perbarui / setup): Selesai 23 → 21 panggilan.
+
+**Tab per project**
 
 - **Tab `Maintenance <baterai>` = laporan per project** (nama tetap): tampilan sama dengan `Laporan <tahun>` (judul, kolom `Format Laporan`, warna, belang, warna Kondisi perbaikan), hanya baris project itu, No. 1..n. Sebelumnya 42 kolom data mentah, tersembunyi, dan format manual hilang tiap `setup`. Isinya rumus ke tab Laporan: baris yang ditulis tiap aksi langsung ikut, tombol teknisi tidak lebih lambat, trigger malam tidak menulis ulang bila tidak ada yang berubah. Hanya tahun berjalan (seperti Laporan). Terlihat, tepat setelah Laporan. Lebar kolom yang diatur admin bertahan.
 - **Tab per project boleh dihapus / dimatikan**: tab `TPM <project>` atau `Maintenance <baterai>` yang dihapus admin tidak dibuat lagi; aplikasi menulis project itu di `Config` → `TPM_DIMATIKAN` / `TAB_BATERAI_DIMATIKAN` dan di `Log`. Nyalakan lagi = hapus namanya dari Config. `Semua` = tidak ada tab sama sekali (TPM: tanpa baca data & Google Translate). Nama project salah ketik → peringatan di Dashboard admin. Tab yang diganti nama tidak disentuh.
@@ -16,7 +34,7 @@ Ganti `Auth`, `Code`, `Config`, `Master`, `Translate`, `Rekap`, `Tampilan`, `Tpm
 - **Email ditulis dua kali di `Users`**: peran diambil dari baris pertama tetapi nama dari baris terakhir (terlihat: "Ditutup … oleh <nama baris lain>"). Sekarang peran & nama dari baris yang sama: baris **aktif** pertama (baris lama yang dinonaktifkan tidak lagi mengunci orang itu). Dashboard admin & pesan `setup` memberi peringatan; pilihan PIC tidak dobel.
 
 **Uji di Apps Script asli** (`test/seed-uji.js` + `test/gas/Uji.js`, hanya untuk spreadsheet uji): data dari kode yang sama di atas mock, lalu `ujiIsiData` / `ujiPeriksa` / `ujiAlur` membandingkan hasil runtime asli sel per sel. Ronde 1 (2.6.0): Laporan 100 baris, Rekap, KPI per bulan × Plant / Project / Line, tutup bulan, Ringkasan (tanpa error, Downtime & MTBF = KPI, kedua Top 5), trigger & ID tab cocok dengan hitungan mock; bug terjemahan dan email ganda di atas ditemukan dari isi tab `Terjemahan` & `KPI`. `ujiIsiData` butuh 336 dtk (setup di spreadsheet kosong + setup ulang 104 pekerjaan), dekat batas 360 dtk Apps Script → uji dipecah dan hasil ditulis per bagian.
-- Test lokal: penerjemah palsu kini meniru Google (satu bahasa asal per panggilan; deteksi otomatis + huruf Han = 中文 semua). Dengan kode 2.6.0, 4 test langsung gagal. 90 test; jumlah panggilan aksi teknisi tidak berubah.
+- Test lokal: penerjemah palsu kini meniru Google (satu bahasa asal per panggilan; deteksi otomatis + huruf Han = 中文 semua). Dengan kode 2.6.0, 4 test langsung gagal. 93 test; aksi teknisi tidak lebih lambat (Selesai lebih cepat).
 
 ## 2.6.0 — revisi uji lapangan + KPI MTTR & MTBF bulanan
 Gabungan revisi uji lapangan (`Improvement_2.6.md`) dan seluruh rencana 2.5.3 (statistik & download): cukup satu kali salin file.

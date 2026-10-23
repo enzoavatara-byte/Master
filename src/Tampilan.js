@@ -161,17 +161,18 @@ function tabPlan_(ss) {
     if (real && !seen[real]) { seen[real] = true; plan.push([real, grp, !!hide]); }
   };
   add(RINGKASAN_, 'baca'); add(BACA_, 'baca');
-  add(laporanName_(y), 'laporan');
-  var md = masterData_();   // Maintenance <baterai> = Laporan per project (2.6.1): tepat setelah Laporan
+  add(laporanName_(y), 'laporan'); add(kpiName_(y), 'laporan');
+  var md = masterData_();   // Maintenance <baterai> = Laporan per project (2.6.1): setelah Laporan & KPI
   (md.allBatteries.length ? md.allBatteries : APP.PROJECT_DEFAULTS.map(function (p) { return p[1]; }))
     .forEach(function (b) { add(S.MAINT + ' ' + b, 'laporan'); });
-  add(rekapName_(y), 'laporan'); add(kpiName_(y), 'laporan');
   ss.getSheets().map(function (sh) { return sh.getName(); }).filter(function (n) { return n.indexOf(TPM_PREFIX_) === 0; }).sort()
     .forEach(function (n) { add(n, 'laporan'); });
-  add(S.PENDING, 'laporan'); add(S.SARAN, 'laporan');
-  add(S.MAINT, 'app'); add(S.PEMAKAIAN, 'app');
+  add(S.SARAN, 'laporan');
+  add(S.MAINT, 'app'); add(S.PEMAKAIAN, 'app'); add(S.MANUAL, 'app');
   [S.USERS, S.LINES, S.SPAREPART, S.OPTIONS].forEach(function (n) { add(n, 'atur'); });
   [S.PROJECTS, S.FACTORY, S.FORM, S.FORMAT, S.PANDUAN, S.CONFIG, S.RENCANA, S.MESIN].forEach(function (n) { add(n, 'atur', true); });   // Mesin: tidak dipakai lagi (2.6)
+  // 2.6.1: Rekap (angka utama ada di KPI) & Pending Work (ada di Ringkasan + tab Pending aplikasi) tetap dibangun, disembunyikan
+  add(rekapName_(y), 'laporan', true); add(S.PENDING, 'laporan', true);
   add(S.LOG, 'app', true); add(S.TERJEMAHAN, 'app', true); add(S.KPI_DATA, 'app', true);
   var rest = ss.getSheets().map(function (sh) { return sh.getName(); }).filter(function (n) { return !seen[n]; });
   rest.filter(function (n) { return /^(Laporan|Rekap|KPI) \d{4}$/.test(n); }).sort().reverse().forEach(function (n) { add(n, 'laporan', true); });
@@ -196,6 +197,31 @@ function applyTabs_(ss, order) {
 }
 
 // ---------- tabel ----------
+
+/** Tab Input Manual (2.6.1): dropdown dari master (teks lain tetap boleh), tanggal & jam sebagai teks, catatan cara isi di judul. */
+function manualSpec_() {
+  var md = masterData_(), opt = function (src) { return (md.options[src] || []).slice(0, 400); };
+  var lines = Object.keys(md.lines).map(function (k) { return md.lines[k]; }).filter(function (l) { return l.active; }).map(function (l) { return l.id; });
+  var people = md.users.filter(function (u) { return u.email && isActiveRow_(u.aktif); }).map(function (u) { return u.name || u.email; });
+  var src = function (f) { var d = fieldDef_(md, 'Selesai', f); return d ? opt(d.source) : []; };
+  return {
+    wrap: ['Masalah', 'Penyebab', 'Penanganan', 'Sparepart', 'Catatan', 'Hasil'], plain: ['Tanggal', 'Jam mulai', 'Jam selesai'],
+    wide: { 'Tanggal': 95, 'Jam mulai': 80, 'Jam selesai': 80, 'Line': 80, 'Masalah': 220, 'Penyebab': 200, 'Penanganan': 200, 'Sparepart': 200,
+      'PIC': 140, 'PIC tambahan': 160, 'Catatan': 200, 'Hasil': 260 },
+    dropdowns: { 'Line': lines, 'Baterai': md.allBatteries, 'Stop line': [APP.YES, APP.NO], 'Jenis kerusakan': src('Jenis kerusakan'),
+      'Masalah': src('Masalah'), 'Penyebab': src('Penyebab'), 'Penanganan': src('Penanganan'), 'PIC': uniq_(people) },
+    notes: {
+      'Tanggal': 'Tanggal mulai, mis. 22/10/2026 (hari/bulan/tahun).',
+      'Jam mulai': 'mis. 07:30 atau 07.30', 'Jam selesai': 'mis. 08:15. Lebih kecil dari jam mulai = lewat tengah malam.',
+      'Baterai': 'Kosong = baterai satu-satunya di line itu.', 'Stop line': 'Ya / Tidak. Kosong = Ya untuk Corrective.',
+      'Masalah': 'Pilih dari daftar. Detail boleh ditulis setelah tanda –, mis. "Sensor error – kabel putus". Teks lain = Lainnya.',
+      'Penyebab': 'Pilih dari daftar, boleh + "– detail".', 'Penanganan': 'Pilih dari daftar, boleh + "– detail".',
+      'Sparepart': 'Satu per baris atau pisahkan dengan ;  mis. "Fuse 10A x2; Bearing 6205". Tanpa jumlah = 1. Kosong = tidak ada pergantian.',
+      'PIC': 'Teknisi utama (nama di Users).', 'PIC tambahan': 'Teknisi lain yang ikut, pisahkan koma.',
+      'Hasil': 'Diisi aplikasi: ✓ ID = sudah masuk, ✗ = alasan (perbaiki lalu jalankan menu lagi). Baris ✓ boleh dihapus.'
+    }
+  };
+}
 
 function tableSpecs_() {
   var S = APP.SHEETS, YT = [APP.YES, APP.NO], spec = {};
@@ -224,6 +250,7 @@ function tableSpecs_() {
   spec[S.PANDUAN] = { off: 'Aktif', wrap: ['Isi'], dropdowns: { 'Untuk': ['Teknisi', 'Admin', 'Semua'], 'Aktif': YT } };
   spec[S.RENCANA] = { off: 'Aktif', wrap: ['Isi'], dropdowns: { 'Aktif': YT } };
   spec[S.CONFIG] = { wrap: ['Keterangan'], wide: { 'Key': 190, 'Value': 200, 'Keterangan': 420 } };
+  spec[S.MANUAL] = manualSpec_();
   return spec;
 }
 
@@ -259,6 +286,8 @@ function styleTable_(sh, o, full) {
   });
   (APP.DATE_COLUMNS[sh.getName()] || []).forEach(function (n) { if (col(n)) body(col(n)).setNumberFormat(DATE_FMT_); });
   (o.ints || []).forEach(function (n) { if (col(n)) body(col(n)).setNumberFormat('0'); });
+  (o.plain || []).forEach(function (n) { if (col(n)) body(col(n)).setNumberFormat('@'); });   // teks apa adanya (tanggal/jam ketikan admin)
+  Object.keys(o.notes || {}).forEach(function (n) { if (col(n)) sh.getRange(1, col(n)).setNote(o.notes[n]); });
   Object.keys(o.dropdowns || {}).forEach(function (n) {
     if (!col(n)) return;
     body(col(n)).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(o.dropdowns[n], true).setAllowInvalid(true).build());
@@ -340,7 +369,28 @@ function stylePendingWork_(ss, full) {
   sh.getRange(2, 7, max - 1, 1).setNumberFormat('0.0');
 }
 
-/** Laporan <tahun> (dipanggil buildLaporan_): judul, header, belang, kolom Kondisi berwarna. Kolom tidak diubah. */
+/** Sumber kolom Laporan → [lebar px, rata tengah, tanpa pindah baris]. Sparepart tanpa pindah baris: baris ① di tiap kolom sejajar. */
+var LAP_STYLE_ = {
+  'NO': [50, 1], 'Factory': [70, 1], 'Nama factory': [120], 'Project': [70, 1], 'Proses': [100], 'Line': [70, 1], 'Station': [160],
+  'Tanggal': [90, 1], 'Jam mulai': [80, 1], 'Jam selesai': [80, 1], 'Stop line (1/0)': [90, 1], 'Durasi stop line': [90, 1],
+  'Waktu aktif (menit)': [90, 1], 'Jenis kerusakan': [100], 'Masalah + detail': [240], 'Penyebab + detail': [220], 'Penanganan + detail': [240],
+  'Jenis sparepart': [120, 0, 1], 'Nama sparepart': [170, 0, 1], 'Model sparepart': [170, 0, 1], 'Jumlah sparepart': [80, 1, 1],
+  'Catatan': [260], 'Kondisi perbaikan': [100, 1], 'PIC': [170], 'Tipe maintenance': [100, 1], 'Maintenance ID': [140]
+};
+var LAP_W_KEY_ = 'MTTR_LAP_W';   // DocumentProperties: {sheetId: sidik Format Laporan} = lebar kolom sudah dipasang
+
+/** Lebar kolom dipasang sekali per tab per Format Laporan; lebar yang diubah admin sesudahnya dibiarkan. */
+function lapWidths_(sh, cols) {
+  var props = PropertiesService.getDocumentProperties(), done = {};
+  try { done = JSON.parse(props.getProperty(LAP_W_KEY_) || '{}') || {}; } catch (e) { done = {}; }
+  var id = String(sh.getSheetId()), sig = lapKeyHeader_(cols);
+  if (done[id] === sig) return;
+  cols.forEach(function (c, j) { sh.setColumnWidth(j + 1, (LAP_STYLE_[c.sumber] || [110])[0]); });
+  done[id] = sig;
+  props.setProperty(LAP_W_KEY_, JSON.stringify(done));
+}
+
+/** Laporan <tahun> & Maintenance <baterai>: judul, header, belang, kolom Kondisi berwarna, rata & lebar per jenis kolom. */
 function styleLaporan_(sh, cols, fmtRows) {
   var w = Math.max(1, cols.length), last = fmtRows + 1;
   sh.getBandings().forEach(function (b) { b.remove(); });
@@ -349,7 +399,14 @@ function styleLaporan_(sh, cols, fmtRows) {
   sh.getRange(2, 1, 1, w).setFontColor(TEMA_.headText).setHorizontalAlignment('center').setVerticalAlignment('middle');
   sh.getRange(2, 1, last - 1, w).applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, true, false)
     .setHeaderRowColor(TEMA_.head).setFirstRowColor('#FFFFFF').setSecondRowColor(TEMA_.band);
-  if (last > 2) sh.getRange(3, 1, last - 2, w).setVerticalAlignment('top');
+  if (last > 2) {
+    sh.getRange(3, 1, last - 2, w).setVerticalAlignment('top');
+    var a1 = function (j) { var L = colLetter_(j + 1); return L + '3:' + L + last; }, center = [], clip = [];
+    cols.forEach(function (c, j) { var st = LAP_STYLE_[c.sumber] || []; if (st[1]) center.push(a1(j)); if (st[2]) clip.push(a1(j)); });
+    if (center.length) sh.getRangeList(center).setHorizontalAlignment('center');
+    if (clip.length) sh.getRangeList(clip).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+  }
+  lapWidths_(sh, cols);
   var rules = [];
   cols.forEach(function (c, j) {
     if (c.sumber !== 'Kondisi perbaikan' || last <= 2) return;
@@ -699,15 +756,14 @@ function buildBacaSaya_(ss) {
     [T.laporan, laporanName_(y), 'Laporan format Excel (Form Stop Line). Satu baris = satu pekerjaan. Untuk dikirim ke atasan.\nExcel 格式报表（停线表）。一行 = 一项工作。', 'Tidak: dibuat ulang otomatis. Salah isi → perbaiki di tab Maintenance.\n否：自动重建。请在 Maintenance 中修改。'],
     [T.laporan, APP.SHEETS.MAINT + ' <baterai>', 'Laporan per project: sama dengan ' + laporanName_(y) + ', hanya baris project itu (No. 1..n), selalu terbaru.\n按项目的报表：与 ' + laporanName_(y) + ' 相同，只显示该项目，自动更新。',
       'Tidak: salah isi → perbaiki di Maintenance. Boleh dihapus: tidak dibuat lagi (Config TAB_BATERAI_DIMATIKAN).\n否。可删除，不再生成。'],
-    [T.laporan, rekapName_(y), 'Jumlah pekerjaan & MTTR per bulan.\n每月工作数量和 MTTR。', 'Tidak (otomatis)\n否（自动）'],
     [T.laporan, kpiName_(y), 'KPI bulanan: kerusakan, MTTR, downtime, jam operasi, MTBF per Plant / Project / Line + target (✓ / ✗). Bulan yang sudah "Ditutup" admin = angka terkunci.\n每月 KPI：故障次数、MTTR、停机时间、运行时间、MTBF（工厂 / 项目 / 产线）及目标。已关账月份数字锁定。',
       'Tidak: dihitung aplikasi (tiap malam, Dashboard, tutup bulan). Jam operasi & target → Config / Projects.\n否：自动计算。'],
     [T.laporan, TPM_PREFIX_ + '<project>', 'Format Excel TPM manager (中文 + English): masalah Corrective yang selesai. Copy baris 9 ke bawah ke Excel manager.\nTPM 格式（中英文）：已完成的故障维修。复制第 9 行以下到经理的 Excel。',
       'Tidak: dibuat ulang tiap malam & lewat Dashboard. Salah isi → perbaiki di Maintenance / Pilihan. Boleh dihapus: tidak dibuat lagi (Config TPM_DIMATIKAN).\n否：每晚自动重建。可删除，不再生成。'],
-    [T.laporan, APP.SHEETS.PENDING, 'Pekerjaan yang tertunda (pending). Merah = lewat tenggat.\n挂起的工作。红色 = 已逾期。', 'Tidak (otomatis)\n否（自动）'],
     [T.laporan, APP.SHEETS.SARAN, 'Saran dari teknisi. Tanggapi lewat aplikasi (💡 Saran).\n技术员的建议。请在应用中回复。', 'Status & Tanggapan boleh\n可改状态和回复'],
     [T.app, APP.SHEETS.MAINT, 'Semua data pekerjaan (data asli aplikasi). Kolom email & waktu sistem disembunyikan.\n所有维修原始数据。邮箱和系统时间列已隐藏。', 'Hanya admin, untuk memperbaiki salah isi\n仅管理员修正错误'],
     [T.app, APP.SHEETS.PEMAKAIAN, 'Satu baris = satu sparepart yang dipakai. Bisa difilter.\n每行 = 一个使用的备件。可以筛选。', 'Tidak\n否'],
+    [T.app, APP.SHEETS.MANUAL, 'Admin: ketik pekerjaan yang tidak tercatat lewat aplikasi (mis. riwayat WeChat), lalu menu → Masukkan Input Manual. Catatan cara isi di judul kolom.\n管理员：录入未通过应用记录的工作，然后菜单 → 录入。', 'Ya (admin)\n可以（管理员）'],
     [T.atur, N(APP.SHEETS.USERS), 'Teknisi & admin. Nama di sini yang tampil di laporan. Bahasa: zh = aplikasi 中文.\n技术员和管理员。Bahasa 填 zh = 中文界面。', 'Ya (admin)\n可以（管理员）'],
     [T.atur, N(APP.SHEETS.LINES), 'Daftar line / unit kerja. Satu baris = satu QR (nama mesin cukup ditulis di Nama Line).\n产线 / 工位列表。一行 = 一个二维码。', 'Ya (admin)\n可以（管理员）'],
     [T.atur, N(APP.SHEETS.SPAREPART), 'Katalog sparepart: Jenis → Nama → Model.\n备件目录：类别 → 名称 → 型号。', 'Ya (admin)\n可以（管理员）'],
@@ -719,6 +775,7 @@ function buildBacaSaya_(ss) {
     [T.atur, N(APP.SHEETS.CONFIG) + ', ' + N(APP.SHEETS.PANDUAN) + ', ' + N(APP.SHEETS.RENCANA), 'Aturan (jam peringatan, nama aplikasi…); catatan & rencana di Panduan aplikasi.\n规则；应用指南中的说明和计划。'],
     [T.app, APP.SHEETS.LOG + ', ' + APP.SHEETS.TERJEMAHAN, 'Riwayat setiap tombol; hasil terjemahan (boleh dikoreksi).\n每次操作记录；翻译结果（可修改）。'],
     [T.app, APP.SHEETS.KPI_DATA, 'Salinan KPI bulan yang sudah ditutup admin (jangan diedit).\n已关账月份的 KPI 副本（请勿编辑）。'],
+    [T.laporan, rekapName_(y) + ', ' + APP.SHEETS.PENDING, 'Jumlah pekerjaan & MTTR per bulan (angka utama ada di KPI); daftar pending (ada di Ringkasan & tab Pending aplikasi).\n每月工作数量和 MTTR（主要数字见 KPI）；挂起列表（见总览和应用的挂起页）。'],
     [T.arsip, 'Arsip <tahun>, Laporan/Rekap tahun lalu', 'Data tahun sebelumnya.\n往年数据。']
   ];
   var g = [];

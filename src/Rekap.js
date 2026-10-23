@@ -127,7 +127,7 @@ function rekapLayout_(year, data) {
   var pad = function (row) { while (row.length < w) row.push(''); return row; };
   return [
     pad(['Rekap ' + appName_() + ' ' + year]),
-    pad(['Diperbarui ' + fmtDate_(new Date()) + ' WIB (otomatis setiap ada perubahan). MTTR = rata-rata waktu aktif pekerjaan "Masuk MTTR = Ya" (' +
+    pad(['Diperbarui ' + fmtDate_(new Date()) + ' WIB (tiap malam & lewat Dashboard → Perbarui). MTTR = rata-rata waktu aktif pekerjaan "Masuk MTTR = Ya" (' +
       getConfig_('MTTR_TIPE') + '). Bulan = bulan selesai / cancel / abandoned.']),
     pad([]),
     REKAP_HEADERS_.slice()
@@ -153,6 +153,7 @@ function refreshRekap() {
     var y = yearOf_(new Date());
     buildKpi_(y);
     if (monthOf_(new Date()) === 1) buildKpi_(y - 1);   // Januari: KPI Desember tahun lalu masih bisa ditutup
+    kpiTutupOtomatis_();
   } catch (e) { console.warn('KPI gagal (dicoba lagi besok / lewat Dashboard): ' + e); }
   rapikanTampilan_({});
 }
@@ -180,11 +181,9 @@ function lapKeyHeader_(cols) {
 function syncReports_(r, rows, parts) {
   if (!isYes_(getConfig_('LAPORAN_LANGSUNG'))) return;
   try {
-    syncLaporan_(r, parts);
-    var fin = finalDate_(r);
-    if (fin && rows) syncRekap_(yearOf_(fin), rows);
+    syncLaporan_(r, parts);   // 2.6.1: Rekap (tersembunyi) tidak lagi per tombol; dibangun malam / Perbarui / setup
   } catch (e) {
-    console.warn('Sinkron Laporan/Rekap gagal (diperbaiki saat pembaruan penuh berikutnya): ' + e);
+    console.warn('Sinkron Laporan gagal (diperbaiki saat pembaruan penuh berikutnya): ' + e);
   }
 }
 
@@ -212,6 +211,7 @@ function syncLaporan_(r, parts) {
     return;
   }
   var idx = at >= 0 ? at : n;                        // pekerjaan baru → baris paling bawah (mulai paling akhir)
+  if (3 + idx > sh.getMaxRows()) { buildLaporan_(year); return; }   // baris cadangan habis → bangun ulang (baris + format)
   var used = parts ? parts.map(function (p) {
     return { 'Jenis Sparepart': p.jenis, 'Nama Sparepart': p.nama, 'Model': p.model, 'Jumlah': p.qty };
   }) : (r['Status'] === APP.STATUS.COMPLETED ? usageOf_(id, year) : []);
@@ -275,9 +275,15 @@ function laporanRows_(year) {
   return { rows: rows, usage: usage };
 }
 
+/** ①..⑳, lalu "21." dst. */
+function partNo_(i) { return i < 20 ? String.fromCharCode(0x2460 + i) : (i + 1) + '.'; }
+
 function laporanValue_(src, r, i, used, md, names) {
   var line = lineOf_(md, r['Line']);
-  var col = function (k) { return used.map(function (u) { return u[k] === '' || u[k] == null ? '-' : u[k]; }).join('\n'); };
+  // >1 part: nomor yang sama di tiap kolom sparepart (① Timing Belt | ① HTD 5M-450 | ① 1) supaya baris mudah dicocokkan
+  var col = function (k) {
+    return used.map(function (u, i) { return (used.length > 1 ? partNo_(i) + ' ' : '') + (u[k] === '' || u[k] == null ? '-' : u[k]); }).join('\n');
+  };
   var noPart = !used.length && r['Status'] === APP.STATUS.COMPLETED;
   var legacy = noPart && r['Part'] && r['Part'] !== APP.NO_PART && r['Part'] !== 'Tidak ada';   // data 2.1 (teks bebas)
   switch (src) {
@@ -305,7 +311,7 @@ function laporanValue_(src, r, i, used, md, names) {
     case 'Nama sparepart': return used.length ? col('Nama Sparepart') : (legacy ? String(r['Part']).replace(/; /g, '\n') : '');
     case 'Model sparepart': return used.length ? col('Model') : '';
     case 'Jumlah sparepart': return used.length ? (used.length === 1 ? Number(used[0]['Jumlah']) : col('Jumlah')) : '';
-    case 'Catatan': return r['Catatan'];
+    case 'Catatan': return tpmNote_(r['Catatan']);   // teks saja; cap waktu & nama tetap di Maintenance / Riwayat
     case 'Kondisi perbaikan': return APP.STATUS_LABEL[r['Status']] || r['Status'];
     case 'PIC':
       return r['Nama teknisi terlibat'] || String(r['Teknisi terlibat'] || r['Teknisi terakhir'] || '').split(',').map(function (e) {
@@ -341,12 +347,17 @@ function buildLaporan_(year, opts) {
       .concat([String(r['Maintenance ID'])]));
   });
   sh.showColumns(1, sh.getMaxColumns());      // kolom kunci format lama mungkin tersembunyi di posisi lain
+  ensureRows_(sh, out.length + LAP_SPARE_);
+  // "07.30" ditulis sebagai teks: tanpa format @ Sheets mengubahnya jadi angka 7.3 (ditemukan di Sheets asli, 2.6.1)
+  cols.forEach(function (c, j) {
+    if (c.sumber === 'Jam mulai' || c.sumber === 'Jam selesai') sh.getRange(3, j + 1, out.length - 2 + LAP_SPARE_, 1).setNumberFormat('@');
+  });
   sh.getRange(1, 1, out.length, w + 1).setValues(out);
   sh.hideColumns(w + 1);
   sh.getRange(1, 1, 1, w).merge().setFontWeight('bold');
   sh.getRange(2, 1, 1, w).setFontWeight('bold');
   // Baris cadangan di bawah tabel ikut diformat, supaya baris yang ditambah sinkron langsung tampil sama.
-  var fmtRows = Math.max(1, Math.min(out.length - 1 + LAP_SPARE_, sh.getMaxRows() - 1));
+  var fmtRows = out.length - 1 + LAP_SPARE_;
   sh.getRange(2, 1, fmtRows, w).setWrap(true);
   sh.setFrozenRows(2);
   cols.forEach(function (c, j) {
@@ -441,7 +452,11 @@ function appendArchive_(name, srcHeaders, srcRows, keyOf) {
     existing[keyOf(o)] = true;
     out.push(objToRow_(h, o));
   });
-  if (out.length) sh.getRange(sh.getLastRow() + 1, 1, out.length, h.length).setValues(out);
+  if (out.length) {
+    var at = sh.getLastRow() + 1;
+    ensureRows_(sh, at + out.length - 1, 500);
+    sh.getRange(at, 1, out.length, h.length).setValues(out);
+  }
   (APP.DATE_COLUMNS.Maintenance.concat(APP.DATE_COLUMNS.Log, APP.DATE_COLUMNS['Pemakaian Sparepart'])).forEach(function (col) {
     var c = h.indexOf(col) + 1;
     if (c > 0 && sh.getLastRow() > 1) sh.getRange(2, c, sh.getLastRow() - 1, 1).setNumberFormat(DATE_FMT_);

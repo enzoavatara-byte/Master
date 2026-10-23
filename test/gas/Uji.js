@@ -144,6 +144,17 @@ function ujiPeriksa() {
     var kinds = UJI_.expect.laporanHead.map(function (h) { return /Tanggal/.test(h) ? 'tgl' : ''; });
     ok('Laporan ' + y + ': jumlah baris', Object.keys(act).length === 100, Object.keys(act).length + ' baris (harap 100)');
     ujiTabel_(ok, 'Laporan ' + y + ': isi sel', exp, act, disp, UJI_.expect.laporanHead, { kind: kinds });
+    // 2.6.1: jam tetap teks "07.30" (dulu Sheets mengubahnya jadi 7.3); sparepart >1 part bernomor sama di tiap kolom
+    var src = masterData_().report.map(function (c) { return c.sumber; }), ids = Object.keys(act);
+    var jam = ['Jam mulai', 'Jam selesai'].map(function (k) { return src.indexOf(k); }).filter(function (j) { return j >= 0; });
+    var badJam = [];
+    ids.forEach(function (k) { jam.forEach(function (j) { var x = act[k][j]; if (x !== '' && !(typeof x === 'string' && /^\d\d\.\d\d$/.test(x))) badJam.push(k + ': ' + x + ' (' + typeof x + ')'); }); });
+    ok('Laporan: jam tetap teks "07.30" (bukan angka 7.3)', jam.length && !badJam.length, badJam.slice(0, 5).join(' · ') || 'contoh: ' + disp[ids[0]][jam[0]]);
+    var sp = ['Jenis sparepart', 'Nama sparepart', 'Model sparepart', 'Jumlah sparepart'].map(function (k) { return src.indexOf(k); }).filter(function (j) { return j >= 0; });
+    var multi = ids.filter(function (k) { return /①/.test(String(act[k][sp[1]])); });
+    var mis = multi.filter(function (k) { var n = String(act[k][sp[0]]).split('\n').length; return sp.some(function (j) { return String(act[k][j]).split('\n').length !== n || !/^①/.test(String(act[k][j])); }); });
+    ok('Laporan: sparepart >1 part bernomor ① ② sejajar di 4 kolom', multi.length > 0 && !mis.length, multi.length + ' pekerjaan ber-part banyak' + (mis.length ? ' · tidak sejajar: ' + mis.slice(0, 5).join(', ') : '') +
+      (multi.length ? '\ncontoh: ' + sp.map(function (j) { return String(disp[multi[0]][j]).replace(/\n/g, ' ⏎ '); }).join(' | ') : ''));
   });
   safe('Rekap ' + y, function () {
     var v = ss.getSheetByName(rekapName_(y)).getDataRange().getValues(), act = {}, exp = {};
@@ -194,6 +205,11 @@ function ujiPeriksa() {
       ok(sheet + ': No, Machine, Discipline, Responsibility, End Time, Date', !bad.length, bad.join('\n') || exp.length + ' baris cocok');
       ok(sheet + ': Issue & Root Cause berformat 中文 + (English)', untranslated === 0, untranslated ? untranslated + ' sel belum 中文/English (kuota Google?)' :
         'contoh: ' + String(v[0] ? v[0][2] : '').replace(/\n/g, ' ⏎ '));
+      if (v.length) {
+        var dd = sh.getRange(9, 10, 1, 2).getDisplayValues()[0];
+        ok(sheet + ': Date tampil 10月22日 & Notes 开始/影响时长', /^\d{1,2}月\d{1,2}日$/.test(dd[0]) && /^开始：\d\d:\d\d(，影响时长：\d+分钟)?\n\(Start: \d\d:\d\d/.test(dd[1]),
+          dd[0] + ' · ' + String(dd[1]).replace(/\n/g, ' ⏎ '));
+      }
     });
   });
   safe('Ringkasan', function () {
@@ -212,8 +228,10 @@ function ujiPeriksa() {
   safe('Spreadsheet', function () {
     var names = ss.getSheets().map(function (s) { return s.getName(); }).filter(function (n) { return n.indexOf(UJI_SHEET_) !== 0; });
     var batTabs = masterData_().allBatteries.map(function (b) { return APP.SHEETS.MAINT + ' ' + b; });
-    var want = ['Ringkasan', 'Baca Saya', laporanName_(y)].concat(batTabs, [rekapName_(y), kpiName_(y)]);
-    ok('Urutan tab (Maintenance <baterai> setelah Laporan)', names.slice(0, want.length).join(' | ') === want.join(' | '), names.slice(0, want.length + 2).join(' | '));
+    var want = ['Ringkasan', 'Baca Saya', laporanName_(y), kpiName_(y)].concat(batTabs);
+    ok('Urutan tab (KPI setelah Laporan, lalu Maintenance <baterai>)', names.slice(0, want.length).join(' | ') === want.join(' | '), names.slice(0, want.length + 2).join(' | '));
+    ok('Rekap & Pending Work disembunyikan (tetap dibuat)', [rekapName_(y), APP.SHEETS.PENDING].every(function (n) { var x = ss.getSheetByName(n); return x && x.isSheetHidden(); }), '');
+    ok('Tab Input Manual ada & terlihat', !!findSheet_(APP.SHEETS.MANUAL, ss) && !findSheet_(APP.SHEETS.MANUAL, ss).isSheetHidden(), '');
     var tr = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); }).sort();
     ok('Trigger terpasang', ['checkTimeouts', 'onMasterChange', 'refreshRekap'].every(function (h) { return tr.indexOf(h) !== -1; }), tr.join(', '));
     var ids = JSON.parse(PropertiesService.getDocumentProperties().getProperty('MTTR_SHEET_IDS') || '{}');
@@ -296,7 +314,8 @@ function ujiPeriksa() {
     var ex = timed('Download Riwayat (tahun ini, semua)', function () { return apiExport({ from: y + '-01-01', to: todayKey, scope: 'all' }); });
     ok('Download: 100 baris, kolom = Laporan', ex.v.total === 100 && ex.v.columns.length === UJI_.expect.laporanHead.length, ex.v.total + ' baris · ' + ex.v.columns.length + ' kolom', ex.ms);
     var rv = timed('Review (daftar)', function () { return apiListReview({}); });
-    ok('Review: 3 menunggu (2 Cancelled + 1 Abandoned)', rv.v.items.length === 3, rv.v.items.map(function (x) { return x.id + ' ' + x.status; }).join(', '), rv.ms);
+    ok('Review: 1 Abandoned menunggu (Cancel tanpa review sejak 2.6.1)', rv.v.items.length === 1 && rv.v.items[0].status === APP.STATUS.ABANDONED,
+      rv.v.items.map(function (x) { return x.id + ' ' + x.status; }).join(', '), rv.ms);
     var pd = timed('Tab Pending', function () { return apiListPending({}); });
     ok('Pending: 4 pekerjaan', pd.v.items.length === 4, pd.v.items.map(function (x) { return x.line; }).join(', '), pd.ms);
   });
@@ -340,9 +359,8 @@ function ujiAlur() {
     var c = timed('Mulai (untuk cancel)', function () { return apiStart('UJI', { baterai: 'VF7' }); }), id2 = c.v.open.id;
     flowIds.push(id2);
     timed('Cancel', function () { return apiCancel(id2, { values: { 'Alasan cancel': 'Input ganda' } }); });
-    timed('Review: setujui cancel', function () { return apiReview(id2, { action: 'SETUJU', note: 'uji' }, {}); });
     var r2 = findById_(readTable_(APP.SHEETS.MAINT), id2);
-    ok('Alur: Cancel → review disetujui', r2 && r2['Status'] === 'Cancelled' && r2['Status review'] === APP.REVIEW.DONE, r2 ? r2['Status'] + ' · ' + r2['Status review'] : '-');
+    ok('Alur: Cancel langsung final, tanpa review', r2 && r2['Status'] === 'Cancelled' && !r2['Status review'], r2 ? r2['Status'] + ' · "' + r2['Status review'] + '"' : '-');
   });
   safe('Ganti nama tab Lines', function () {
     var L = findSheet_('Lines', ss), old = L.getName();
@@ -357,6 +375,27 @@ function ujiAlur() {
     var t = timed('Tutup ulang bulan lalu', function () { return apiTutupBulan(UJI_.meta.prevKey); });
     var last = readTable_(APP.SHEETS.LOG).filter(function (e) { return e['Kejadian'] === 'tutup bulan'; }).pop();
     ok('Tutup ulang tercatat di Log (lama → baru)', t.v.reclosed && /ditutup ulang; sebelumnya/.test(last['Detail']), String(last['Detail']).slice(0, 200), t.ms);
+  });
+  safe('Input Manual', function () {
+    var M = findSheet_(APP.SHEETS.MANUAL, ss), h = headers_(M, APP.SHEETS.MANUAL);
+    var tgl = Utilities.formatDate(new Date(Date.now() - 86400000), APP.TZ, 'dd/MM/yyyy');
+    var base = { 'Tanggal': tgl, 'Jam mulai': '21:05', 'Jam selesai': '22:20', 'Line': 'L02', 'Baterai': 'VF7', 'Stop line': 'Ya', 'Jenis kerusakan': 'Mekanikal',
+      'Masalah': 'Mesin berhenti – uji input manual', 'Penyebab': 'Komponen aus', 'Penanganan': 'Ganti part', 'Sparepart': 'Timing Belt HTD 5M-450 x1; Bearing 6205-2RS x2',
+      'PIC': 'Budi Santoso', 'PIC tambahan': 'Andi Wijaya', 'Catatan': 'Uji input manual (dihapus otomatis)' };
+    var row0 = M.getLastRow() + 1;
+    M.getRange(row0, 1, 2, h.length).setValues([objToRow_(h, base), objToRow_(h, Object.assign({}, base, { 'Jam mulai': '23:00', 'Jam selesai': '23:30', 'Line': 'TIDAKADA' }))]);
+    var cek = timed('Input Manual: periksa 2 baris', function () { return apiInputManual({ periksa: true }); });
+    ok('Input Manual: periksa = 1 benar, 1 salah, belum ditulis', cek.v.ok === 1 && cek.v.bad === 1, cek.v.summary, cek.ms);
+    var res = timed('Input Manual: masukkan', function () { return apiInputManual({}); });
+    flowIds.push.apply(flowIds, res.v.ids);
+    var hasil = M.getRange(row0, h.indexOf('Hasil') + 1, 2, 1).getDisplayValues().map(function (x) { return x[0]; });
+    var r = res.v.ids.length ? findById_(readTable_(APP.SHEETS.MAINT), res.v.ids[0]) : null;
+    ok('Input Manual: ✓ / ✗ di kolom Hasil, pekerjaan Completed 75 mnt + 2 PIC + 2 part', /^✓ /.test(hasil[0]) && /^✗ Line "TIDAKADA"/.test(hasil[1]) && r &&
+      r['Status'] === 'Completed' && Number(r['Total aktif (menit)']) === 75 && /\n/.test(String(r['Part'])) && String(r['Nama teknisi terlibat']).indexOf('Andi') !== -1,
+      hasil.join(' | ') + (r ? ' · ' + r['Maintenance ID'] + ' ' + r['Total aktif (menit)'] + ' mnt · ' + r['Nama teknisi terlibat'] : ''), res.ms);
+    var lap = ss.getSheetByName(laporanName_(yearOf_(r ? r['Mulai'] : new Date()))).getDataRange().getValues(), kc = lap[1].length - 1;
+    ok('Input Manual: langsung ada di Laporan', r && lap.some(function (x) { return x[kc] === r['Maintenance ID']; }), '');
+    rewriteKeeping_(M, M.getDataRange().getValues(), function (row) { return String(row[h.indexOf('Catatan')]).indexOf('dihapus otomatis') === -1; });
   });
   safe('Bersihkan alur uji', function () {
     var drop = {}; flowIds.forEach(function (x) { drop[x] = true; });

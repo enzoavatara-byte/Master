@@ -175,6 +175,16 @@ function round2_(n) {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * Pastikan sheet punya baris sampai `last`. Di Apps Script getRange di luar jumlah baris sheet = error (appendRow saja
+ * yang menambah baris sendiri); tab baru hanya 1000 baris → setelah ±1 tahun pemakaian, tulisan sekaligus gagal.
+ * Ditambah sekalian `spare` baris supaya tidak tiap kali.
+ */
+function ensureRows_(sh, last, spare) {
+  var max = sh.getMaxRows();
+  if (last > max) sh.insertRowsAfter(max, last - max + (spare || 0));
+}
+
 function colLetter_(n) {
   var s = '';
   while (n > 0) {

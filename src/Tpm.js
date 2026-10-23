@@ -112,9 +112,9 @@ function tpmSpec_(md, r, used, names, ask) {
   var parts = used.map(function (u) {
     var nama = String(u['Nama Sparepart'] || '').trim(), model = String(u['Model'] || '').trim();
     return nama ? nama + (model ? ' ' + model : '') + ' ×' + (u['Jumlah'] === '' || u['Jumlah'] == null ? 1 : u['Jumlah']) : '';
-  }).filter(String).join(', ');
+  }).filter(String);
   var legacy = String(r['Part'] || '').trim();   // data 2.1: part berupa teks bebas
-  if (!parts && legacy && legacy !== APP.NO_PART && legacy !== 'Tidak ada') parts = legacy.replace(/\n/g, ', ');
+  if (!parts.length && legacy && legacy !== APP.NO_PART && legacy !== 'Tidak ada') parts = legacy.split(/\n|; /).map(function (x) { return x.trim(); }).filter(String);
   return {
     bat: String(r['Baterai']).trim(),
     machine: [P(mesin, true)],
@@ -124,6 +124,8 @@ function tpmSpec_(md, r, used, names, ask) {
     notes: [P(tpmNote_(r['Catatan']))],
     parts: parts,
     end: r['Selesai'] instanceof Date ? r['Selesai'] : '',
+    start: r['Mulai'],
+    down: laporanValue_('Durasi stop line', r, 0, [], md, names),
     disc: disciplineOf_(md, r['Jenis kerusakan']),
     pic: laporanValue_('PIC', r, 0, [], md, names),
     date: r['Mulai']
@@ -149,9 +151,21 @@ function tpmCell_(pieces, zhMap, enMap) {
  */
 function tpmRow_(sp, i, zhMap, enMap) {
   var sol = tpmCell_(sp.sol, zhMap, enMap);
-  if (sp.parts) sol += (sol ? '\n' : '') + '备件 Spare parts: ' + sp.parts;
+  if (sp.parts.length) {   // >1 part: satu baris bernomor per part
+    sol += (sol ? '\n' : '') + '备件 Spare parts:' + (sp.parts.length === 1 ? ' ' + sp.parts[0] :
+      sp.parts.map(function (p, k) { return '\n' + partNo_(k) + ' ' + p; }).join(''));
+  }
+  var note = tpmCell_(sp.notes, zhMap, enMap), impact = tpmImpact_(sp);
   return [i + 1, tpmCell_(sp.machine, zhMap, enMap), tpmCell_(sp.issue, zhMap, enMap), tpmCell_(sp.cause, zhMap, enMap),
-    sol, sp.end, sp.disc, sp.pic, sp.date, tpmCell_(sp.notes, zhMap, enMap)];
+    sol, sp.end, sp.disc, sp.pic, sp.date, impact + (impact && note ? '\n' : '') + note];
+}
+
+/** Notes seperti Excel manager: "开始：22:10，影响时长：20分钟 / (Start: 22:10; Downtime: 20 min)". Stop line kosong (data lama) → jam mulai saja. */
+function tpmImpact_(sp) {
+  if (!(sp.start instanceof Date)) return '';
+  var hm = Utilities.formatDate(sp.start, APP.TZ, 'HH:mm');
+  if (sp.down === '' || sp.down == null) return '开始：' + hm + '\n(Start: ' + hm + ')';
+  return '开始：' + hm + '，影响时长：' + sp.down + '分钟\n(Start: ' + hm + '; Downtime: ' + sp.down + ' min)';
 }
 
 function tpmTranslate_(texts, lang, stats) {
@@ -248,7 +262,7 @@ function styleTpm_(sh, last) {
   sh.getRange(R0, 2, nb, 10).setHorizontalAlignment('center').setWrap(true);
   [4, 5, 11].forEach(function (c) { sh.getRange(R0, c, nb, 1).setHorizontalAlignment('left'); });   // Issue, Root Cause, Notes
   sh.getRange(R0, 7, nb, 1).setNumberFormat('h:mm');
-  sh.getRange(R0, 10, nb, 1).setNumberFormat('yyyy-mm-dd');
+  sh.getRange(R0, 10, nb, 1).setNumberFormat('m"月"d"日"');   // seperti Excel manager: 10月22日 (nilai tetap tanggal)
   sh.getRange(R0, 8, nb, 1).setDataValidation(SpreadsheetApp.newDataValidation()
     .requireValueInRange(sh.getRange(2, 9, 4, 1), true).setAllowInvalid(true).build());
 }

@@ -123,7 +123,7 @@ const special = {};
 const put = (dayIdx, ev) => { (special[dayIdx] = special[dayIdx] || []).push(ev); };
 const N = days.length;
 put(Math.floor(N * 0.45), 'abandon-hitung'); put(N - 9, 'abandon-keluarkan'); put(N - 2, 'abandon-tunggu');
-put(Math.floor(N * 0.3), 'cancel-setuju'); put(N - 12, 'cancel-setuju'); put(N - 5, 'cancel-tunggu'); put(N - 1, 'cancel-tunggu');
+put(Math.floor(N * 0.3), 'cancel'); put(N - 12, 'cancel'); put(N - 5, 'cancel'); put(N - 1, 'cancel');   // 2.6.1: Cancel tanpa review
 put(N - 4, 'pending-lewat'); put(N - 3, 'pending-tanggal'); put(N - 1, 'pending-besok'); put(N - 1, 'pending-shift');
 
 let k = 0;
@@ -162,7 +162,6 @@ days.forEach((day0, di) => {
       at(day0, 0, tMin); const id = open(T.dewi, 'L13', 'E245');
       at(day0, 0, tMin + 3);
       as(T.dewi, () => ctx.apiCancel(id, { values: { 'Alasan cancel': di % 2 ? 'Salah line' : 'Input ganda' } }));
-      if (ev === 'cancel-setuju') as(ADMIN, () => ctx.apiReview(id, { action: 'SETUJU', note: 'Oke, salah input' }));
       ids.cancelled.push(id);
       tMin += 20;
     } else if (ev.indexOf('abandon') === 0) {                           // shift malam: lupa ditutup → peringatan 3 jam → Abandoned 4 jam

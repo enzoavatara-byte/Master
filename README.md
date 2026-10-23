@@ -10,7 +10,7 @@ isi pilihan, field form, format laporan, catatan panduan, dan batas waktu semuan
 scan QR line → (stop line) → MULAI → Aktif ⇄ Pause
                                      Aktif/Pause → Pending → (lanjut, user mana pun, konfirmasi QR) → Aktif
                                      Aktif → Completed          (jenis kerusakan, masalah, penyebab, penanganan, sparepart, PIC tambahan)
-                                     Aktif/Pause → Cancelled    (alasan wajib → review Admin)
+                                     Aktif/Pause → Cancelled    (alasan wajib; sejak 2.6.1 langsung final, tanpa review)
                                      > 3 jam tanpa konfirmasi → peringatan → tidak dijawab s/d 4 jam → Abandoned
 ```
 
@@ -23,7 +23,7 @@ Riwayat versi: [CHANGELOG.md](CHANGELOG.md). Panduan singkat untuk teknisi & adm
 | Permintaan | Implementasi |
 |---|---|
 | QR jadi satu, mesin di dalam line | **Line = unit kerja**: satu baris `Lines` = satu QR, tanpa pilih mesin. Mesin penting cukup dijadikan baris sendiri (mis. `L01-W` "Assy Cell 1 - Welding"). Sheet `Mesin` tidak dipakai lagi (disembunyikan, tidak dihapus). Satu pekerjaan terbuka per line |
-| Hapus fungsi Cek | Pending tidak masuk Review lagi; tab Review hanya untuk Admin (Cancelled & Abandoned) |
+| Hapus fungsi Cek | Pending tidak masuk Review lagi; tab Review hanya untuk Admin (sejak 2.6.1 hanya Abandoned) |
 | Hapus Preventive | Tipe hanya Corrective; pertanyaan Tipe hilang (pilihan dengan 1 opsi tidak ditanyakan). Data Preventive lama tetap |
 | Hapus Alias & Grup | Logika dihapus; kolom lama disembunyikan, boleh dihapus admin |
 | Tambah PIC saat Selesai | **PIC tambahan**: tap nama dari `Users` (boleh >1, bisa dicari). Masuk `Teknisi terlibat`, Laporan (PIC), TPM (Responsibility), Dashboard per teknisi, Log |
@@ -89,18 +89,18 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 ## 2. Upgrade
 
 ### Ke 2.6.1 (dari 2.6.0)
-Ganti `Auth`, `Code`, `Config`, `Master`, `Translate`, `Rekap`, `Tampilan`, `Tpm` (Script). **Run `setup`**: terjemahan Inggris lama yang salah di tab `Terjemahan` dikosongkan sekali (koreksi admin tidak disentuh; tab TPM menerjemahkan ulang malam berikutnya atau lewat Dashboard → Perbarui); tab `Maintenance <baterai>` diganti format laporan per project dan ditampilkan setelah Laporan; 2 kunci Config baru (`TPM_DIMATIKAN`, `TAB_BATERAI_DIMATIKAN`). Lalu New version. Tidak ada izin baru.
+Buat file Script **`Manual`**; ganti `Api`, `Auth`, `Code`, `Config`, `Db`, `Kpi`, `Maintenance`, `Master`, `Rekap`, `Tampilan`, `Tpm`, `Translate` (Script) dan `App`, `I18n` (HTML). **Run `setup`**: terjemahan Inggris lama yang salah di tab `Terjemahan` dikosongkan sekali (koreksi admin tidak disentuh; tab TPM menerjemahkan ulang malam berikutnya atau lewat Dashboard → Perbarui); tab `Maintenance <baterai>` diganti format laporan per project; tab `Input Manual` dibuat; Cancelled lama keluar dari antrian review; `Rekap` & `Pending Work` disembunyikan, `KPI` setelah Laporan; 3 kunci Config baru (`TPM_DIMATIKAN`, `TAB_BATERAI_DIMATIKAN`, `KPI_TUTUP_OTOMATIS`). Lalu New version. Tidak ada izin baru.
 
 ### Ke 2.6.1 (dari 2.5.2)
 
 | Jenis | Nama | Status |
 |---|---|---|
-| Script | `Kpi` | **BARU** |
+| Script | `Kpi`, `Manual` | **BARU** |
 | Script | `Config`, `Db`, `Master`, `Maintenance`, `Api`, `Rekap`, `Code`, `Tampilan`, `Translate`, `Tpm`, `Auth` | berubah |
 | HTML | `App`, `I18n`, `Styles`, `Panduan` | berubah |
 | Script / HTML | `Index`, `Message`, `appsscript.json` | tetap |
 
-1. Buat file Script **`Kpi`**, paste semua file yang berubah, Ctrl+S.
+1. Buat file Script **`Kpi`** dan **`Manual`**, paste semua file yang berubah, Ctrl+S.
 2. **Run `setup`** (wajib). Yang dilakukan, aman untuk data lama:
    - baris Form "pilih mesin" dimatikan; pilihan `Preventive` dimatikan **sekali** (kalau admin menyalakannya lagi, setup berikutnya tidak mematikannya); pekerjaan Pending dikeluarkan dari antrean review;
    - field `Selesai · PIC tambahan`, kolom `Projects → Target MTBF (jam)`, 4 kunci `Config` KPI, sheet tersembunyi `KPI data`, tab `KPI <tahun>`;
@@ -263,27 +263,37 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
 
 - **`Laporan <tahun>`** = format Excel. Satu baris per pekerjaan yang *dimulai* di tahun itu (Cancelled tidak ikut; Pending/Abandoned ikut dengan Kondisi masing-masing).
   Kolom sparepart: satu part per baris dalam sel, urutannya sejajar antar-kolom (Jenis / Nama / Model / Jumlah).
-- **`Rekap <tahun>`** = ringkasan per bulan (seperti 2.1).
-- Keduanya **diperbarui langsung setiap aksi** (Mulai, Pause, Resume, Pending, Lanjut, Selesai, Cancel, review, Abandoned): hanya baris pekerjaan itu yang ditulis di Laporan, dan angka Rekap dihitung ulang dari data yang sudah di memori.
+  Sejak 2.6.1: >1 part diberi nomor sama ① ② di tiap kolom, kolom sparepart tidak pindah baris, Catatan tanpa cap waktu, jam `07.30` tetap teks, lebar kolom per isi (dipasang sekali; ubahan admin bertahan).
+- **`Rekap <tahun>`** = ringkasan per bulan (seperti 2.1). Sejak 2.6.1 **disembunyikan** (angka utama ada di `KPI <tahun>`) dan dibangun tiap malam / Perbarui / setup, tidak per tombol.
+- Laporan **diperbarui langsung setiap aksi** (Mulai, Pause, Resume, Pending, Lanjut, Selesai, Cancel, review, Abandoned): hanya baris pekerjaan itu yang ditulis.
   Cancel → barisnya dihapus dan NO diurutkan ulang. Matikan dengan `Config` → `LAPORAN_LANGSUNG` = `Tidak` jika tombol terasa terlalu lambat.
 - **Bangun ulang penuh** tiap malam ±01:00, lewat Dashboard → **Perbarui Laporan, Rekap & TPM**, atau menu spreadsheet → **Laporan & Rekap tahunan**. Perlu setelah admin **mengedit sheet `Maintenance` secara manual** (edit manual tidak memicu sinkron). Mengubah `Format Laporan` otomatis memicu bangun ulang di aksi berikutnya.
 - Kolom terakhir tab Laporan (tersembunyi, "ID sistem …") adalah kunci baris untuk sinkron. Jangan dihapus; kalau terhapus, aksi berikutnya membangun ulang tab.
 - Jangan edit tab Laporan/Rekap (ditulis ulang). Perbaiki datanya di `Maintenance`.
 - Untuk dikirim: klik kanan tab → **Copy to → New spreadsheet** → File → Download → Microsoft Excel.
 - **`Maintenance <baterai>`** (2.6.1) = laporan per project: judul, kolom, warna & belang sama dengan `Laporan <tahun>`, hanya baris project itu, No. 1..n. Isinya rumus ke tab Laporan (selalu terbaru, tombol teknisi tidak lebih lambat), jadi **hanya tahun berjalan**. Butuh kolom `Project` aktif di `Format Laporan`. Jangan diedit; lebar kolom boleh diatur (bertahan).
+- **`Input Manual`** (2.6.1, admin) = pekerjaan yang tidak tercatat lewat aplikasi (riwayat WeChat, HP mati, lupa scan). Satu baris = satu pekerjaan:
+  `Tanggal` (22/10/2026) · `Jam mulai` / `Jam selesai` (07:30 atau 07.30; selesai lebih kecil = lewat tengah malam) · `Line` · `Baterai` (kosong = satu-satunya di line) ·
+  `Stop line` (kosong = Ya untuk Corrective) · `Jenis kerusakan` · `Masalah` / `Penyebab` / `Penanganan` (pilihan, detail setelah `–`, mis. "Sensor error – kabel putus"; teks lain = Lainnya) ·
+  `Sparepart` ("Fuse 10A x2; Bearing 6205", tanpa jumlah = 1, katalog dikenali otomatis) · `PIC` (nama dari Users) · `PIC tambahan` · `Catatan`.
+  Menu → **Masukkan Input Manual…**: semua baris diperiksa dengan aturan aplikasi, lalu "n benar, m salah. Masukkan n?" → Ya. Hasil di kolom `Hasil` (✓ ID / ✗ alasan; baris ✓ dilewati, boleh dihapus).
+  Waktu aktif = selesai − mulai. Ditandai di `Maintenance` → `Input manual oleh` dan Log `input manual`; Dashboard admin menampilkan "n dari m pekerjaan selesai = input manual". Maks 200 baris per jalan; pekerjaan yang sama (line & jam mulai) ditolak.
+  Bulan KPI yang sudah ditutup → kolom Hasil memberi ⚠: tutup ulang bulan itu supaya ikut dihitung.
 - **Tab per project boleh dihapus** (2.6.1): hapus tab `TPM <project>` atau `Maintenance <baterai>` → tidak dibuat lagi; saat Perbarui / malam / `setup` aplikasi menulis nama project itu di `Config` → `TPM_DIMATIKAN` / `TAB_BATERAI_DIMATIKAN` (+ `Log`). Nyalakan lagi = hapus namanya dari Config. `Semua` = tidak ada tab sama sekali (TPM: tanpa Google Translate, trigger malam lebih cepat). Tab yang diganti nama tidak disentuh (cara menyimpan salinan).
 - **`TPM <project>`** (2.5.2) = format Excel TPM manager ("Statistical Analysis of Issues Reported from Production"): kotak Status Overview (COUNTIF per Discipline), Total tasks, judul kolom baris 8,
   data mulai **B9**: No · Machine · Issue Description · Root Cause · Solution · End Time · Discipline · Responsibility · Date · Notes. Satu tab per project.
   - Isi: pekerjaan `TPM_TIPE` (default Corrective) yang **Completed**, dimulai sejak `TPM_MULAI` (kosong = 1 Januari), urut waktu mulai. Sumber: Machine = mesin (atau line), Issue = Masalah + detail, Root Cause = Penyebab + detail,
-    Solution = Penanganan + detail + satu baris sparepart, End Time = jam selesai, Date = tanggal mulai, Responsibility = nama teknisi, Notes = Catatan (tanpa cap waktu).
+    Solution = Penanganan + detail + sparepart (>1 part: satu baris bernomor per part), End Time = jam selesai, Date = tanggal mulai (tampil `10月22日`), Responsibility = nama teknisi,
+    Notes = `开始：22:10，影响时长：20分钟` + `(Start: 22:10; Downtime: 20 min)` (downtime = menit stop line, 0 bila tidak stop line) lalu Catatan (tanpa cap waktu).
   - Sel teks = `中文` + baris baru + `(English)`. Pilihan, mesin & line memakai kolom 中文/English di sheet; teks bebas lewat Google Translate + sheet `Terjemahan` (koreksi admin dipakai). Maks 300 teks baru per bahasa sekali jalan; sisanya tetap teks asli dan diterjemahkan saat pembaruan berikutnya.
   - **Discipline** dari `Pilihan` → kolom `Discipline` (Jenis Kerusakan): bawaan Elektrikal/Mekanikal/Pneumatik/Program = Machine, Operasional = Operation, Produk = Product Item, MES = MES. Kosong/salah = Machine (+ peringatan di Dashboard).
   - Nilai statis, dibangun ulang tiap malam, lewat Dashboard → **Perbarui Laporan, Rekap & TPM**, menu spreadsheet → **Perbarui tab TPM**, dan saat `setup`. Tidak di jalur tombol teknisi (terjemahan butuh waktu).
   - Cara kirim: blok **B9 sampai baris terakhir kolom K** → Copy → paste di Excel manager. Jangan edit tab TPM (tertimpa); perbaiki di `Maintenance` / `Pilihan` / `Terjemahan`.
-  - Bedanya dengan contoh Excel: Total tasks = jumlah baris sebenarnya (contoh: `COUNT(...)-3`), judul baris 6 dari `TPM_JUDUL` (contoh masih judul template checklist), kolom A (R/Y/G) dan aturan warna R/Y/G sisa template tidak dipakai, tanggal `yyyy-mm-dd`.
+  - Bedanya dengan contoh Excel: Total tasks = jumlah baris sebenarnya (contoh: `COUNT(...)-3`), judul baris 6 dari `TPM_JUDUL` (contoh masih judul template checklist), kolom A (R/Y/G) dan aturan warna R/Y/G sisa template tidak dipakai.
 - **`KPI <tahun>`** (2.6) = KPI bulanan per **Plant / Project / Line**: Bulan · Level · Nama · Kerusakan · MTTR · Target MTTR · Downtime · Jam operasi · MTBF · Target MTBF · Tercapai (✓ / ✗ MTTR / ✗ MTBF) · Status.
   - Rumus: lihat "Yang baru di 2.6". Nilai statis, dibangun ulang tiap malam, lewat Dashboard → **Perbarui Laporan, Rekap, TPM & KPI**, menu → **Perbarui tab KPI**, saat tutup bulan dan `setup`.
   - **Tutup bulan**: Dashboard (admin) mengingatkan bulan lalu yang belum ditutup + jumlah pekerjaan bulan itu yang masih menunggu review → **Tutup bulan …**. Atau menu → **Tutup bulan KPI…** (bulan mana pun yang sudah lewat).
+    Sejak 2.6.1 **otomatis** oleh trigger malam mulai tanggal `KPI_TUTUP_OTOMATIS` (5) bulan berikutnya, bila tidak ada Abandoned yang menunggu review ("Ditutup … oleh otomatis"; `0` = tetap manual). Tutup ulang manual tetap bisa.
     Angka bulan itu disalin ke `KPI data` dan sejak itu selalu dipakai, walau data lama diedit. **Tutup ulang** = angka diganti; angka lama & baru dicatat di `Log`.
     Selesaikan review dulu baru tutup bulan: Abandoned yang belum direview tidak dihitung.
   - Cek silang: Kerusakan & MTTR Plant = angka `Rekap` bulan itu (persis, kecuali bulan `KPI_MULAI` jika tanggalnya di tengah bulan). Jumlah baris `TPM <project>` sebulan ≈ Kerusakan project itu; bisa beda sedikit karena TPM memakai tanggal **mulai** dan hanya Completed, KPI memakai tanggal **selesai** dan ikut menghitung Abandoned yang disetujui admin.
@@ -338,7 +348,7 @@ Waktu aksi di Apps Script ditentukan oleh **jumlah panggilan ke Google Sheets**.
 Tombol 🌐 dengan 15 teks baru: **1 panggilan Google + 9 Sheets** (teks digabung per panggilan, hasil ditulis sekaligus); teks yang sama berikutnya: 0 (cache).
 Ukuran halaman ±58 KB gzip (2.2.6: ±38 KB; kamus 中文 ±11 KB). Diukur di Chromium dengan CPU 4× lebih lambat: teknisi Indonesia tidak lebih lambat dari 2.2.6, tampilan 中文 ±0,1–0,2 detik lebih lama (render huruf Han).
 
-Laporan langsung menambah 4 panggilan per aksi (Selesai/Cancel: 6, karena Rekap ikut dihitung) ≈ 0,3–0,6 detik lebih lama per tombol.
+Laporan langsung menambah 4 panggilan per aksi ≈ 0,3 detik lebih lama per tombol (sejak 2.6.1 Rekap tidak lagi per tombol: Selesai 23 → 21 panggilan).
 Itu harga "data langsung masuk laporan". Kalau di HP teknisi terasa terlalu lambat: `LAPORAN_LANGSUNG` = `Tidak` (kembali ke 12/17).
 
 Master (termasuk katalog sparepart, format laporan, catatan panduan) di-cache di CacheService dan dihapus otomatis saat spreadsheet diedit.

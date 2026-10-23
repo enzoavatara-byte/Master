@@ -153,7 +153,10 @@ function saveTranslations_(texts, lang, got) {
       };
       put(col); put(tcol, now);
     }
-    if (rows.length) sh.getRange(start, 1, rows.length, h.length).setValues(rows);
+    if (rows.length) {
+      ensureRows_(sh, start + rows.length - 1, 300);
+      sh.getRange(start, 1, rows.length, h.length).setValues(rows);
+    }
   } finally {
     lock.releaseLock();
   }

@@ -17,6 +17,7 @@ var APP = {
     MESIN: 'Mesin',
     SPAREPART: 'Sparepart',
     PEMAKAIAN: 'Pemakaian Sparepart',
+    MANUAL: 'Input Manual',
     FORMAT: 'Format Laporan',
     PANDUAN: 'Catatan Panduan',
     OPTIONS: 'Pilihan',
@@ -75,8 +76,12 @@ var APP = {
       'Factory', 'Tipe', 'Mesin ID', 'Nama Mesin',
       // 2.2
       'Proses', 'Stop line', 'Jenis kerusakan', 'Detail masalah', 'Detail penyebab', 'Detail penanganan',
-      'Nama PIC', 'Nama teknisi awal', 'Nama teknisi terlibat'
+      'Nama PIC', 'Nama teknisi awal', 'Nama teknisi terlibat',
+      // 2.6.1: diisi hanya untuk pekerjaan dari tab Input Manual (email admin yang memasukkan)
+      'Input manual oleh'
     ],
+    'Input Manual': ['Tanggal', 'Jam mulai', 'Jam selesai', 'Line', 'Baterai', 'Stop line', 'Jenis kerusakan', 'Masalah', 'Penyebab',
+      'Penanganan', 'Sparepart', 'PIC', 'PIC tambahan', 'Catatan', 'Hasil'],
     Log: ['Timestamp', 'Maintenance ID', 'Kejadian', 'User', 'Detail'],
     /** KPI bulan yang sudah DITUTUP admin (2.6): salinan angka saat ditutup. Ditulis aplikasi, disembunyikan & diproteksi. */
     'KPI data': ['Bulan', 'Level', 'Kunci', 'Nama', 'Kerusakan', 'MTTR (menit)', 'Target MTTR (menit)', 'Downtime (jam)', 'Jam operasi',
@@ -135,7 +140,7 @@ var APP = {
   EVENTS: {
     START: 'start', PAUSE: 'pause', RESUME: 'resume', PENDING: 'pending', CONTINUE: 'lanjut',
     COMPLETE: 'complete', CANCEL: 'cancel', WARN: 'peringatan', CONFIRM: 'masih lanjut',
-    ABANDON: 'abandoned', REVIEW: 'review', TUTUP_BULAN: 'tutup bulan'
+    ABANDON: 'abandoned', REVIEW: 'review', TUTUP_BULAN: 'tutup bulan', INPUT_MANUAL: 'input manual'
   },
 
   SYSTEM_USER: 'SYSTEM',
@@ -276,6 +281,7 @@ var APP = {
     JAM_OPERASI_PER_HARI: { value: 24, description: 'KPI MTBF: jam operasi per line per hari operasi (mis. 24 = 3 shift, 16 = 2 shift)' },
     HARI_OPERASI: { value: 'Sen-Min', description: 'KPI MTBF: hari operasi, mis. "Sen-Min" (setiap hari), "Sen-Sab", atau "Sen,Sel,Rab,Kam,Jum"' },
     TANGGAL_LIBUR: { value: '', description: 'KPI MTBF: tanggal tidak beroperasi (dd/mm/yyyy, pisahkan dengan koma), mis. 25/12/2026, 01/01/2027' },
+    KPI_TUTUP_OTOMATIS: { value: 5, description: 'KPI: tanggal bulan berikutnya untuk tutup bulan otomatis (trigger malam), bila tidak ada Abandoned yang menunggu review. 0 = mati (tutup manual)' },
     KPI_MULAI: { value: '', description: 'KPI: dihitung sejak tanggal ini (dd/mm/yyyy), mis. tanggal aplikasi mulai dipakai. Kosong = awal bulan data pertama' }
   },
 

@@ -422,8 +422,15 @@ function partText_(parts) {
 function appendUsage_(r, parts, now) {
   if (!parts.length) return;
   var sh = sheet_(APP.SHEETS.PEMAKAIAN);
-  var h = headers_(sh);
-  var rows = parts.map(function (p) {
+  var rows = usageRows_(headers_(sh), r, parts, now);
+  var at = sh.getLastRow() + 1;
+  ensureRows_(sh, at + rows.length - 1, 500);
+  sh.getRange(at, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+/** Baris Pemakaian Sparepart untuk satu pekerjaan (juga dipakai Input Manual untuk tulisan sekaligus). */
+function usageRows_(h, r, parts, now) {
+  return parts.map(function (p) {
     return objToRow_(h, {
       'Tanggal': now, 'Maintenance ID': r['Maintenance ID'], 'Factory': r['Factory'], 'Line': r['Line'], 'Proses': r['Proses'],
       'Mesin': String(r['Nama Mesin'] || '').replace(APP.OTHER_PREFIX, ''), 'Baterai': r['Baterai'], 'Jenis kerusakan': r['Jenis kerusakan'],
@@ -431,7 +438,6 @@ function appendUsage_(r, parts, now) {
       'Manual': p.manual ? APP.YES : APP.NO, 'PIC': r['Nama PIC'], 'Email PIC': r['Teknisi terakhir']
     });
   });
-  sh.getRange(sh.getLastRow() + 1, 1, rows.length, h.length).setValues(rows);
 }
 
 /**
@@ -511,7 +517,7 @@ function apiCancel(id, input, catatan) {
     transition_(r, APP.STATUS.CANCELLED, now);
     applyFormValues_(r, f.values, now, user);
     r['Masuk MTTR'] = APP.MTTR.NO;
-    r['Status review'] = APP.REVIEW.NEEDED;
+    r['Status review'] = '';   // 2.6.1: Cancel tanpa review (satu-satunya keputusan dulu "Setujui"); alasan tercatat di Log
     r['Peringatan pada'] = '';
     writeObj_(APP.SHEETS.MAINT, r);
     log_(now, r['Maintenance ID'], APP.EVENTS.CANCEL, user.email, f.summary.join(' · ') + (owner ? '' : ' (oleh Admin)'));

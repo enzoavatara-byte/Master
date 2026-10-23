@@ -93,9 +93,9 @@ function sortPending_(list) {
   });
 }
 
-/** 2.6: review = keputusan admin (Cancelled, Abandoned). Pending tidak lagi masuk review (fungsi Cek dihapus). */
+/** Review = keputusan admin. 2.6: Pending tidak lagi (Cek dihapus); 2.6.1: Cancelled juga tidak (hanya bisa "Setujui"). */
 function reviewVisible_(r, user) {
-  return r['Status review'] === APP.REVIEW.NEEDED && r['Status'] !== APP.STATUS.PENDING && isAdmin_(user);
+  return r['Status review'] === APP.REVIEW.NEEDED && r['Status'] === APP.STATUS.ABANDONED && isAdmin_(user);
 }
 
 function canDecide_(r, user) {
