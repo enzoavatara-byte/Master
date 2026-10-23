@@ -2451,4 +2451,14 @@ test('2.6.1 Input Manual: periksa → konfirmasi → Maintenance / Pemakaian / L
   assert.ok(k.audit.manual >= inMonth && k.audit.done >= k.audit.manual, JSON.stringify(k.audit));
 });
 
+test('2.6.1 format tanggal baris baru (appendRow) dipasang ulang tiap malam, tanpa tambahan di tombol teknisi', () => {
+  const L = ss.getSheetByName('Log');
+  L.fmt = [];
+  ctx.rapikanTampilan_({});   // jalur malam
+  const c = ctx.headers_(L).indexOf('Timestamp') + 1;
+  assert.ok(L.fmt.some(f => f[0] === 'setNumberFormat' && f[1] === '2,' + c + ':' + (L.getMaxRows() - 1) + 'x1' && f[2][0] === ctx.DATE_FMT_), 'Log Timestamp');
+  const M = ss.getSheetByName('Maintenance'), mh = ctx.headers_(M);
+  ['Mulai', 'Selesai'].forEach(n => assert.ok(M.fmt.some(f => f[0] === 'setNumberFormat' && f[1] === '2,' + (mh.indexOf(n) + 1) + ':' + (M.getMaxRows() - 1) + 'x1'), 'Maintenance ' + n));
+});
+
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

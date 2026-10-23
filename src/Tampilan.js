@@ -262,9 +262,12 @@ function styleTable_(sh, o, full) {
   var h = headers_(sh), w = h.length;
   if (!w) return;
   var max = Math.max(sh.getMaxRows(), 2), bands = sh.getBandings();
-  if (!full && bands.length && bands[0].getRange().getLastRow() >= max) return;   // malam: belum ada baris baru
   var col = function (name) { return h.indexOf(name) + 1; };
   var body = function (c) { return sh.getRange(2, c, max - 1, 1); };
+  // Baris dari appendRow (Maintenance, Log) tidak ikut format kolom → format tanggal dipasang ulang tiap malam juga
+  // (ditemukan di Sheets asli, 2.6.1: baris baru tampil "10/23/2026 17:29:51"). Tidak ada tambahan di tombol teknisi.
+  (APP.DATE_COLUMNS[sh.getName()] || []).forEach(function (n) { if (col(n)) body(col(n)).setNumberFormat(DATE_FMT_); });
+  if (!full && bands.length && bands[0].getRange().getLastRow() >= max) return;   // malam: belum ada baris baru
 
   bands.forEach(function (b) { b.remove(); });
   sh.getRange(1, 1, max, w).applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, true, false)
@@ -284,7 +287,6 @@ function styleTable_(sh, o, full) {
     sh.setColumnWidth(i + 1, wd);
     if (wrap.indexOf(name) !== -1) body(i + 1).setWrap(true);
   });
-  (APP.DATE_COLUMNS[sh.getName()] || []).forEach(function (n) { if (col(n)) body(col(n)).setNumberFormat(DATE_FMT_); });
   (o.ints || []).forEach(function (n) { if (col(n)) body(col(n)).setNumberFormat('0'); });
   (o.plain || []).forEach(function (n) { if (col(n)) body(col(n)).setNumberFormat('@'); });   // teks apa adanya (tanggal/jam ketikan admin)
   Object.keys(o.notes || {}).forEach(function (n) { if (col(n)) sh.getRange(1, col(n)).setNote(o.notes[n]); });

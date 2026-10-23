@@ -354,8 +354,8 @@ function ujiAlur() {
     var lr = readTable_(APP.SHEETS.LOG).filter(function (e) { return e['Maintenance ID'] === id; }).pop();
     var ld = lr ? ss.getSheetByName(APP.SHEETS.LOG).getRange(lr._row, 1).getDisplayValue() : '';
     var md2 = ss.getSheetByName(APP.SHEETS.MAINT).getRange(r._row, headers_(ss.getSheetByName(APP.SHEETS.MAINT)).indexOf('Mulai') + 1).getDisplayValue();
-    ok('Alur: baris baru Log & Maintenance bertipe tanggal, tampil dd/MM/yyyy HH:mm', lr && lr['Timestamp'] instanceof Date && r['Mulai'] instanceof Date &&
-      /^\d\d\/\d\d\/\d{4} \d\d:\d\d$/.test(ld) && /^\d\d\/\d\d\/\d{4} \d\d:\d\d$/.test(md2), 'Log "' + ld + '" · Mulai "' + md2 + '"');
+    ok('Alur: baris baru Log & Maintenance bertipe tanggal (format tampil dipasang malam, dicek di akhir)', lr && lr['Timestamp'] instanceof Date && r['Mulai'] instanceof Date,
+      'Log "' + ld + '" · Mulai "' + md2 + '"');
     var c = timed('Mulai (untuk cancel)', function () { return apiStart('UJI', { baterai: 'VF7' }); }), id2 = c.v.open.id;
     flowIds.push(id2);
     timed('Cancel', function () { return apiCancel(id2, { values: { 'Alasan cancel': 'Input ganda' } }); });
@@ -430,6 +430,9 @@ function ujiAlur() {
     ok('Setelah dibersihkan: Laporan kembali 100 baris', a.v.rows === 100, a.v.rows + ' baris · TPM ' + t.v.sheets.map(function (x) { return x.sheet + ' ' + x.rows; }).join(', ') +
       (t.v.untranslated ? ' · ' + t.v.untranslated + ' teks belum diterjemahkan' : ''), a.ms);
     ok('Trigger malam total < 120 dtk untuk 100 pekerjaan (batas 360)', total < 120000, Math.round(total / 1000) + ' dtk', total);
+    var lg = readTable_(APP.SHEETS.LOG).filter(function (e) { return e['Kejadian'] === 'tab dimatikan'; }).pop();
+    var shown = lg ? ss.getSheetByName(APP.SHEETS.LOG).getRange(lg._row, 1).getDisplayValue() : '';
+    ok('Malam: baris Log baru tampil dd/MM/yyyy HH:mm (format tanggal dipasang ulang)', /^\d\d\/\d\d\/\d{4} \d\d:\d\d$/.test(shown), 'Log "' + shown + '"');
   });
   return R.selesai('Selesai. Kirim "sudah" ke Claude.');
 }

@@ -10,6 +10,7 @@ Buat file Script `Manual`; ganti `Api`, `Auth`, `Code`, `Config`, `Db`, `Kpi`, `
 **Bug yang ditemukan di runtime / skala asli**
 - **Tombol Selesai bisa gagal setelah ±1 tahun pemakaian.** Tulisan sekaligus ke baris di bawah baris terakhir (`Pemakaian Sparepart`, Laporan, Terjemahan, Arsip, KPI data) tidak menambah baris sheet; tab baru hanya 1000 baris dan Apps Script menolak range di luar batas. Begitu `Pemakaian Sparepart` mencapai 1000 baris, **Selesai dengan sparepart gagal**; Laporan dengan >±700 pekerjaan setahun juga gagal dibangun. Sekarang baris ditambah otomatis (`ensureRows_`). Mock test kini menolak range di luar batas seperti Sheets asli.
 - **Jam di Laporan berubah jadi angka**: "07.30" ditulis sebagai teks tetapi Sheets mengubahnya jadi `7.3` (dan "10.00" jadi `10`). Kolom Jam sekarang berformat teks sebelum ditulis.
+- **Tanggal di baris baru `Maintenance` & `Log` tampil format bawaan** (`10/23/2026 17:29:51`): baris dari tombol teknisi tidak ikut format kolom. Format `dd/mm/yyyy hh:mm` sekarang dipasang ulang tiap malam (±13 panggilan di trigger malam, tidak ada tambahan di tombol teknisi); isi sel sudah tanggal benar sejak awal.
 
 **Lebih mudah dibaca**
 - Laporan (juga `Maintenance <baterai>` & Download): >1 sparepart diberi nomor sama **① ②** di kolom Jenis / Nama / Model / Jumlah (1 part tanpa nomor), kolom sparepart tidak pindah baris supaya ① sejajar; Catatan tanpa cap `[dd/MM HH:mm Nama]` (cap tetap di Maintenance & Riwayat); lebar kolom per isi (dipasang sekali per format; ubahan admin bertahan), kolom pendek rata tengah.
