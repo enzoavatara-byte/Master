@@ -157,7 +157,7 @@ Langkah:
 4. **Deploy → Manage deployments → ✏️ → New version → Deploy.** Bukan "New deployment" (URL berubah, semua QR mati).
 5. QR tidak perlu dicetak ulang.
 
-Install baru dari nol: buat spreadsheet → Extensions → Apps Script → paste 17 file + `appsscript.json` → Run `setup` → Deploy web app *Execute as: User accessing*, *Anyone with Google account* → share spreadsheet sebagai Editor ke semua user.
+Install baru dari nol: buat spreadsheet → Extensions → Apps Script → paste 19 file + `appsscript.json` → Run `setup` → Deploy web app *Execute as: User accessing*, *Anyone with Google account* → share spreadsheet sebagai Editor ke semua user.
 
 **Apakah update/deploy menghapus data, atau mengacaukan pekerjaan yang sedang berjalan?** Tidak:
 - Data ada di **Google Sheet**, kode ada di **Apps Script**. Deploy hanya mengganti kode. `setup` hanya *menambah* sheet/kolom/baris yang belum ada; tidak menghapus data.
@@ -166,6 +166,17 @@ Install baru dari nol: buat spreadsheet → Extensions → Apps Script → paste
 - Saat kode sedang di-paste (sebelum New version), trigger tiap 15 menit memakai kode yang baru disimpan. Paste semua file sekaligus (±5 menit); paling buruk satu jalannya trigger gagal dan dicoba lagi 15 menit kemudian.
 - Yang benar-benar berbahaya: **New deployment** (URL baru → semua QR mati), menghapus/mengganti nama sheet atau judul kolom, dan salah file saat menyalin untuk factory kedua.
 - Versi baru bermasalah? Deploy → Manage deployments → ✏️ → pilih **versi sebelumnya** → Deploy. Data tidak ikut mundur. Spreadsheet juga punya **File → Version history**.
+
+### Serah terima ke akun lain
+Trigger (`checkTimeouts` tiap 15 menit, `refreshRekap` tiap malam, `onMasterChange`) **milik akun yang menjalankan `setup`**,
+bukan milik spreadsheet. Kalau akun itu dicabut aksesnya atau dihapus, Laporan malam, Abandoned otomatis, peringatan email, dan
+tutup bulan otomatis **berhenti tanpa pesan**; tombol teknisi tetap jalan, jadi tidak langsung ketahuan. Urutan yang benar:
+1. Akun baru dijadikan Editor (atau Owner: Share → ⋮ → Transfer ownership) spreadsheet.
+2. **Akun baru** membuka Apps Script → Run `setup` (membuat trigger miliknya) dan masuk `Users` sebagai Admin.
+3. **Akun lama** membuka Apps Script → ⏰ Triggers → hapus ketiga trigger miliknya (kalau tidak, semuanya jalan dua kali).
+4. Baru cabut akses akun lama. Web app (*Execute as: User accessing*), URL, dan QR tidak berubah.
+Cek kapan saja, login sebagai akun yang menjalankan `setup`: Apps Script → ⏰ Triggers → tepat satu `checkTimeouts`, satu
+`refreshRekap`, satu `onMasterChange`. Setiap akun hanya melihat trigger miliknya sendiri, jadi cek dari kedua akun saat serah terima.
 
 ---
 
