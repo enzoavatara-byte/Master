@@ -88,21 +88,25 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 
 ## 2. Upgrade
 
-### Ke 2.6.0 (dari 2.5.2)
+### Ke 2.6.1 (dari 2.6.0)
+Ganti `Auth`, `Code`, `Config`, `Master`, `Translate` (Script). **Run `setup`** (sekali: terjemahan Inggris lama yang salah di tab `Terjemahan` dikosongkan; koreksi admin tidak disentuh; tab TPM menerjemahkan ulang malam berikutnya atau lewat Dashboard → Perbarui). Lalu New version. Tidak ada izin baru.
+
+### Ke 2.6.1 (dari 2.5.2)
 
 | Jenis | Nama | Status |
 |---|---|---|
 | Script | `Kpi` | **BARU** |
-| Script | `Config`, `Db`, `Master`, `Maintenance`, `Api`, `Rekap`, `Code`, `Tampilan`, `Translate`, `Tpm` | berubah |
+| Script | `Config`, `Db`, `Master`, `Maintenance`, `Api`, `Rekap`, `Code`, `Tampilan`, `Translate`, `Tpm`, `Auth` | berubah |
 | HTML | `App`, `I18n`, `Styles`, `Panduan` | berubah |
-| Script / HTML | `Auth`, `Index`, `Message`, `appsscript.json` | tetap |
+| Script / HTML | `Index`, `Message`, `appsscript.json` | tetap |
 
 1. Buat file Script **`Kpi`**, paste semua file yang berubah, Ctrl+S.
 2. **Run `setup`** (wajib). Yang dilakukan, aman untuk data lama:
    - baris Form "pilih mesin" dimatikan; pilihan `Preventive` dimatikan **sekali** (kalau admin menyalakannya lagi, setup berikutnya tidak mematikannya); pekerjaan Pending dikeluarkan dari antrean review;
    - field `Selesai · PIC tambahan`, kolom `Projects → Target MTBF (jam)`, 4 kunci `Config` KPI, sheet tersembunyi `KPI data`, tab `KPI <tahun>`;
    - mencatat ID tab pengaturan (setelah ini nama tab boleh diganti). **Ganti nama tab baru boleh setelah `setup` 2.6 jalan**, bukan sebelumnya;
-   - jika sheet `Mesin` berisi data, pesan setup menyebut jumlahnya: buat baris `Lines` sendiri untuk mesin yang perlu QR sendiri, lalu cetak QR-nya.
+   - jika sheet `Mesin` berisi data, pesan setup menyebut jumlahnya: buat baris `Lines` sendiri untuk mesin yang perlu QR sendiri, lalu cetak QR-nya;
+   - terjemahan Inggris lama dari Google di tab `Terjemahan` dikosongkan sekali (2.6.1, lihat CHANGELOG); pesan setup menyebut jumlahnya.
 3. Isi `Projects` → `Target MTBF (jam)` dan `Config` → `JAM_OPERASI_PER_HARI`, `HARI_OPERASI`, `TANGGAL_LIBUR`, `KPI_MULAI` (tanggal aplikasi mulai dipakai sungguhan).
 4. Deploy → Manage deployments → ✏️ → **New version**. Tidak ada izin baru.
 5. QR **line** lama tetap berfungsi. QR **mesin** lama membuka line-nya (tanpa memilih mesin). Kalau mesin dijadikan baris `Lines` sendiri, cetak QR barunya dari Dashboard → QR.

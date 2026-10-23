@@ -20,6 +20,7 @@ const advance = (min) => { clock.now += min * 60000; };
 class Range {
   constructor(sh, r, c, nr, nc) { Object.assign(this, { sh, r, c, nr, nc }); }
   getDisplayValues() { return this.getValues().map(r => r.map(v => (v instanceof Date ? v.toISOString() : String(v == null ? '' : v)))); }
+  getDisplayValue() { return this.getDisplayValues()[0][0]; }
   getValues() {
     const out = [];
     for (let i = 0; i < this.nr; i++) {
@@ -236,11 +237,16 @@ const ctx = {
   },
   MailApp: { sendEmail: (m) => mails.push(m) },
   // Google Translate palsu: "[zh-CN] teks" — cukup untuk menguji cache & alur, bukan kualitas terjemahan.
-  // Seperti Google: baris per baris. fail = kuota habis; joinLines = hasil tanpa pemisah baris (jumlah baris tidak cocok).
-  LanguageApp: { calls: 0, fail: false, joinLines: false, translate(text, src, tgt) {
+  // Seperti Google: baris per baris, SATU bahasa asal per panggilan. Asal '' = deteksi otomatis: ada huruf Han → seluruh
+  // panggilan dianggap 中文 dan baris tanpa Han kembali utuh (perilaku asli yang merusak teks Indonesia di 2.6.0).
+  // fail = kuota habis; joinLines = hasil tanpa pemisah baris (jumlah baris tidak cocok); log = semua panggilan.
+  LanguageApp: { calls: 0, log: [], fail: false, joinLines: false, translate(text, src, tgt) {
     this.calls++;
+    this.log.push({ text: String(text), src, tgt });
     if (this.fail) throw new Error('Service invoked too many times for one day: translate.');
-    return String(text).split('\n').map(l => '[' + tgt + '] ' + l).join(this.joinLines ? ' ' : '\n');
+    const han = (l) => /[\u3400-\u9fff]/.test(l), from = src || (han(text) ? 'zh-CN' : 'id');
+    return String(text).split('\n').map(l => (from === tgt || (from === 'zh-CN' && !han(l)) ? l : '[' + tgt + '] ' + l))
+      .join(this.joinLines ? ' ' : '\n');
   } },
   CacheService: { getScriptCache: () => scriptCache },
   PropertiesService: { getDocumentProperties: () => docProps },

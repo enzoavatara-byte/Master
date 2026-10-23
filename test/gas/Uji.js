@@ -2,11 +2,13 @@
  * UJI 2.6 DI APPS SCRIPT ASLI — hanya untuk spreadsheet uji. JANGAN disalin ke spreadsheet produksi.
  * Dibuat oleh test/gas-uji.js: UJI_ (di atas file ini) = data 104 pekerjaan + angka harapan, dihitung dari kode yang sama
  * di atas mock. Di sini angka itu dibandingkan dengan hasil runtime Apps Script asli.
- *   1. Run ujiIsiData   → setup, tulis data, setup ulang (Laporan, Rekap, TPM, KPI, Ringkasan), tutup bulan lalu
- *   2. Run ujiPeriksa   → bandingkan + uji alur & kecepatan nyata → tab "Uji 2.6"
+ *   1. Run ujiIsiData   → (setup bila kosong), tulis data, setup ulang (Laporan, Rekap, TPM, KPI, Ringkasan), tutup bulan lalu
+ *   2. Run ujiPeriksa   → bandingkan tab & API dengan harapan → tab "Uji 2.6"
+ *   3. Run ujiAlur      → alur nyata di line UJI, ganti nama tab, tutup ulang, bangun ulang seperti trigger malam → "Uji 2.6 alur"
+ * Hasil ditulis setelah tiap bagian: bila Apps Script berhenti di batas 6 menit, bagian yang sudah selesai tetap terbaca.
  */
 
-var UJI_SHEET_ = 'Uji 2.6';
+var UJI_SHEET_ = 'Uji 2.6', UJI_ALUR_SHEET_ = 'Uji 2.6 alur', UJI_ISI_PROP_ = 'UJI_26_ISI';
 
 function ujiMe_() {
   var me = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
@@ -32,23 +34,29 @@ function ujiTulis_(ss, name, rows, me) {
 }
 
 function ujiIsiData() {
-  var t0 = Date.now(), me = ujiMe_(), ss = SpreadsheetApp.getActive(), log = [];
-  var s1 = setup();                                   // spreadsheet kosong → semua tab & judul kolom
-  log.push('setup 1: ' + s1);
-  var D = UJI_.data;
-  ['Users', 'Factory', 'Projects', 'Lines', 'Maintenance', 'Log', 'Pemakaian Sparepart'].forEach(function (n) { ujiTulis_(ss, n, D[n], me); });
+  var t0 = Date.now(), lap = t0, me = ujiMe_(), ss = SpreadsheetApp.getActive(), log = [];
+  var step = function (text) { var now = Date.now(); log.push(text + ' · ' + Math.round((now - lap) / 1000) + ' dtk'); lap = now; };
+  if (!ss.getSheetByName(APP.SHEETS.MAINT)) step('setup 1 (spreadsheet kosong): ' + setup());
+  else log.push('setup 1 dilewati (tab sudah ada)');
+  var D = UJI_.data, owner = '';
+  try { owner = String(ss.getOwner() ? ss.getOwner().getEmail() : '').trim().toLowerCase(); } catch (e) { owner = ''; }
+  var users = D.Users.slice();
+  if (owner && owner !== me) users.push([owner, 'Pemilik (Admin)', 'Admin', 'Ya', '']);   // pemilik bisa buka web app sebagai Admin
+  ujiTulis_(ss, 'Users', users, me);
+  ['Factory', 'Projects', 'Lines', 'Maintenance', 'Log', 'Pemakaian Sparepart'].forEach(function (n) { ujiTulis_(ss, n, D[n], me); });
   var cfg = findSheet_('Config', ss), cv = cfg.getDataRange().getValues(), ck = cv[0].indexOf('Key'), cval = cv[0].indexOf('Value');
   Object.keys(UJI_.meta.config).forEach(function (k) {
     for (var i = 1; i < cv.length; i++) if (String(cv[i][ck]).trim() === k) cfg.getRange(i + 1, cval + 1).setValue(UJI_.meta.config[k]);
   });
-  log.push('data: ' + (D.Maintenance.length - 1) + ' pekerjaan, ' + (D.Log.length - 1) + ' baris Log, ' + (D['Pemakaian Sparepart'].length - 1) + ' sparepart');
+  step('data: ' + (D.Maintenance.length - 1) + ' pekerjaan, ' + (D.Log.length - 1) + ' baris Log, ' + (D['Pemakaian Sparepart'].length - 1) +
+    ' sparepart · Admin: ' + me + (owner && owner !== me ? ' + pemilik ' + owner : ''));
   invalidateMaster_(); resetMaster_();
-  var s2 = setup();                                   // bangun ulang dari data: Laporan, Rekap, TPM, KPI, Ringkasan, tab per baterai
-  log.push('setup 2: ' + s2);
+  step('setup 2 (bangun ulang dari data): ' + setup());
   var c = apiTutupBulan(UJI_.meta.prevKey);
-  log.push('tutup bulan ' + c.label + ': ' + kpiBrief_(c.plant));
-  log.push('waktu total ' + Math.round((Date.now() - t0) / 1000) + ' dtk');
-  ujiHasil_([[1, 'ujiIsiData', 'SELESAI', log.join('\n'), Date.now() - t0]], 'Data diisi. Sekarang Run ujiPeriksa.');
+  step('tutup bulan ' + c.label + ': ' + kpiBrief_(c.plant));
+  log.push('waktu total ' + Math.round((Date.now() - t0) / 1000) + ' dtk (batas Apps Script 360)');
+  PropertiesService.getDocumentProperties().setProperty(UJI_ISI_PROP_, JSON.stringify({ log: log.join('\n').slice(0, 6000), ms: Date.now() - t0 }));
+  ujiHasil_(UJI_SHEET_, [[1, 'ujiIsiData', 'SELESAI', log.join('\n'), Date.now() - t0]], 'Data diisi. Sekarang Run ujiPeriksa.', true);
   return log.join('\n');
 }
 
@@ -96,14 +104,36 @@ function ujiCari_(vals, re) {
   return null;
 }
 
+/** Pencatat hasil satu fungsi uji: ok / safe (tulis hasil sementara setelah tiap bagian) / timed / selesai. */
+function ujiRunner_(sheetName) {
+  var T0 = Date.now(), res = [], waktu = [];
+  var R = {
+    res: res,
+    ok: function (cek, pass, detail, ms) { res.push([res.length + 1, cek, pass ? 'LULUS' : 'GAGAL', String(detail || '').slice(0, 2000), ms == null ? '' : ms]); return pass; },
+    timed: function (label, fn) { var t = Date.now(), v = fn(); var ms = Date.now() - t; waktu.push([label, ms]); return { v: v, ms: ms }; },
+    safe: function (cek, fn) {
+      try { fn(); } catch (e) { R.ok(cek, false, 'Error: ' + (e && e.message || e) + (e && e.stack ? '\n' + String(e.stack).slice(0, 600) : '')); }
+      ujiHasil_(sheetName, res, 'berjalan… selesai: ' + cek + ' · ' + Math.round((Date.now() - T0) / 1000) + ' dtk', false);
+    },
+    selesai: function (next) {
+      waktu.forEach(function (w) { R.ok('Waktu: ' + w[0], true, w[1] + ' ms', w[1]); });
+      var lulus = res.filter(function (r) { return r[2] === 'LULUS'; }).length;
+      var txt = lulus + ' / ' + res.length + ' LULUS · ' + Math.round((Date.now() - T0) / 1000) + ' dtk' + (next ? ' · ' + next : '');
+      ujiHasil_(sheetName, res, txt, true);
+      return txt;
+    }
+  };
+  return R;
+}
+
 function ujiPeriksa() {
-  var T0 = Date.now(), me = ujiMe_(), ss = SpreadsheetApp.getActive(), y = UJI_.meta.year, res = [], waktu = [];
-  var ok = function (cek, pass, detail, ms) { res.push([res.length + 1, cek, pass ? 'LULUS' : 'GAGAL', String(detail || '').slice(0, 2000), ms == null ? '' : ms]); return pass; };
-  var safe = function (cek, fn) { try { fn(); } catch (e) { ok(cek, false, 'Error: ' + (e && e.message || e) + (e && e.stack ? '\n' + String(e.stack).slice(0, 600) : '')); } };
-  var timed = function (label, fn) { var t = Date.now(), v = fn(); var ms = Date.now() - t; waktu.push([label, ms]); return { v: v, ms: ms }; };
+  var me = ujiMe_(), ss = SpreadsheetApp.getActive(), y = UJI_.meta.year;
+  var R = ujiRunner_(UJI_SHEET_), ok = R.ok, safe = R.safe, timed = R.timed;
   var todayKey = Utilities.formatDate(new Date(), APP.TZ, 'yyyy-MM-dd'), sameDay = todayKey === UJI_.meta.todayKey;
   var curKey = todayKey.slice(0, 7);
   resetMaster_();
+  var isi = JSON.parse(PropertiesService.getDocumentProperties().getProperty(UJI_ISI_PROP_) || '{}');
+  ok('ujiIsiData (dijalankan sebelumnya)', !!isi.log, isi.log || 'belum dijalankan dengan Uji.js versi ini', isi.ms);
 
   // ---- tab buatan Apps Script dibanding hasil kode yang sama di mock ----
   safe('Laporan ' + y + ': 100 baris, isi sama', function () {
@@ -133,7 +163,7 @@ function ujiPeriksa() {
       }
     });
     var st = v.slice(1).filter(function (r) { return ujiNorm_(r[0]) === UJI_.meta.prevKey && r[1] === 'Plant'; })[0];
-    ok('KPI ' + UJI_.meta.prevKey + ' berstatus ditutup', st && /^Ditutup \d\d\/\d\d\/\d{4} oleh /.test(st[11]), st ? st[11] : 'baris Plant tidak ada');
+    ok('KPI ' + UJI_.meta.prevKey + ' berstatus ditutup, oleh nama Admin', st && /^Ditutup \d\d\/\d\d\/\d{4} oleh Admin Uji$/.test(st[11]), st ? st[11] : 'baris Plant tidak ada');
     var cur = v.slice(1).filter(function (r) { return ujiNorm_(r[0]) === curKey && r[1] === 'Plant'; })[0];
     ok('KPI bulan berjalan "Berjalan"', cur && cur[11] === 'Berjalan', cur ? cur[11] : '-');
     ok('KPI: kolom Bulan tetap teks (bukan tanggal)', v.slice(1).every(function (r) { return !r[0] || typeof r[0] === 'string'; }),
@@ -180,7 +210,7 @@ function ujiPeriksa() {
       t5 ? 'tersering: ' + v[t5.r + 2].slice(1, 5).join(' / ') + ' · terlama: ' + v[t5.r + 2].slice(5, 9).join(' / ') : 'judul tidak ketemu');
   });
   safe('Spreadsheet', function () {
-    var names = ss.getSheets().map(function (s) { return s.getName(); }).filter(function (n) { return n !== UJI_SHEET_; });
+    var names = ss.getSheets().map(function (s) { return s.getName(); }).filter(function (n) { return n.indexOf(UJI_SHEET_) !== 0; });
     ok('Urutan tab', names.slice(0, 5).join(' | ') === ['Ringkasan', 'Baca Saya', laporanName_(y), rekapName_(y), kpiName_(y)].join(' | '), names.slice(0, 8).join(' | '));
     var tr = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); }).sort();
     ok('Trigger terpasang', ['checkTimeouts', 'onMasterChange', 'refreshRekap'].every(function (h) { return tr.indexOf(h) !== -1; }), tr.join(', '));
@@ -190,6 +220,36 @@ function ujiPeriksa() {
     var rows = kd ? readTable_(APP.SHEETS.KPI_DATA).filter(function (r) { return kpiMonthOfCell_(r['Bulan']) === UJI_.meta.prevKey; }) : [];
     ok('KPI data: salinan bulan ditutup, oleh pelaksana', rows.length > 0 && rows.every(function (r) { return String(r['Ditutup oleh']).toLowerCase() === me; }), rows.length + ' baris');
     ok('KPI data tersembunyi & diproteksi', kd && kd.isSheetHidden() && kd.getProtections(SpreadsheetApp.ProtectionType.SHEET).length > 0, '');
+    var emails = readTable_(APP.SHEETS.USERS).map(function (r) { return String(r['Email']).trim().toLowerCase(); }).filter(String);
+    var dup = emails.filter(function (e, i) { return emails.indexOf(e) !== i; });
+    ok('Users: tanpa email ganda, pelaksana = Admin', !dup.length && getCurrentUser_().role === APP.ROLES.ADMIN, (dup.join(', ') || emails.length + ' email') + ' · ' + me + ' = ' + getCurrentUser_().role);
+  });
+  safe('Terjemahan', function () {
+    var T = readTable_(APP.SHEETS.TERJEMAHAN), seen = {}, dobel = [];
+    T.forEach(function (r) { var k = String(r['Teks']).trim(); if (seen[k] && dobel.indexOf(k) === -1) dobel.push(k); seen[k] = true; });
+    ok('Terjemahan: satu baris per teks', !dobel.length, dobel.slice(0, 5).join(' · ') || T.length + ' baris');
+    var idRows = T.filter(function (r) { return String(r['Bahasa asal']) === 'id' && String(r['Sumber']) === 'Google'; });
+    var withEn = idRows.filter(function (r) { return String(r['en']).trim(); });
+    var same = withEn.filter(function (r) { return String(r['en']).trim().toLowerCase() === String(r['Teks']).trim().toLowerCase(); });
+    ok('Terjemahan Inggris dari teks Indonesia benar-benar diterjemahkan', withEn.length >= 10 && same.length <= Math.ceil(withEn.length * 0.1),
+      withEn.length + ' teks punya Inggris, ' + same.length + ' sama dengan aslinya, ' + (idRows.length - withEn.length) + ' belum\ncontoh: ' +
+      withEn.slice(0, 8).map(function (r) { return r['Teks'] + ' → ' + r['en']; }).join(' · ') + (same.length ? '\nsama: ' + same.slice(0, 5).map(function (r) { return r['Teks']; }).join(' · ') : ''));
+    ok('Migrasi 2.6.1 (terjemahan Inggris lama dikosongkan sekali)', !!PropertiesService.getDocumentProperties().getProperty('MTTR_TR_EN_261'),
+      (/dikosongkan/.test(isi.log || '') ? 'jalan di setup ujiIsiData: ' + ((isi.log || '').match(/\d+ terjemahan Inggris lama[^.]*/) || [''])[0] : 'tidak ada yang perlu dikosongkan'));
+    var idSet = {}; idRows.forEach(function (r) { idSet[String(r['Teks']).trim().toLowerCase()] = true; });
+    var raw = [];
+    Object.keys(UJI_.expect.tpm).forEach(function (sheet) {
+      var sh = ss.getSheetByName(sheet), last = sh ? sh.getLastRow() : 0;
+      if (last < 9) return;
+      sh.getRange(9, 2, last - 8, 10).getValues().forEach(function (r) {
+        [2, 3, 4, 9].forEach(function (j) {
+          var m = String(r[j] || '').match(/\n\(([\s\S]*)\)/);
+          if (m) m[1].split(/: |\n/).forEach(function (p) { p = p.trim().toLowerCase(); if (idSet[p] && raw.indexOf(p) === -1) raw.push(p); });
+        });
+      });
+    });
+    ok('TPM: bagian (English) tidak berisi teks Indonesia asli', raw.length <= Math.max(1, Math.ceil(Object.keys(idSet).length * 0.1)),
+      raw.length + ' teks Indonesia masih utuh di bagian English' + (raw.length ? ': ' + raw.slice(0, 6).join(' · ') : ''));
   });
 
   // ---- API sebagai admin (waktu nyata) ----
@@ -218,7 +278,14 @@ function ujiPeriksa() {
     ok('Pending: 4 pekerjaan', pd.v.items.length === 4, pd.v.items.map(function (x) { return x.line; }).join(', '), pd.ms);
   });
 
-  // ---- alur nyata di line UJI (dihapus lagi di akhir) ----
+  return R.selesai('Lanjut: Run ujiAlur');
+}
+
+/** Alur nyata di line UJI (dihapus lagi di akhir), ganti nama tab, tutup ulang, lalu bangun ulang seperti trigger malam. */
+function ujiAlur() {
+  var me = ujiMe_(), ss = SpreadsheetApp.getActive(), y = UJI_.meta.year;
+  var R = ujiRunner_(UJI_ALUR_SHEET_), ok = R.ok, safe = R.safe, timed = R.timed;
+  resetMaster_();
   var flowIds = [];
   safe('Alur Mulai → Selesai', function () {
     var L = findSheet_('Lines', ss), h = headers_(L, 'Lines');
@@ -242,6 +309,11 @@ function ujiPeriksa() {
     var lap = ss.getSheetByName(laporanName_(y)).getDataRange().getValues(), kc = lap[1].length - 1;
     ok('Alur: baris Laporan langsung tertulis (tanpa tunggu malam)', lap.some(function (x) { return x[kc] === id; }), '');
     ok('Alur: Pemakaian Sparepart tertulis', readTable_(APP.SHEETS.PEMAKAIAN).some(function (u) { return u['Maintenance ID'] === id && Number(u['Jumlah']) === 2; }), '');
+    var lr = readTable_(APP.SHEETS.LOG).filter(function (e) { return e['Maintenance ID'] === id; }).pop();
+    var ld = lr ? ss.getSheetByName(APP.SHEETS.LOG).getRange(lr._row, 1).getDisplayValue() : '';
+    var md2 = ss.getSheetByName(APP.SHEETS.MAINT).getRange(r._row, headers_(ss.getSheetByName(APP.SHEETS.MAINT)).indexOf('Mulai') + 1).getDisplayValue();
+    ok('Alur: baris baru Log & Maintenance bertipe tanggal, tampil dd/MM/yyyy HH:mm', lr && lr['Timestamp'] instanceof Date && r['Mulai'] instanceof Date &&
+      /^\d\d\/\d\d\/\d{4} \d\d:\d\d$/.test(ld) && /^\d\d\/\d\d\/\d{4} \d\d:\d\d$/.test(md2), 'Log "' + ld + '" · Mulai "' + md2 + '"');
     var c = timed('Mulai (untuk cancel)', function () { return apiStart('UJI', { baterai: 'VF7' }); }), id2 = c.v.open.id;
     flowIds.push(id2);
     timed('Cancel', function () { return apiCancel(id2, { values: { 'Alasan cancel': 'Input ganda' } }); });
@@ -272,25 +344,29 @@ function ujiPeriksa() {
     var L = findSheet_('Lines', ss), lv = L.getDataRange().getValues();
     rewriteKeeping_(L, lv, function (row) { return row[0] !== 'UJI'; });
     resetHeaders_(); invalidateMaster_(); resetMaster_();
-    var b = timed('Perbarui Laporan, Rekap, TPM & KPI', function () { return apiBuildReports(y); });
-    rapikanTampilan_({});
-    ok('Setelah dibersihkan: Laporan kembali 100 baris', b.v.rows === 100, b.v.rows + ' baris · ' + (b.v.tpmError || b.v.kpiError || 'TPM & KPI OK'), b.ms);
   });
-
-  waktu.forEach(function (w) { ok('Waktu: ' + w[0], true, w[1] + ' ms', w[1]); });
-  var lulus = res.filter(function (r) { return r[2] === 'LULUS'; }).length;
-  ujiHasil_(res, lulus + ' / ' + res.length + ' LULUS · ' + Math.round((Date.now() - T0) / 1000) + ' dtk');
-  return lulus + ' / ' + res.length + ' LULUS';
+  // Sama dengan refreshRekap (trigger malam), per tahap: mana yang mahal bila data setahun?
+  safe('Bangun ulang seperti trigger malam', function () {
+    var a = timed('Malam: Rekap + Laporan (di dalam lock)', function () { return withLock_(function () { buildRekap_(y); return buildLaporan_(y); }); });
+    var t = timed('Malam: TPM (termasuk terjemahan baru)', function () { return buildTpm_(); });
+    var k = timed('Malam: KPI', function () { return buildKpi_(y); });
+    var f = timed('Malam: rapikan tampilan', function () { return rapikanTampilan_({}); });
+    var total = a.ms + t.ms + k.ms + f.ms;
+    ok('Setelah dibersihkan: Laporan kembali 100 baris', a.v.rows === 100, a.v.rows + ' baris · TPM ' + t.v.sheets.map(function (x) { return x.sheet + ' ' + x.rows; }).join(', ') +
+      (t.v.untranslated ? ' · ' + t.v.untranslated + ' teks belum diterjemahkan' : ''), a.ms);
+    ok('Trigger malam total < 120 dtk untuk 100 pekerjaan (batas 360)', total < 120000, Math.round(total / 1000) + ' dtk', total);
+  });
+  return R.selesai('Selesai. Kirim "sudah" ke Claude.');
 }
 
-function ujiHasil_(rows, ringkas) {
-  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName(UJI_SHEET_) || ss.insertSheet(UJI_SHEET_, 1);
-  sh.clear();
-  sh.setConditionalFormatRules([]);
+function ujiHasil_(sheetName, rows, ringkas, final) {
+  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName, 1);
   var head = [['UJI 2.6 — ' + ringkas, '', '', 'versi ' + APP.VERSION + ' · data dibuat ' + UJI_.meta.todayKey + ' · dijalankan ' +
     Utilities.formatDate(new Date(), APP.TZ, 'yyyy-MM-dd HH:mm') + ' oleh ' + ujiMe_(), ''], ['No', 'Cek', 'Hasil', 'Detail', 'ms']];
   var all = head.concat(rows);
+  sh.clearContents();
   sh.getRange(1, 1, all.length, 5).setValues(all);
+  if (!final) { SpreadsheetApp.flush(); return; }   // hasil sementara: secepat mungkin, format di akhir saja
   sh.getRange(1, 1, 2, 5).setFontWeight('bold');
   sh.getRange(3, 4, Math.max(1, rows.length), 1).setWrap(true);
   sh.setColumnWidth(2, 320); sh.setColumnWidth(4, 620);

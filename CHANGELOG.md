@@ -3,6 +3,18 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.1 — perbaikan dari uji di Apps Script asli
+Ditemukan saat 2.6 dijalankan di Apps Script & Google Sheets asli (spreadsheet uji kosong, 104 pekerjaan berbeda-beda → Laporan 100 baris).
+Ganti `Auth`, `Code`, `Config`, `Master`, `Translate`, Run `setup`, New version.
+
+- **Terjemahan Inggris di tab TPM salah (bug sejak 2.5.2).** Teks Indonesia dan 中文 dikirim ke Google Translate dalam satu panggilan dengan deteksi bahasa otomatis; Google menganggap seluruhnya 中文, sehingga teks Indonesia kembali utuh atau rusak di bagian *(English)*. Contoh nyata: "lampu indikator mati" → "Laminator mati", "Kabel sensor putus di konektor" → "Sensor sensor putus di konektor", "pintu safety tidak terkunci" tetap Indonesia. Arah ke 中文 dan dari 中文 tidak terpengaruh. Sekarang satu panggilan = satu bahasa asal yang disebut jelas (ada huruf Han = 中文, selain itu Indonesia).
+  - `setup` sekali: sel `en` hasil Google untuk teks non-中文 di tab `Terjemahan` dikosongkan (koreksi admin dan arah lain tetap); tab TPM menerjemahkan ulang pada pembangunan berikutnya (maks 300 teks per bahasa sekali jalan, sisanya malam berikutnya).
+  - Tab `Terjemahan` tidak lagi menulis dua baris untuk teks yang sama (satu untuk 中文, satu untuk English); baris lama yang kosong dibuang saat migrasi. Terjemahan untuk baris yang sudah ada ditulis sekaligus per kolom, bukan per sel (40 teks: 160 → 2 tulisan), supaya terjemahan ulang setelah migrasi tidak memperlambat trigger malam.
+- **Email ditulis dua kali di `Users`**: peran diambil dari baris pertama tetapi nama dari baris terakhir (terlihat: "Ditutup … oleh <nama baris lain>"). Sekarang peran & nama dari baris yang sama: baris **aktif** pertama (baris lama yang dinonaktifkan tidak lagi mengunci orang itu). Dashboard admin & pesan `setup` memberi peringatan; pilihan PIC tidak dobel.
+
+**Uji di Apps Script asli** (`test/seed-uji.js` + `test/gas/Uji.js`, hanya untuk spreadsheet uji): data dari kode yang sama di atas mock, lalu `ujiIsiData` / `ujiPeriksa` / `ujiAlur` membandingkan hasil runtime asli sel per sel. Ronde 1 (2.6.0): Laporan 100 baris, Rekap, KPI per bulan × Plant / Project / Line, tutup bulan, Ringkasan (tanpa error, Downtime & MTBF = KPI, kedua Top 5), trigger & ID tab cocok dengan hitungan mock; bug terjemahan dan email ganda di atas ditemukan dari isi tab `Terjemahan` & `KPI`. `ujiIsiData` butuh 336 dtk (setup di spreadsheet kosong + setup ulang 104 pekerjaan), dekat batas 360 dtk Apps Script → uji dipecah dan hasil ditulis per bagian.
+- Test lokal: penerjemah palsu kini meniru Google (satu bahasa asal per panggilan; deteksi otomatis + huruf Han = 中文 semua). Dengan kode 2.6.0, 4 test langsung gagal. 88 test.
+
 ## 2.6.0 — revisi uji lapangan + KPI MTTR & MTBF bulanan
 Gabungan revisi uji lapangan (`Improvement_2.6.md`) dan seluruh rencana 2.5.3 (statistik & download): cukup satu kali salin file.
 

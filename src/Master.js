@@ -184,6 +184,11 @@ function buildMaster_() {
     return { email: String(u['Email']).trim().toLowerCase(), name: String(u['Nama'] || u['Email']), peran: String(u['Peran'] || ''), aktif: u['Aktif'],
       lang: normLang_(u['Bahasa']) };
   });
+  var seenUser = {};
+  md.users.forEach(function (u) {
+    if (u.email && seenUser[u.email] === 1) warnings.push('Users: email ' + u.email + ' ditulis lebih dari sekali; yang dipakai baris aktif pertama. Hapus baris lainnya.');
+    seenUser[u.email] = (seenUser[u.email] || 0) + 1;
+  });
   md.config = {};
   readOptional_(APP.SHEETS.CONFIG).forEach(function (r) {
     var k = String(r['Key'] || '').trim();
@@ -466,8 +471,9 @@ function clientMaster_(md) {
     spareparts: md.spareparts.map(function (p) { return { id: p.id, jenis: p.jenis, nama: p.nama, model: p.model, satuan: p.satuan }; }),
     jenisKerusakan: md.options['Jenis Kerusakan'] || [],
     // PIC tambahan saat Selesai (2.6): user aktif, urut nama
-    people: md.users.filter(function (u) { return u.email && isActiveRow_(u.aktif); })
-      .map(function (u) { return { email: u.email, name: u.name }; }).sort(function (a, b) { return a.name.localeCompare(b.name); }),
+    people: md.users.filter(function (u, i) {
+      return u.email && isActiveRow_(u.aktif) && !md.users.slice(0, i).some(function (x) { return x.email === u.email && isActiveRow_(x.aktif); });
+    }).map(function (u) { return { email: u.email, name: u.name }; }).sort(function (a, b) { return a.name.localeCompare(b.name); }),
     trZh: md.tr.zh,
     rencana: md.rencana,
     appName: String(md.config.NAMA_APLIKASI || APP.NAME),

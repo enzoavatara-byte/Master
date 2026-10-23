@@ -217,6 +217,7 @@ function setup() {
   });
   migrateDiscipline_();   // 2.5.2: Jenis kerusakan Operasional / Produk / MES + kolom Discipline (tab TPM)
   var notes = migrate26_(ss);   // 2.6: field mesin, Preventive, review Pending
+  notes = notes.concat(migrateTr261_());   // 2.6.1: terjemahan Inggris lama yang salah dibuat ulang
 
   if (readTable_(APP.SHEETS.FACTORY).length === 0) {
     APP.FACTORY_DEFAULTS.forEach(function (f) {
@@ -270,6 +271,8 @@ function setup() {
     var me = currentEmail_();
     if (me) appendObj_(APP.SHEETS.USERS, { 'Email': me, 'Nama': me.split('@')[0], 'Peran': APP.ROLES.ADMIN, 'Aktif': 'Ya' });
   }
+
+  notes = notes.concat(masterData_().warnings.filter(function (w) { return /^Users: /.test(w); }));
 
   buildDerivedSheets_(ss);
   ss.setRecalculationInterval(SpreadsheetApp.RecalculationInterval.HOUR); // "Lama pending" pakai NOW()
@@ -337,6 +340,31 @@ function migrate26_(ss) {
       'Jika sebuah mesin perlu dicatat sendiri, tambahkan barisnya di Lines (mis. "Line Pack 1 - EOL Test") lalu cetak QR-nya.');
   }
   return notes;
+}
+
+/**
+ * 2.6.1, sekali: hasil Google Translate ke Inggris untuk teks non-中文 dikosongkan. Sebelum 2.6.1 teks Indonesia dan 中文
+ * dikirim dalam satu panggilan → Google menganggap semuanya 中文 dan teks Indonesia kembali utuh / rusak. Koreksi admin
+ * (Sumber bukan Google) dan arah lain (中文, Indonesia) tidak disentuh. Pembangunan TPM berikutnya menerjemahkan ulang.
+ * @return {string[]} catatan untuk admin
+ */
+function migrateTr261_() {
+  var props = PropertiesService.getDocumentProperties();
+  if (props.getProperty('MTTR_TR_EN_261')) return [];
+  var sh = sheet_(APP.SHEETS.TERJEMAHAN), vals = sh.getDataRange().getValues(), h = vals[0].map(function (x) { return String(x).trim(); });
+  var ce = h.indexOf('en'), cs = h.indexOf('Sumber'), cl = h.indexOf('Bahasa asal'), n = 0;
+  var filled = function (r) { return ['id', 'zh', 'en'].some(function (l) { return h.indexOf(l) >= 0 && String(r[h.indexOf(l)]).trim() !== ''; }); };
+  if (ce >= 0 && cs >= 0 && vals.length > 1) {
+    vals.slice(1).forEach(function (r) {
+      if (String(r[ce]).trim() === '' || String(r[cs]).trim() !== 'Google' || String(cl >= 0 ? r[cl] : '').trim() === 'zh') return;
+      r[ce] = ''; n++;
+    });
+    // baris yang kini kosong (dulu baris khusus Inggris) dibuang; baris lain tetap di tempatnya
+    if (n) rewriteKeeping_(sh, vals, function (r) { return filled(r) || String(r[cs]).trim() !== 'Google'; });
+  }
+  TR_MEMO_ = null;
+  props.setProperty('MTTR_TR_EN_261', new Date().toISOString());
+  return n ? [n + ' terjemahan Inggris lama (tab Terjemahan) dikosongkan karena sering salah sebelum 2.6.1; tab TPM menerjemahkan ulang otomatis.'] : [];
 }
 
 /**

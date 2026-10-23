@@ -12,15 +12,24 @@ function getCurrentUser_() {
   resetMaster_(); // memo per request (di Apps Script tiap panggilan = eksekusi baru; ini untuk test & trigger)
   var email = currentEmail_();
   if (!email) return { email: '', authorized: false };
-  var users = masterData_().users;
-  for (var i = 0; i < users.length; i++) {
-    var u = users[i];
-    if (u.email !== email) continue;
-    var role = APP.ROLE_ALIASES[u.peran.trim().toLowerCase()];
-    if (!isYes_(u.aktif) || !role) return { email: email, authorized: false };
-    return { email: email, authorized: true, name: u.name || email, role: role, lang: u.lang || 'id' };
-  }
-  return { email: email, authorized: false };
+  var u = userByEmail_()[email];
+  var role = u && APP.ROLE_ALIASES[u.peran.trim().toLowerCase()];
+  if (!u || !isYes_(u.aktif) || !role) return { email: email, authorized: false };
+  return { email: email, authorized: true, name: u.name || email, role: role, lang: u.lang || 'id' };
+}
+
+/**
+ * Email → baris Users yang dipakai: baris aktif pertama, atau baris pertama jika tidak ada yang aktif. Email yang ditulis
+ * dua kali (mis. baris lama dinonaktifkan lalu ditambah baris baru) tetap satu orang: peran & nama dari baris yang sama.
+ */
+function userByEmail_() {
+  var map = {};
+  masterData_().users.forEach(function (u) {
+    if (!u.email) return;
+    var cur = map[u.email];
+    if (!cur || (!isYes_(cur.aktif) && isYes_(u.aktif))) map[u.email] = u;
+  });
+  return map;
 }
 
 /** @param {string[]=} allowedRoles kosong = semua peran yang aktif. */
@@ -38,8 +47,8 @@ function isAdmin_(user) {
 }
 
 function userNameMap_() {
-  var map = {};
-  masterData_().users.forEach(function (u) { map[u.email] = u.name; });
+  var map = {}, users = userByEmail_();
+  Object.keys(users).forEach(function (e) { map[e] = users[e].name; });
   return map;
 }
 

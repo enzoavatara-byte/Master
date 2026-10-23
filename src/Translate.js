@@ -20,7 +20,8 @@ function trHash_(s) {
   for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return (h >>> 0).toString(36);
 }
-function trCacheKey_(lang, s) { return 'tr:' + lang + ':' + trHash_(s) + ':' + s.length; }
+// tr2: 2.6.1 — hasil terjemahan Inggris lama (gabungan campur bahasa) tidak dipakai lagi
+function trCacheKey_(lang, s) { return 'tr2:' + lang + ':' + trHash_(s) + ':' + s.length; }
 
 /** Sheet Terjemahan → { teks: {_row, id, zh, en} }. Baris dobel digabung (bahasa pertama yang terisi menang). */
 function trTable_() {
@@ -84,30 +85,38 @@ function translate_(texts, lang, opts) {
 /**
  * Google Translate untuk banyak teks dengan sesedikit mungkin panggilan: teks satu baris digabung per ±4000 karakter
  * (dipisah baris baru). Jumlah baris hasil tidak cocok → teks itu diterjemahkan satu per satu.
+ * Satu panggilan = satu bahasa asal yang disebut jelas (ada huruf Han = 中文, selain itu Indonesia). Dengan deteksi otomatis,
+ * gabungan Indonesia + 中文 dianggap 中文 seluruhnya dan teks Indonesia kembali utuh atau rusak
+ * ("lampu indikator mati" → "Laminator mati"; ditemukan saat uji di Apps Script asli, 2.6.1).
  * Google menolak (mis. kuota harian habis) → berhenti, sisa teks tetap teks asli.
  * @return {Object<string,string>} teks → terjemahan (hanya yang berhasil)
  */
 function googleMany_(texts, lang) {
-  var out = {}, code = TR_CODE_[lang], single = [], chunks = [], cur = [], len = 0, dead = false;
-  var call = function (s) {
+  var out = {}, code = TR_CODE_[lang], dead = false, groups = {};
+  var call = function (s, from) {
     if (dead) return null;
-    try { return String(LanguageApp.translate(s, '', code) || ''); } catch (e) { console.warn('Terjemahan gagal: ' + e); dead = true; return null; }
+    try { return String(LanguageApp.translate(s, from, code) || ''); } catch (e) { console.warn('Terjemahan gagal: ' + e); dead = true; return null; }
   };
-  texts.forEach(function (s) {
-    if (s.indexOf('\n') !== -1) { single.push(s); return; }
-    if (cur.length && len + s.length > TR_BATCH_CHARS_) { chunks.push(cur); cur = []; len = 0; }
-    cur.push(s); len += s.length + 1;
+  texts.forEach(function (s) { var from = TR_CODE_[textLang_(s)]; (groups[from] = groups[from] || []).push(s); });
+  Object.keys(groups).forEach(function (from) {
+    if (from === code) { groups[from].forEach(function (s) { out[s] = s; }); return; }   // sudah berbahasa tujuan
+    var single = [], chunks = [], cur = [], len = 0;
+    groups[from].forEach(function (s) {
+      if (s.indexOf('\n') !== -1) { single.push(s); return; }
+      if (cur.length && len + s.length > TR_BATCH_CHARS_) { chunks.push(cur); cur = []; len = 0; }
+      cur.push(s); len += s.length + 1;
+    });
+    if (cur.length) chunks.push(cur);
+    chunks.forEach(function (c) {
+      if (c.length === 1) { single.push(c[0]); return; }
+      var r = call(c.join('\n'), from);
+      if (r == null) return;
+      var lines = r.split('\n');
+      if (lines.length !== c.length) { single = single.concat(c); return; }
+      c.forEach(function (s, i) { var v = lines[i].trim(); if (v) out[s] = v; });
+    });
+    single.forEach(function (s) { var r = call(s, from); if (r != null && r.trim()) out[s] = r.trim(); });
   });
-  if (cur.length) chunks.push(cur);
-  chunks.forEach(function (c) {
-    if (c.length === 1) { single.push(c[0]); return; }
-    var r = call(c.join('\n'));
-    if (r == null) return;
-    var lines = r.split('\n');
-    if (lines.length !== c.length) { single = single.concat(c); return; }
-    c.forEach(function (s, i) { var v = lines[i].trim(); if (v) out[s] = v; });
-  });
-  single.forEach(function (s) { var r = call(s); if (r != null && r.trim()) out[s] = r.trim(); });
   return out;
 }
 
@@ -124,21 +133,27 @@ function saveTranslations_(texts, lang, got) {
   if (!lock.tryLock(3000)) return;
   try {
     var h = headers_(sh), col = h.indexOf(lang) + 1, tcol = h.indexOf('Diperbarui') + 1;
-    var table = trTable_(), now = new Date(), rows = [];
+    var table = trTable_(), now = new Date(), rows = [], upd = [], start = sh.getLastRow() + 1;
     texts.forEach(function (s) {
       var row = table[s];
-      if (row && row._row && col > 0) {
-        sh.getRange(row._row, col).setValue(got[s]);
-        if (tcol > 0) sh.getRange(row._row, tcol).setValue(now);
-        return;
-      }
+      if (row && row._row && col > 0) { upd.push([row._row, got[s]]); row[lang] = got[s]; return; }
       var o = { 'Teks': s, 'Bahasa asal': textLang_(s), 'Sumber': 'Google', 'Diperbarui': now };
       o[lang] = got[s];
       rows.push(objToRow_(h, o));
       table[s] = row || {};
+      table[s]._row = start + rows.length - 1;   // bahasa lain di eksekusi yang sama (TPM: zh lalu en) → baris yang sama
       table[s][lang] = got[s];
     });
-    if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, h.length).setValues(rows);
+    if (upd.length) {   // baris yang sudah ada: satu tulisan per kolom (bukan per sel; TPM bisa ratusan teks sekaligus)
+      var put = function (c, v) {
+        if (c < 1) return;
+        var rg = sh.getRange(2, c, start - 2, 1), vals = rg.getValues();
+        upd.forEach(function (u) { vals[u[0] - 2][0] = v == null ? u[1] : v; });
+        rg.setValues(vals);
+      };
+      put(col); put(tcol, now);
+    }
+    if (rows.length) sh.getRange(start, 1, rows.length, h.length).setValues(rows);
   } finally {
     lock.releaseLock();
   }

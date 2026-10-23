@@ -2102,4 +2102,87 @@ test('2.6 Download Riwayat: kolom tab Laporan, teknisi hanya pekerjaannya, admin
   throwsMsg(() => as('owner@gmail.com', () => ctx.apiExport({})), /Pilih periode/);
 });
 
+test('2.6.1 terjemahan Inggris: teks Indonesia & 中文 tidak digabung dalam satu panggilan; bahasa asal selalu disebut (temuan uji Apps Script asli)', () => {
+  LA.log = [];
+  const src = ['Kabel sensor putus di konektor 261', '传送带打滑 261', 'lampu indikator mati 261', 'Timing belt putus 261'];
+  const out = as('budi@gmail.com', () => ctx.apiTranslate(src, 'en'));
+  jeq(out, src.map(t => '[en] ' + t), 'semua diterjemahkan, termasuk teks Indonesia');
+  assert.ok(LA.log.length >= 2, 'satu panggilan per bahasa asal');
+  LA.log.forEach(c => {
+    assert.ok(c.src === 'id' || c.src === 'zh-CN', 'bahasa asal disebut: ' + JSON.stringify(c));
+    const lines = c.text.split('\n'), han = lines.filter(l => /[㐀-鿿]/.test(l)).length;
+    assert.ok(han === 0 || han === lines.length, 'tidak campur: ' + c.text);
+  });
+  // TPM: kolom English untuk detail berbahasa Indonesia benar-benar diterjemahkan, walau ada teks 中文 di pembangunan yang sama
+  const T = ctx.readTable_('Terjemahan');
+  assert.ok(!T.some(r => /^\[en\] /.test(String(r.zh))), 'tidak ada hasil Inggris di kolom 中文');
+  const hdr = T.length ? Object.keys(T[0]) : [];
+  assert.ok(hdr.indexOf('en') !== -1);
+  const dup = {}; T.forEach(r => { dup[r.Teks] = (dup[r.Teks] || 0) + 1; });
+  assert.ok(!Object.keys(dup).some(k => dup[k] > 1 && /261$/.test(k)), 'zh lalu en untuk teks yang sama = satu baris Terjemahan');
+  // setelah migrasi: ratusan baris lama mendapat Inggris baru → satu tulisan per kolom, bukan per sel
+  const tsh = ss.getSheetByName('Terjemahan'), many = Array.from({ length: 40 }, (_, i) => 'baris lama nomor ' + i + ' 261');
+  many.forEach(t => tsh.appendRow(rowOf('Terjemahan', { Teks: t, 'Bahasa asal': 'id', zh: '旧' + t, Sumber: 'Google' })));
+  ctx.TR_MEMO_ = null;
+  const RP = Object.getPrototypeOf(tsh.getRange(1, 1)), orig = { v: RP.setValue, vs: RP.setValues };
+  let writes = 0;
+  RP.setValue = function () { writes++; return orig.v.apply(this, arguments); };
+  RP.setValues = function () { writes++; return orig.vs.apply(this, arguments); };
+  try { ctx.translate_(many, 'en', { max: 300 }); } finally { RP.setValue = orig.v; RP.setValues = orig.vs; }
+  assert.ok(writes <= 3, writes + ' tulisan untuk 40 baris');
+  const T2 = ctx.readTable_('Terjemahan');
+  assert.ok(many.every(t => T2.find(r => r.Teks === t).en === '[en] ' + t), 'Inggris masuk ke baris yang sama');
+  assert.strictEqual(T2.filter(r => /^baris lama nomor/.test(r.Teks)).length, 40, 'tidak ada baris baru');
+});
+
+test('2.6.1 setup: terjemahan Inggris lama dari Google untuk teks Indonesia dikosongkan sekali; koreksi admin & arah lain tetap', () => {
+  const sh = ss.getSheetByName('Terjemahan');
+  const add = (o) => sh.appendRow(rowOf('Terjemahan', o));
+  add({ Teks: 'lampu indikator mati X', 'Bahasa asal': 'id', zh: '指示灯熄灭', en: 'Laminator mati', Sumber: 'Google' });
+  add({ Teks: 'pintu safety X', 'Bahasa asal': 'id', en: 'pintu safety X', Sumber: 'Google' });          // baris khusus Inggris lama
+  add({ Teks: 'selang bocor X', 'Bahasa asal': 'id', en: 'Leaking hose (koreksi)', Sumber: 'Admin' });
+  add({ Teks: '传送带打滑 X', 'Bahasa asal': 'zh', en: 'Conveyor belt slippage', Sumber: 'Google' });
+  delete docProps.store.MTTR_TR_EN_261;
+  const msg = as('owner@gmail.com', () => ctx.setup());
+  assert.match(msg, /terjemahan Inggris lama \(tab Terjemahan\) dikosongkan/);
+  const T = () => ctx.readTable_('Terjemahan'), row = (t) => T().find(r => r.Teks === t);
+  assert.strictEqual(row('lampu indikator mati X').en, '', 'hasil Google lama dikosongkan');
+  assert.strictEqual(row('lampu indikator mati X').zh, '指示灯熄灭', '中文 tidak disentuh');
+  assert.ok(!row('pintu safety X'), 'baris yang jadi kosong dibuang');
+  assert.strictEqual(row('selang bocor X').en, 'Leaking hose (koreksi)', 'koreksi admin tetap');
+  assert.strictEqual(row('传送带打滑 X').en, 'Conveyor belt slippage', 'dari 中文 sudah benar → tetap');
+  assert.ok(docProps.store.MTTR_TR_EN_261, 'penanda migrasi');
+  sh.appendRow(rowOf('Terjemahan', { Teks: 'baru X', 'Bahasa asal': 'id', en: '[en] baru X', Sumber: 'Google' }));
+  assert.doesNotMatch(as('owner@gmail.com', () => ctx.setup()), /terjemahan Inggris lama/, 'hanya sekali');
+  assert.strictEqual(row('baru X').en, '[en] baru X', 'terjemahan sesudah 2.6.1 tidak dikosongkan lagi');
+});
+
+test('2.6.1 Users: email ditulis dua kali → peran & nama dari baris yang sama (aktif pertama), peringatan di Dashboard & setup', () => {
+  const U = ss.getSheetByName('Users'), n0 = U.data.length;
+  U.appendRow(rowOf('Users', { Email: 'budi@gmail.com', Nama: 'Budi Dobel', Peran: 'Admin', Aktif: 'Ya' }));
+  ctx.invalidateMaster_();
+  try {
+    const first = ctx.readTable_('Users').find(r => r.Email === 'budi@gmail.com');
+    const me = as('budi@gmail.com', () => ctx.getCurrentUser_());
+    assert.strictEqual(me.role, ctx.APP.ROLE_ALIASES[String(first.Peran).toLowerCase()], 'peran dari baris pertama');
+    assert.strictEqual(me.name, first.Nama);
+    assert.strictEqual(ctx.userNameMap_()['budi@gmail.com'], first.Nama, 'nama dari baris yang sama dengan peran');
+    const w = as('owner@gmail.com', () => ctx.apiDashboard({ periode: 30 })).warnings;
+    assert.ok(w.some(x => /^Users: email budi@gmail.com ditulis lebih dari sekali/.test(x)), 'peringatan di Dashboard admin');
+    assert.match(as('owner@gmail.com', () => ctx.setup()), /Users: email budi@gmail.com/);
+    const people = as('budi@gmail.com', () => ctx.apiBootstrap('')).master.people.filter(p => p.email === 'budi@gmail.com');
+    assert.strictEqual(people.length, 1, 'pilihan PIC tidak dobel');
+    setRow('Users', (r, h) => r[h.indexOf('Email')] === 'budi@gmail.com' && r[h.indexOf('Nama')] === first.Nama, 'Aktif', 'Tidak');
+    ctx.invalidateMaster_();
+    const now = as('budi@gmail.com', () => ctx.getCurrentUser_());
+    assert.ok(now.authorized && now.role === 'Admin' && now.name === 'Budi Dobel', 'baris lama nonaktif → baris aktif berikutnya dipakai');
+    assert.strictEqual(ctx.userNameMap_()['budi@gmail.com'], 'Budi Dobel');
+  } finally {
+    setRow('Users', (r, h) => r[h.indexOf('Email')] === 'budi@gmail.com', 'Aktif', 'Ya');
+    U.data.splice(n0);
+    ctx.invalidateMaster_();
+  }
+  assert.strictEqual(as('budi@gmail.com', () => ctx.getCurrentUser_()).name, ctx.readTable_('Users').find(r => r.Email === 'budi@gmail.com').Nama);
+});
+
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

@@ -14,7 +14,7 @@ const setTime = (ms) => { shiftMs = ms - RealNow(); };
 const as = (email, fn) => { const p = user.email; user.email = email; try { return fn(); } finally { user.email = p; } };
 
 const ADMIN = 'admin@uji.invalid';           // diganti email pelaksana saat ujiIsiData() di Apps Script
-const ENZO = 'enzoavatara@gmail.com';        // akun nyata pengguna (Teknisi) untuk uji tampilan web app
+const ENZO = 'teknisi@uji.invalid';          // teknisi uji tanpa akun nyata (email asli bisa bentrok dengan pelaksana = Admin)
 const T = { budi: 'budi@example.com', andi: 'andi@example.com', sari: 'sari@example.com', dewi: 'dewi@example.com',
   rizki: 'rizki@example.com', li: 'li@example.com', enzo: ENZO };
 const TECHS = [T.budi, T.andi, T.sari, T.dewi, T.rizki, T.enzo];
