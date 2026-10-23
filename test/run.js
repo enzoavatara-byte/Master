@@ -2351,6 +2351,17 @@ test('2.6.1 pangkas: Cancel tanpa review (antrian lama dibersihkan setup), Dashb
   ctx.buildKpi_(+pk.slice(0, 4));
   const st = ss.getSheetByName('KPI ' + pk.slice(0, 4)).data.find(r => r[0] === pk && r[1] === 'Plant');
   assert.match(String(st[11]), / oleh otomatis$/);
+  // nilai Config salah → mati, Dashboard tidak menjanjikan tanggal itu, admin diperingatkan
+  for (const bad of [30, '5 Nov', -1]) {
+    cfgSet('KPI_TUTUP_OTOMATIS', bad); ctx.invalidateMaster_();
+    assert.strictEqual(ctx.kpiAutoDay_(), 0, String(bad));
+    const d = as('owner@gmail.com', () => ctx.apiDashboard({ periode: 30 }));
+    assert.strictEqual(d.kpiMonth.autoDay, 0, 'Dashboard: tidak menulis "ditutup otomatis tanggal ' + bad + '"');
+    assert.ok(d.warnings.some(w => /KPI_TUTUP_OTOMATIS = ".*": harus tanggal 1–28/.test(w)), 'peringatan untuk ' + bad);
+  }
+  cfgSet('KPI_TUTUP_OTOMATIS', ''); ctx.invalidateMaster_();
+  assert.strictEqual(ctx.kpiAutoDay_(), 5, 'kosong = bawaan 5');
+  assert.ok(!as('owner@gmail.com', () => ctx.apiDashboard({ periode: 30 })).warnings.some(w => /KPI_TUTUP_OTOMATIS/.test(w)));
   cfgSet('KPI_TUTUP_OTOMATIS', 5); ctx.invalidateMaster_();
 });
 

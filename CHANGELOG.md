@@ -20,7 +20,7 @@ Buat file Script `Manual`; ganti `Api`, `Auth`, `Code`, `Config`, `Db`, `Kpi`, `
 
 **Dipangkas (mengurangi kerja tanpa keputusan)**
 - **Review Cancel dihapus**: satu-satunya keputusan dulu "Setujui", dan Cancelled tidak pernah masuk MTTR. Cancel langsung final (alasan tetap di Riwayat & Log); review hanya untuk Abandoned. `setup` membersihkan antrian lama. Dashboard admin menampilkan "cancel setelah >30 menit kerja" (yang patut dicek).
-- **Tutup bulan otomatis** tanggal `KPI_TUTUP_OTOMATIS` (5) oleh trigger malam bila tidak ada Abandoned menunggu review ("oleh otomatis"; 0 = manual). Tutup ulang tetap bisa.
+- **Tutup bulan otomatis** tanggal `KPI_TUTUP_OTOMATIS` (5) oleh trigger malam bila tidak ada Abandoned menunggu review ("oleh otomatis"; 0 = manual). Tutup ulang tetap bisa. Tanggal 5 = waktu 4 hari untuk review Abandoned, Input Manual & koreksi sebelum angka dikunci; ganti di Config (1–28). Isi salah (mis. `30`, `5 Nov`) → tutup otomatis mati dan Dashboard admin memberi peringatan.
 - **Rekap tidak ditulis per tombol** (tab tersembunyi; dibangun malam / Perbarui / setup): Selesai 23 → 21 panggilan.
 
 **Tab per project**

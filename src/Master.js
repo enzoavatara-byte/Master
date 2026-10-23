@@ -202,6 +202,10 @@ function buildMaster_() {
       if (known.indexOf(x.toLowerCase()) === -1) warnings.push('Config ' + k + ': project "' + x + '" tidak ada di sheet Projects (cek ejaan).');
     });
   });
+  var auto = String(md.config['KPI_TUTUP_OTOMATIS'] == null ? '' : md.config['KPI_TUTUP_OTOMATIS']).trim();   // kosong = bawaan 5
+  if (auto && !(/^\d{1,2}$/.test(auto) && Number(auto) <= 28)) {
+    warnings.push('Config KPI_TUTUP_OTOMATIS = "' + auto + '": harus tanggal 1–28 (0 = tutup manual); sekarang tutup bulan otomatis mati.');
+  }
   md.spareparts = readSpareparts_(warnings, opts);
   md.report = readReportFormat_(warnings);
   md.rencana = readOptional_(APP.SHEETS.RENCANA).filter(function (r) {

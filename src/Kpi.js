@@ -361,8 +361,8 @@ function kpiTutup_(ym, email, note) {
  */
 function kpiTutupOtomatis_(now) {
   now = now || new Date();
-  var day = Math.floor(Number(getConfig_('KPI_TUTUP_OTOMATIS')));
-  if (!(day >= 1 && day <= 28) || Number(Utilities.formatDate(now, APP.TZ, 'dd')) < day) return '';
+  var day = kpiAutoDay_();
+  if (!day || Number(Utilities.formatDate(now, APP.TZ, 'dd')) < day) return '';
   var y = yearOf_(now), mo = monthOf_(now), pk = mo === 1 ? ymKey_(y - 1, 12) : ymKey_(y, mo - 1);
   if (kpiClosed_()[pk]) return '';
   var rows = rekapRows_(Number(pk.slice(0, 4))), s = kpiSettings_();
@@ -370,6 +370,12 @@ function kpiTutupOtomatis_(now) {
   if (!rows.some(function (r) { var d = finalDate_(r); return !!d && ymOf_(d) === pk; }) || kpiReviewsOpen_(rows, pk)) return '';
   kpiTutup_(pk, APP.SYSTEM_USER, 'otomatis (Config KPI_TUTUP_OTOMATIS = ' + day + ')');
   return pk;
+}
+
+/** Config KPI_TUTUP_OTOMATIS → tanggal 1–28; 0 = mati, juga bila isinya bukan bilangan bulat 0–28 (diperingatkan di Dashboard). */
+function kpiAutoDay_() {
+  var v = String(getConfig_('KPI_TUTUP_OTOMATIS')).trim();
+  return /^\d{1,2}$/.test(v) && Number(v) <= 28 ? Number(v) : 0;
 }
 
 /** Nama penutup bulan untuk tampilan: SYSTEM = "otomatis". */
@@ -392,7 +398,7 @@ function kpiDashboard_(user, rows, md, now, names) {
     if (c || (hasData && !(s.mulai && s.mulai.slice(0, 7) > pk))) {
       out.prev = { bulan: pk, label: ymLabel_(pk), closedIso: c ? c[0] : '', closedBy: c ? closerName_(names, c[1]) : '', reviews: kpiReviewsOpen_(rows, pk) };
     }
-    out.autoDay = Math.max(0, Math.floor(Number(getConfig_('KPI_TUTUP_OTOMATIS')) || 0));
+    out.autoDay = kpiAutoDay_();
     // 2.6.1: yang patut dicek admin (pengganti review Cancel): cancel setelah lama bekerja, dan porsi input manual
     var cur = function (r) { var d = finalDate_(r); return !!d && ymOf_(d) === key; };
     var done = rows.filter(function (r) { return r['Status'] === APP.STATUS.COMPLETED && cur(r); });
