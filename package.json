@@ -8,6 +8,7 @@
     "preview": "node test/preview.js",
     "push": "clasp push",
     "deploy": "clasp deploy",
-    "perf": "node test/perf.js"
+    "perf": "node test/perf.js",
+    "uji-tahun": "node test/gas-tahun.js"
   }
 }

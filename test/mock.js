@@ -214,7 +214,12 @@ const Utilities = {
     const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s);
     if (!m) throw new Error('Unparseable date: ' + s);
     return new FakeDate(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 7, +m[5], +(m[6] || 0)));
-  }
+  },
+  // Byte[] (Apps Script) → Buffer di sini; cukup untuk data uji gzip + base64 (test/gas-tahun.js)
+  base64Decode: (s) => Buffer.from(String(s), 'base64'),
+  newBlob: (data, type) => { const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
+    return { _buf: buf, getContentType: () => type || '', getDataAsString: () => buf.toString('utf8'), getBytes: () => buf }; },
+  ungzip: (blob) => Utilities.newBlob(require('zlib').gunzipSync(blob._buf), 'application/octet-stream')
 };
 
 const ui = { menus: [] };
