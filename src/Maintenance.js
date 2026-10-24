@@ -1,310 +1,612 @@
 /**
- * Logika inti state machine Maintenance.
+ * State machine Maintenance 2.0.
  *
- *   START  -> IN_PROGRESS -> COMPLETED   (Testing OK atau NG, tanpa loop-back)
- *                         -> CANCELLED
- *                         -> ABANDONED   (otomatis oleh trigger, lalu direview Supervisor/Admin)
+ *   start -> Aktif <-> Pause
+ *            Aktif / Pause -> Pending -> (lanjut, user mana pun) -> Aktif
+ *            Aktif         -> Completed
+ *            Aktif / Pause -> Cancelled                     (alasan wajib, review admin)
+ *            Aktif / Pause -> Abandoned                     (trigger, peringatan tidak dijawab)
  *
- * Semua timestamp dibuat di server (new Date() di sini), bukan dari device.
- * Fungsi tanpa underscore = bisa dipanggil dari client via google.script.run.
+ * Waktu: setiap record menyimpan 'Status sejak'. Pada setiap perpindahan status, selisih
+ * (sekarang - Status sejak) ditambahkan ke total milik status lama (aktif / pause / pending).
+ * Hanya Total aktif yang masuk MTTR. Semua timestamp dibuat di server.
+ *
+ * Fungsi tanpa underscore = dipanggil dari client via google.script.run.
  */
 
-// ---------- Serialisasi (Date tidak boleh dikirim lewat google.script.run) ----------
-
-function serializeRecord_(r, lineMap) {
-  var start = r['Start Time'] instanceof Date ? r['Start Time'] : null;
-  var finish = r['Finish Time'] instanceof Date ? r['Finish Time'] : null;
-  var line = lineMap ? lineMap[String(r['Line ID']).toUpperCase()] : null;
-  return {
-    id: String(r['Maintenance ID']),
-    lineId: String(r['Line ID']),
-    lineName: line ? String(line['Line Name']) : '',
-    userEmail: String(r['User Email']),
-    startIso: start ? start.toISOString() : '',
-    startText: fmtDate_(start),
-    finishIso: finish ? finish.toISOString() : '',
-    finishText: fmtDate_(finish),
-    status: String(r['Status']),
-    problem: String(r['Problem'] || ''),
-    actionTaken: String(r['Action Taken'] || ''),
-    partReplaced: String(r['Part Replaced'] || ''),
-    testingResult: String(r['Testing Result'] || ''),
-    durationMin: r['Duration (min)'] === '' ? null : Number(r['Duration (min)']),
-    closedBy: String(r['Closed By'] || ''),
-    note: String(r['Note'] || ''),
-    reviewedBy: String(r['Reviewed By'] || ''),
-    reviewedAtText: fmtDate_(r['Reviewed At'])
-  };
+function isOpen_(r) {
+  return r['Status'] === APP.STATUS.ACTIVE || r['Status'] === APP.STATUS.PAUSE;
 }
 
-function serializeLine_(l) {
-  return {
-    lineId: String(l['Line ID']),
-    lineName: String(l['Line Name'] || ''),
-    machine: String(l['Machine'] || ''),
-    department: String(l['Department'] || ''),
-    location: String(l['Location'] || ''),
-    active: isActiveStatus_(l['Status'])
-  };
+/** Tambahkan waktu yang berjalan sejak 'Status sejak' ke bucket status saat ini. */
+function accrue_(r, now) {
+  var since = r['Status sejak'];
+  var col = APP.BUCKET[r['Status']];
+  if (col && since instanceof Date) {
+    var add = Math.max(0, (now.getTime() - since.getTime()) / 60000);
+    r[col] = round2_(Number(r[col] || 0) + add);
+  }
+  r['Status sejak'] = now;
 }
 
-function lineMap_() {
-  var map = {};
-  readTable_(APP.SHEETS.LINES).forEach(function (l) { map[String(l['Line ID']).toUpperCase()] = l; });
-  return map;
+function transition_(r, to, now) {
+  accrue_(r, now);
+  r['Status'] = to;
 }
 
-function userNameMap_() {
-  var map = {};
-  readTable_(APP.SHEETS.USERS).forEach(function (u) { map[String(u['Email']).toLowerCase()] = String(u['Name'] || u['Email']); });
-  return map;
+function log_(now, id, event, user, detail) {
+  appendObj_(APP.SHEETS.LOG, {
+    'Timestamp': now, 'Maintenance ID': id, 'Kejadian': event,
+    'User': user, 'Detail': cleanText_(detail, 1000)
+  });
 }
 
-function activeForLine_(rows, lineId) {
-  var key = String(lineId).toUpperCase();
+function addInvolved_(r, email) {
+  var list = String(r['Teknisi terlibat'] || '').split(',').map(function (s) { return s.trim(); }).filter(String);
+  if (list.indexOf(email) === -1) list.push(email);
+  r['Teknisi terlibat'] = list.join(', ');
+}
+
+function isInvolved_(r, email) {
+  return String(r['Teknisi terlibat'] || '').split(',').some(function (s) { return s.trim().toLowerCase() === email; }) ||
+    String(r['Teknisi awal']).toLowerCase() === email || String(r['Teknisi terakhir']).toLowerCase() === email;
+}
+
+function openForUser_(rows, email) {
   for (var i = 0; i < rows.length; i++) {
-    if (String(rows[i]['Line ID']).toUpperCase() === key && rows[i]['Status'] === APP.STATUS.IN_PROGRESS) return rows[i];
+    if (isOpen_(rows[i]) && String(rows[i]['Teknisi terakhir']).toLowerCase() === email) return rows[i];
   }
   return null;
 }
 
-function cleanText_(v, max) {
-  return String(v == null ? '' : v).replace(/\s+$/g, '').slice(0, max || 1000);
+
+/** Kunci mesin pekerjaan lama (sebelum 2.6): Mesin ID / "Lainnya: <nama>". Pekerjaan 2.6 = '' (seluruh line = unit). */
+function machineKey_(r) {
+  return normLine_(r['Mesin ID']) || String(r['Nama Mesin'] || '').trim().toUpperCase();
 }
 
-// ---------- API: dipanggil dari client ----------
-
-/** Data awal saat halaman dibuka. lineId dari parameter QR (?line=...). */
-function apiBootstrap(lineId) {
-  var user = requireUser_();
-  var rows = readTable_(APP.SHEETS.MAINT);
-  var lines = lineMap_();
-  var names = userNameMap_();
-  var mine = rows.filter(function (r) {
-    return r['Status'] === APP.STATUS.IN_PROGRESS && String(r['User Email']).toLowerCase() === user.email;
-  }).map(function (r) { return serializeRecord_(r, lines); });
-
-  var abandonedCount = isReviewer_(user)
-    ? rows.filter(function (r) { return r['Status'] === APP.STATUS.ABANDONED && !r['Reviewed By']; }).length
-    : 0;
-
-  return {
-    user: user,
-    serverNowIso: new Date().toISOString(),
-    abandonHours: getAbandonHours_(),
-    myActive: mine,
-    abandonedCount: abandonedCount,
-    lineView: lineId ? lineView_(lineId, rows, lines, names, user) : null,
-    lines: Object.keys(lines).map(function (k) { return serializeLine_(lines[k]); })
-      .filter(function (l) { return l.active; })
-  };
-}
-
-/** Status sebuah line: info line + maintenance aktif (jika ada). */
-function apiGetLine(lineId) {
-  var user = requireUser_();
-  return lineView_(lineId, readTable_(APP.SHEETS.MAINT), lineMap_(), userNameMap_(), user);
-}
-
-function lineView_(lineId, rows, lines, names, user) {
-  var line = lines[String(lineId || '').trim().toUpperCase()];
-  if (!line) return { found: false, lineId: String(lineId), serverNowIso: new Date().toISOString() };
-  var active = activeForLine_(rows, line['Line ID']);
-  var rec = active ? serializeRecord_(active, lines) : null;
-  if (rec) rec.userName = names[rec.userEmail.toLowerCase()] || rec.userEmail;
-  return {
-    found: true,
-    line: serializeLine_(line),
-    active: rec,
-    canAct: rec ? (rec.userEmail.toLowerCase() === user.email || isReviewer_(user)) : false,
-    serverNowIso: new Date().toISOString()
-  };
-}
-
-/** START: satu Line ID hanya boleh punya satu IN_PROGRESS (dijaga LockService). */
-function apiStart(lineId) {
-  var user = requireUser_();
-  var line = findLine_(lineId);
-  if (!line) throw new Error('Line ID "' + lineId + '" tidak ditemukan.');
-  if (!isActiveStatus_(line['Status'])) throw new Error('Line ' + line['Line ID'] + ' berstatus nonaktif.');
-
-  withLock_(function () {
-    var rows = readTable_(APP.SHEETS.MAINT);
-    var existing = activeForLine_(rows, line['Line ID']);
-    if (existing) {
-      throw new Error('Line ' + line['Line ID'] + ' sudah punya maintenance IN_PROGRESS (' +
-        existing['Maintenance ID'] + ' oleh ' + existing['User Email'] + ').');
-    }
-    var now = new Date();
-    var rec = {};
-    rec['Maintenance ID'] = newMaintenanceId_(now);
-    rec['Line ID'] = String(line['Line ID']);
-    rec['User Email'] = user.email;
-    rec['Start Time'] = now;
-    rec['Status'] = APP.STATUS.IN_PROGRESS;
-    appendObj_(APP.SHEETS.MAINT, rec);
-  });
-  return apiGetLine(line['Line ID']);
-}
-
-/** COMPLETE: isi form, Finish Time server-side, Duration dihitung. NG tetap COMPLETED. */
-function apiComplete(id, form) {
-  var user = requireUser_();
-  form = form || {};
-  var problem = cleanText_(form.problem);
-  var action = cleanText_(form.actionTaken);
-  var part = cleanText_(form.partReplaced) || '-';
-  var testing = String(form.testingResult || '').toUpperCase();
-  if (!problem.trim()) throw new Error('Problem wajib diisi.');
-  if (!action.trim()) throw new Error('Action Taken wajib diisi.');
-  if (APP.TESTING.indexOf(testing) === -1) throw new Error('Testing Result harus OK atau NG.');
-
-  var lineId = withLock_(function () {
-    var r = findMaintenance_(id);
-    assertCanClose_(r, user);
-    var now = new Date();
-    r['Finish Time'] = now;
-    r['Status'] = APP.STATUS.COMPLETED;
-    r['Problem'] = problem;
-    r['Action Taken'] = action;
-    r['Part Replaced'] = part;
-    r['Testing Result'] = testing;
-    r['Duration (min)'] = durationMinutes_(r['Start Time'], now);
-    r['Closed By'] = user.email;
-    writeObj_(APP.SHEETS.MAINT, r);
-    return r['Line ID'];
-  });
-  return apiGetLine(lineId);
-}
-
-/** CANCEL: tidak ada Finish Time / Duration — record ini bukan data repair valid. */
-function apiCancel(id, reason) {
-  var user = requireUser_();
-  var why = cleanText_(reason, 500);
-  if (!why.trim()) throw new Error('Alasan cancel wajib diisi.');
-  var lineId = withLock_(function () {
-    var r = findMaintenance_(id);
-    assertCanClose_(r, user);
-    r['Status'] = APP.STATUS.CANCELLED;
-    r['Closed By'] = user.email;
-    r['Note'] = 'CANCEL: ' + why;
-    writeObj_(APP.SHEETS.MAINT, r);
-    return r['Line ID'];
-  });
-  return apiGetLine(lineId);
-}
-
-function assertCanClose_(r, user) {
-  if (!r) throw new Error('Maintenance tidak ditemukan.');
-  if (r['Status'] === APP.STATUS.ABANDONED) {
-    throw new Error('Maintenance ini sudah ABANDONED (> ' + getAbandonHours_() + ' jam). Hubungi Supervisor/Admin untuk review.');
+/**
+ * Pekerjaan terbuka yang bentrok di line yang sama. Sejak 2.6 key selalu '' → satu pekerjaan terbuka per line;
+ * pekerjaan lama ber-mesin (pending dari versi sebelumnya) hanya bentrok dengan mesin yang sama atau pekerjaan seluruh line.
+ */
+function openConflict_(rows, lineId, key, exceptId) {
+  var line = normLine_(lineId);
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (!isOpen_(r) || normLine_(r['Line']) !== line || String(r['Maintenance ID']) === String(exceptId || '')) continue;
+    var k = machineKey_(r);
+    if (!key || !k || k === key) return r;
   }
-  if (r['Status'] !== APP.STATUS.IN_PROGRESS) throw new Error('Maintenance sudah berstatus ' + r['Status'] + '.');
-  var owner = String(r['User Email']).toLowerCase() === user.email;
-  if (!owner && !isReviewer_(user)) throw new Error('Hanya ME yang memulai (atau Supervisor/Admin) yang boleh menutup maintenance ini.');
+  return null;
 }
 
-/**
- * Riwayat mentah. ME hanya melihat record miliknya; Supervisor/Admin melihat semua.
- * @param {{status?:string, lineId?:string, from?:string, to?:string}} filter tanggal format yyyy-MM-dd (WIB)
- */
-function apiListRecords(filter) {
-  var user = requireUser_();
-  filter = filter || {};
-  var from = filter.from ? Utilities.parseDate(filter.from + ' 00:00:00', APP.TZ, 'yyyy-MM-dd HH:mm:ss') : null;
-  var to = filter.to ? Utilities.parseDate(filter.to + ' 23:59:59', APP.TZ, 'yyyy-MM-dd HH:mm:ss') : null;
-  var lineKey = String(filter.lineId || '').trim().toUpperCase();
-  var lines = lineMap_();
+function conflictMsg_(r, names) {
+  var who = (names && names[String(r['Teknisi terakhir']).toLowerCase()]) || r['Teknisi terakhir'];
+  return (r['Nama Mesin'] ? 'Mesin ' + r['Nama Mesin'] : 'Line ' + r['Line']) + ' sedang dikerjakan ' + who + ' (' + r['Maintenance ID'] + ').';
+}
 
-  var rows = readTable_(APP.SHEETS.MAINT).filter(function (r) {
-    if (!isReviewer_(user) && String(r['User Email']).toLowerCase() !== user.email) return false;
-    if (filter.status && r['Status'] !== filter.status) return false;
-    if (lineKey && String(r['Line ID']).toUpperCase() !== lineKey) return false;
-    var st = r['Start Time'];
-    if (from && (!(st instanceof Date) || st < from)) return false;
-    if (to && (!(st instanceof Date) || st > to)) return false;
-    return true;
+/** Format ID: <LINE>-<yyMMdd>-<NN>, nomor urut per line per hari. Dipanggil di dalam lock. */
+function newMaintenanceId_(rows, lineId, now) {
+  var prefix = normLine_(lineId) + '-' + Utilities.formatDate(now, APP.TZ, 'yyMMdd') + '-';
+  var max = 0;
+  rows.forEach(function (r) {
+    var id = String(r['Maintenance ID']);
+    if (id.indexOf(prefix) === 0) {
+      var n = parseInt(id.slice(prefix.length), 10);
+      if (n > max) max = n;
+    }
   });
-  rows.sort(function (a, b) { return (b['Start Time'] || 0) - (a['Start Time'] || 0); });
-  var truncated = rows.length > 1000;
-  return {
-    records: rows.slice(0, 1000).map(function (r) { return serializeRecord_(r, lines); }),
-    total: rows.length,
-    truncated: truncated,
-    spreadsheetUrl: isReviewer_(user) ? SpreadsheetApp.getActive().getUrl() : ''
-  };
+  var next = max + 1;
+  return prefix + (next < 10 ? '0' : '') + next;
 }
 
-/** Antrian review: ABANDONED yang belum direview. */
-function apiListAbandoned() {
-  requireUser_([APP.ROLES.SUPERVISOR, APP.ROLES.ADMIN]);
-  var lines = lineMap_();
+/** Baterai terakhir yang dipakai di line ini (default pilihan saat Mulai). */
+function lastBattery_(rows, lineId) {
+  var key = normLine_(lineId), best = null;
+  rows.forEach(function (r) {
+    if (normLine_(r['Line']) !== key || !r['Baterai']) return;
+    if (!best || (r['Mulai'] instanceof Date && r['Mulai'] > best['Mulai'])) best = r;
+  });
+  return best ? String(best['Baterai']) : '';
+}
+
+
+/** Aksi kerja hanya oleh teknisi yang sedang memegang record. */
+function assertOwner_(r, user, allowedStatuses) {
+  if (!r) throw new Error('Maintenance tidak ditemukan.');
+  if (allowedStatuses.indexOf(r['Status']) === -1) {
+    throw new Error('Maintenance ' + r['Maintenance ID'] + ' berstatus ' + r['Status'] + '; aksi ini tidak bisa dilakukan.');
+  }
+  if (String(r['Teknisi terakhir']).toLowerCase() !== user.email) {
+    throw new Error('Maintenance ini sedang dipegang teknisi lain.');
+  }
+}
+
+// ---------- Tenggat pending ----------
+
+function wibDayStart_(d, addDays) {
+  var s = Utilities.formatDate(new Date(d.getTime() + (addDays || 0) * 86400000), APP.TZ, 'yyyy-MM-dd');
+  return Utilities.parseDate(s + ' 00:00:00', APP.TZ, 'yyyy-MM-dd HH:mm:ss');
+}
+
+function endOfDay_(d, addDays) {
+  return new Date(wibDayStart_(d, addDays).getTime() + 86400000 - 1000);
+}
+
+/** Akhir shift berikutnya = jam mulai shift sesudah shift berikutnya. */
+function endOfNextShift_(now) {
+  var mins = String(getConfig_('SHIFT_MULAI') || '').split(',').map(function (s) {
+    var m = /^\s*(\d{1,2}):(\d{2})\s*$/.exec(s);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  }).filter(function (v) { return v !== null && v < 1440; });
+  if (!mins.length) mins = [420, 900, 1380];
+  var starts = [];
+  for (var day = 0; day < 3; day++) {
+    var base = wibDayStart_(now, day).getTime();
+    mins.forEach(function (m) { starts.push(base + m * 60000); });
+  }
+  starts.sort(function (a, b) { return a - b; });
+  var future = starts.filter(function (t) { return t > now.getTime(); });
+  return new Date(future[1] || future[0]);
+}
+
+function computeDeadline_(kind, dateStr, now) {
+  switch (kind) {
+    case 'HARI_INI': return endOfDay_(now, 0);
+    case 'SHIFT': return endOfNextShift_(now);
+    case 'BESOK': return endOfDay_(now, 1);
+    case 'TANGGAL':
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ''))) throw new Error('Tanggal tenggat tidak valid.');
+      var d = new Date(Utilities.parseDate(dateStr + ' 00:00:00', APP.TZ, 'yyyy-MM-dd HH:mm:ss').getTime() + 86400000 - 1000);
+      if (d < now) throw new Error('Tanggal tenggat tidak boleh di masa lalu.');
+      return d;
+    default: throw new Error('Tenggat wajib dipilih.');
+  }
+}
+
+
+// ---------- Aksi teknisi ----------
+
+/** Input form dari client: {values:{field:nilai}, other:{field:teks Lainnya}, ...}. String = nilai field pertama (kompatibel 2.0). */
+function formInput_(input, firstField) {
+  if (input == null || typeof input !== 'object') {
+    var o = { values: {}, other: {} };
+    if (input) o.values[firstField] = input;
+    return o;
+  }
+  input.values = input.values || {};
+  input.other = input.other || {};
+  return input;
+}
+
+/** Nama teknisi (dari sheet Users) ikut ditulis di samping email: hasil akhir menampilkan nama, email tetap jadi ID. */
+function setNames_(r) {
   var names = userNameMap_();
-  return readTable_(APP.SHEETS.MAINT)
-    .filter(function (r) { return r['Status'] === APP.STATUS.ABANDONED && !r['Reviewed By']; })
-    .map(function (r) {
-      var s = serializeRecord_(r, lines);
-      s.userName = names[s.userEmail.toLowerCase()] || s.userEmail;
-      return s;
-    });
+  var nm = function (e) { e = String(e || '').trim().toLowerCase(); return names[e] || e; };
+  r['Nama PIC'] = nm(r['Teknisi terakhir']);
+  r['Nama teknisi awal'] = nm(r['Teknisi awal']);
+  r['Nama teknisi terlibat'] = String(r['Teknisi terlibat'] || '').split(',').map(function (e) { return e.trim(); })
+    .filter(String).map(nm).join(', ');
+}
+
+/** Stop line: Ya/Tidak dari form; kosong → otomatis Ya untuk tipe di Config STOP_LINE_DEFAULT (default Corrective). */
+function stopLineValue_(md, value, tipe) {
+  if (!fieldDef_(md, 'Mulai', 'Stop line')) return '';
+  var v = cleanText_(value, 10);
+  if (v === APP.YES || v === APP.NO) return v;
+  if (v) throw new Error('Stop line harus "Ya" atau "Tidak".');
+  var types = splitList_(getConfig_('STOP_LINE_DEFAULT')).map(function (t) { return t.toLowerCase(); });
+  return types.indexOf(String(tipe).toLowerCase()) !== -1 ? APP.YES : APP.NO;
+}
+
+function appendStamped_(r, col, text, now, user) {
+  if (!text) return;
+  var stamp = '[' + Utilities.formatDate(now, APP.TZ, 'dd/MM HH:mm') + ' ' + user.name + '] ';
+  r[col] = (r[col] ? r[col] + '\n' : '') + stamp + text;
+}
+
+/** Simpan field form ke record. Pekerjaan dilakukan & Catatan ditambahkan (riwayat), sisanya ditimpa. */
+function applyFormValues_(r, values, now, user) {
+  Object.keys(values).forEach(function (f) {
+    if (f === 'Pekerjaan dilakukan' || f === 'Catatan') appendStamped_(r, f, values[f], now, user);
+    else r[f] = values[f];
+  });
 }
 
 /**
- * Keputusan reviewer atas record ABANDONED.
- * @param {{decision:'COMPLETE'|'CANCEL', finishTime?:string, problem?:string, actionTaken?:string,
- *          partReplaced?:string, testingResult?:string, note:string}} p
- *   finishTime format yyyy-MM-ddTHH:mm (WIB, dari input datetime-local).
- *
- * Finish Time di sini BUKAN server timestamp — ini keputusan manusia. Karena itu Reviewed By,
- * Reviewed At, dan Note wajib terisi supaya bisa dibedakan dari data asli saat analisis.
+ * Mulai: timer aktif berjalan + Maintenance ID dibuat pada saat yang sama.
+ * @param {{tipe?:string, baterai:string, stopLine?:string, values?:Object, other?:Object}|string} p
+ *   string = baterai (kompatibel 2.0). Sejak 2.6 tidak ada pilihan mesin (line = unit); `mesin` dari klien lama diabaikan.
  */
-function apiResolveAbandoned(id, p) {
-  var user = requireUser_([APP.ROLES.SUPERVISOR, APP.ROLES.ADMIN]);
-  p = p || {};
-  var note = cleanText_(p.note, 500);
-  if (!note.trim()) throw new Error('Catatan review wajib diisi.');
+function apiStart(lineId, p) {
+  var user = requireUser_();
+  if (typeof p !== 'object' || p === null) p = { baterai: p };
+  var md = masterData_();
+  var line = lineOf_(md, lineId);
+  if (!line) throw new Error('Line "' + lineId + '" tidak ditemukan.');
+  if (!line.active) throw new Error('Line ' + line.id + ' nonaktif.');
+
+  var bat = cleanText_(p.baterai, 50);
+  if (!bat) throw new Error('Baterai wajib dipilih.');
+  if (line.batteries.indexOf(bat) === -1) {
+    throw new Error('Baterai "' + bat + '" tidak ada di daftar pilihan untuk line ' + line.id + ' (' + line.batteries.join(', ') + ').');
+  }
+
+  var tipeDef = fieldDef_(md, 'Mulai', 'Tipe');
+  var tipes = md.options[tipeDef.source] || ['Corrective'];
+  var tipe = cleanText_(p.tipe, 50) || tipes[0];
+  if (tipes.indexOf(tipe) === -1) throw new Error('Tipe maintenance "' + tipe + '" tidak ada di daftar pilihan.');
+
+  var custom = validateForm_(md, 'Mulai', p);
+  var stop = stopLineValue_(md, p.stopLine, tipe);
+
+  var rows = withLock_(function () {
+    var rows = readTable_(APP.SHEETS.MAINT);
+    var mine = openForUser_(rows, user.email);
+    if (mine) throw new Error('Anda masih punya maintenance ' + mine['Status'] + ' (' + mine['Maintenance ID'] + '). Selesaikan, pending, atau cancel dulu.');
+    var other = openConflict_(rows, line.id, '');
+    if (other) throw new Error(conflictMsg_(other, userNameMap_()));
+
+    var now = new Date();
+    var r = {};
+    r['Maintenance ID'] = newMaintenanceId_(rows, line.id, now);
+    r['Line'] = line.id;
+    r['Factory'] = line.factory;
+    r['Proses'] = line.proses;
+    r['Stop line'] = stop;
+    r['Baterai'] = bat;
+    r['Tipe'] = tipe;
+    r['Status'] = APP.STATUS.ACTIVE;
+    r['Teknisi awal'] = user.email;
+    r['Teknisi terakhir'] = user.email;
+    r['Teknisi terlibat'] = user.email;
+    r['Mulai'] = now;
+    r['Total aktif (menit)'] = 0;
+    r['Total pause (menit)'] = 0;
+    r['Total pending (menit)'] = 0;
+    r['Status sejak'] = now;
+    r['Konfirmasi terakhir'] = now;
+    ensureMaintColumns_(Object.keys(custom.values));
+    applyFormValues_(r, custom.values, now, user);
+    setNames_(r);
+    appendObj_(APP.SHEETS.MAINT, r);
+    log_(now, r['Maintenance ID'], APP.EVENTS.START, user.email,
+      [tipe, 'Line ' + r['Line'], 'baterai ' + bat, stop ? 'stop line ' + stop : ''].concat(custom.summary).filter(String).join(', '));
+    rows.push(r);
+    syncReports_(r, rows);
+    return rows;
+  });
+  return lineView_(line.id, rows, ctx_(), user);
+}
+
+/** Pause: field form Pause hanya dicatat di Log (pause bisa terjadi berkali-kali). */
+function apiPause(id, input) {
+  var user = requireUser_();
+  var md = masterData_();
+  var f = validateForm_(md, 'Pause', formInput_(input, 'Alasan pause'));
+  return mutate_(id, user, [APP.STATUS.ACTIVE], function (r, now) {
+    transition_(r, APP.STATUS.PAUSE, now);
+    r['Konfirmasi terakhir'] = now;
+    r['Peringatan pada'] = '';
+    return [APP.EVENTS.PAUSE, f.summary.join(' · ')];
+  });
+}
+
+function apiResume(id) {
+  var user = requireUser_();
+  return mutate_(id, user, [APP.STATUS.PAUSE], function (r, now) {
+    transition_(r, APP.STATUS.ACTIVE, now);
+    r['Konfirmasi terakhir'] = now;
+    r['Peringatan pada'] = '';
+    return [APP.EVENTS.RESUME, ''];
+  });
+}
+
+/** Jawaban "Masih lanjut" atas peringatan 3 jam. Timer TIDAK direset. */
+function apiConfirmStillWorking(id) {
+  var user = requireUser_();
+  return mutate_(id, user, [APP.STATUS.ACTIVE, APP.STATUS.PAUSE], function (r, now) {
+    r['Konfirmasi terakhir'] = now;
+    r['Peringatan pada'] = '';
+    return [APP.EVENTS.CONFIRM, 'Status ' + r['Status']];
+  });
+}
+
+/**
+ * @param {{values:Object, other?:Object, tenggat:'HARI_INI'|'SHIFT'|'BESOK'|'TANGGAL', tanggal?:string}} input
+ */
+function apiPending(id, input) {
+  var user = requireUser_();
+  var md = masterData_();
+  input = formInput_(input, 'Pekerjaan dilakukan');
+  var f = validateForm_(md, 'Pending', input);
+
+  return mutate_(id, user, [APP.STATUS.ACTIVE, APP.STATUS.PAUSE], function (r, now) {
+    var deadline = computeDeadline_(input.tenggat, input.tanggal, now);
+    ensureMaintColumns_(Object.keys(f.values));
+    transition_(r, APP.STATUS.PENDING, now);
+    applyFormValues_(r, f.values, now, user);
+    r['Tenggat'] = deadline;
+    r['Peringatan pada'] = '';
+    return [APP.EVENTS.PENDING, ['Tenggat ' + fmtDate_(deadline)].concat(f.summary).join(' · ')];
+  });
+}
+
+/**
+ * Lanjutkan pending (user mana pun). Wajib konfirmasi QR: scannedLineId harus sama dengan line record.
+ * Timer pending berhenti, timer aktif lanjut dengan Maintenance ID yang sama.
+ */
+function apiContinue(id, scannedLineId) {
+  var user = requireUser_();
+  var res = withLock_(function () {
+    var rows = readTable_(APP.SHEETS.MAINT);
+    var r = findById_(rows, id);
+    if (!r) throw new Error('Maintenance tidak ditemukan.');
+    if (r['Status'] !== APP.STATUS.PENDING) throw new Error('Maintenance ' + id + ' tidak lagi Pending (status ' + r['Status'] + ').');
+    if (normLine_(scannedLineId) !== normLine_(r['Line'])) {
+      throw new Error('QR yang di-scan (' + (scannedLineId || '-') + ') bukan line ' + r['Line'] + '. Scan QR di line yang benar.');
+    }
+    var mine = openForUser_(rows, user.email);
+    if (mine) throw new Error('Anda masih punya maintenance ' + mine['Status'] + ' (' + mine['Maintenance ID'] + ').');
+    var other = openConflict_(rows, r['Line'], machineKey_(r), r['Maintenance ID']);
+    if (other) throw new Error(conflictMsg_(other, userNameMap_()) + ' Tunggu selesai dulu.');
+
+    var now = new Date();
+    transition_(r, APP.STATUS.ACTIVE, now);
+    r['Teknisi terakhir'] = user.email;
+    addInvolved_(r, user.email);
+    setNames_(r);
+    r['Konfirmasi terakhir'] = now;
+    r['Peringatan pada'] = '';
+    r['Status review'] = '';
+    writeObj_(APP.SHEETS.MAINT, r);
+    log_(now, r['Maintenance ID'], APP.EVENTS.CONTINUE, user.email, 'Konfirmasi QR ' + r['Line']);
+    syncReports_(r, rows);
+    return { line: r['Line'], rows: rows };
+  });
+  return lineView_(res.line, res.rows, ctx_(), user);
+}
+
+/** Corrective (atau tipe lain di Config MTTR_TIPE) masuk MTTR; data 2.0 tanpa Tipe dianggap Corrective. */
+function countsForMttr_(r) {
+  var t = String(r['Tipe'] || '').trim().toLowerCase();
+  return !t || mttrTypes_().indexOf(t) !== -1;
+}
+
+/**
+ * Validasi daftar sparepart dari form Selesai.
+ * @param {{id?:string, manual?:boolean, jenis?:string, nama?:string, model?:string, qty:number}[]} parts
+ * @return {{jenis, nama, model, satuan, qty, manual}[]}
+ */
+function validateParts_(md, parts) {
+  var byId = {};
+  md.spareparts.forEach(function (p) { byId[p.id] = p; });
+  var jenisOk = uniq_((md.options['Jenis Kerusakan'] || []).concat(md.spareparts.map(function (p) { return p.jenis; })));
+  var out = (parts || []).map(function (p) {
+    p = p || {};
+    var qty = Math.floor(Number(p.qty));
+    var item;
+    if (p.manual) {
+      var nama = cleanText_(p.nama, 120), jenis = cleanText_(p.jenis, 60);
+      if (!nama) throw new Error('Sparepart manual: nama sparepart wajib diisi.');
+      if (jenisOk.indexOf(jenis) === -1) throw new Error('Sparepart manual "' + nama + '": pilih jenis sparepart.');
+      item = { jenis: jenis, nama: nama, model: cleanText_(p.model, 120), satuan: '', manual: true };
+    } else {
+      var c = byId[String(p.id || '')];
+      if (!c) throw new Error('Sparepart tidak ditemukan di katalog (mungkin baru diubah admin). Muat ulang aplikasi lalu pilih lagi.');
+      item = { jenis: c.jenis, nama: c.nama, model: c.model, satuan: c.satuan, manual: false };
+    }
+    if (!(qty >= 1 && qty <= 999)) throw new Error('Jumlah "' + item.nama + '" harus 1–999.');
+    item.qty = qty;
+    return item;
+  });
+  // Part yang sama dipilih dua kali → digabung.
+  var merged = [], idx = {};
+  out.forEach(function (p) {
+    var k = (p.manual ? 'm|' : 'c|') + partId_(p.jenis, p.nama, p.model);
+    if (idx.hasOwnProperty(k)) merged[idx[k]].qty += p.qty;
+    else { idx[k] = merged.length; merged.push(p); }
+  });
+  return merged;
+}
+
+/** Satu part per baris (bukan dipisah ";"), mis. "Motor Listrik ABB M2QA ×1". */
+function partText_(parts) {
+  if (!parts.length) return APP.NO_PART;
+  return parts.map(function (p) {
+    return p.nama + (p.model ? ' ' + p.model : '') + ' ×' + p.qty + (p.manual ? ' (manual)' : '');
+  }).join('\n');
+}
+
+/** Tulis baris Pemakaian Sparepart sekaligus (satu panggilan). Dipanggil di dalam lock. */
+function appendUsage_(r, parts, now) {
+  if (!parts.length) return;
+  var sh = sheet_(APP.SHEETS.PEMAKAIAN);
+  var rows = usageRows_(headers_(sh), r, parts, now);
+  var at = sh.getLastRow() + 1;
+  ensureRows_(sh, at + rows.length - 1, 500);
+  sh.getRange(at, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+/** Baris Pemakaian Sparepart untuk satu pekerjaan (juga dipakai Input Manual untuk tulisan sekaligus). */
+function usageRows_(h, r, parts, now) {
+  return parts.map(function (p) {
+    return objToRow_(h, {
+      'Tanggal': now, 'Maintenance ID': r['Maintenance ID'], 'Factory': r['Factory'], 'Line': r['Line'], 'Proses': r['Proses'],
+      'Mesin': String(r['Nama Mesin'] || '').replace(APP.OTHER_PREFIX, ''), 'Baterai': r['Baterai'], 'Jenis kerusakan': r['Jenis kerusakan'],
+      'Jenis Sparepart': p.jenis, 'Nama Sparepart': p.nama, 'Model': p.model, 'Jumlah': p.qty, 'Satuan': p.satuan,
+      'Manual': p.manual ? APP.YES : APP.NO, 'PIC': r['Nama PIC'], 'Email PIC': r['Teknisi terakhir']
+    });
+  });
+}
+
+/**
+ * PIC tambahan saat Selesai (2.6): email dari sheet Users yang aktif, tanpa diri sendiri, tanpa dobel, maks 10.
+ * @return {string[]} email (huruf kecil)
+ */
+function validatePics_(md, pics, user) {
+  var active = {};
+  md.users.forEach(function (u) { if (u.email && isActiveRow_(u.aktif)) active[u.email] = true; });
+  var out = [];
+  (Array.isArray(pics) ? pics : []).forEach(function (e) {
+    e = String(e || '').trim().toLowerCase();
+    if (!e || e === user.email || out.indexOf(e) !== -1) return;
+    if (!active[e]) throw new Error('PIC "' + e + '" tidak terdaftar / nonaktif di sheet Users.');
+    out.push(e);
+  });
+  if (out.length > 10) throw new Error('PIC tambahan maksimal 10 orang.');
+  return out;
+}
+
+/**
+ * @param {{values:Object, other?:Object, tanpaPart:boolean, parts:Object[], pics?:string[]}} input
+ *   parts lihat validateParts_; pics = email PIC tambahan (ikut dihitung sebagai teknisi terlibat).
+ */
+function apiComplete(id, input) {
+  var user = requireUser_();
+  var md = masterData_();
+  input = formInput_(input, 'Masalah');
+  var f = validateForm_(md, 'Selesai', input);
+  var pics = fieldDef_(md, 'Selesai', 'PIC tambahan') ? validatePics_(md, input.pics, user) : [];
+  var names = pics.length ? userNameMap_() : {};
+  var parts = [];
+  if (!input.tanpaPart) {
+    parts = validateParts_(md, input.parts);
+    if (!parts.length) throw new Error('Pilih sparepart yang diganti, atau "' + APP.NO_PART + '".');
+  }
+  var part = partText_(parts);
+
+  return mutate_(id, user, [APP.STATUS.ACTIVE], function (r, now) {
+    ensureMaintColumns_(Object.keys(f.values));
+    transition_(r, APP.STATUS.COMPLETED, now);
+    r['Selesai'] = now;
+    applyFormValues_(r, f.values, now, user);
+    r['Part'] = part;
+    r['Masuk MTTR'] = countsForMttr_(r) ? APP.MTTR.YES : APP.MTTR.NO;
+    r['Status review'] = '';
+    r['Peringatan pada'] = '';
+    pics.forEach(function (e) { addInvolved_(r, e); });
+    setNames_(r);
+    appendUsage_(r, parts, now);
+    var extra = pics.length ? ['PIC tambahan: ' + pics.map(function (e) { return names[e] || e; }).join(', ')] : [];
+    return [APP.EVENTS.COMPLETE, f.summary.concat(['Sparepart: ' + part.replace(/\n/g, '; ')], extra).join(' · '), parts];
+  });
+}
+
+/**
+ * Cancel: alasan wajib. Pemilik record, atau Admin untuk membersihkan record yang macet.
+ * @param {{values:Object, other?:Object}|string} input  string = alasan (kompatibel 2.0), catatan = argumen ke-3.
+ */
+function apiCancel(id, input, catatan) {
+  var user = requireUser_();
+  var md = masterData_();
+  input = formInput_(input, 'Alasan cancel');
+  if (catatan && !input.values['Catatan']) input.values['Catatan'] = catatan;
+  if (catatan && input.values['Alasan cancel'] === APP.OTHER && !input.other['Alasan cancel']) input.other['Alasan cancel'] = catatan;
+  var f = validateForm_(md, 'Cancel', input);
+
+  var res = withLock_(function () {
+    var rows = readTable_(APP.SHEETS.MAINT);
+    var r = findById_(rows, id);
+    if (!r) throw new Error('Maintenance tidak ditemukan.');
+    if (!isOpen_(r)) throw new Error('Maintenance ' + id + ' berstatus ' + r['Status'] + '; tidak bisa di-cancel.');
+    var owner = String(r['Teknisi terakhir']).toLowerCase() === user.email;
+    if (!owner && !isAdmin_(user)) throw new Error('Hanya teknisi yang memegang (atau Admin) yang boleh cancel.');
+    var now = new Date();
+    ensureMaintColumns_(Object.keys(f.values));
+    transition_(r, APP.STATUS.CANCELLED, now);
+    applyFormValues_(r, f.values, now, user);
+    r['Masuk MTTR'] = APP.MTTR.NO;
+    r['Status review'] = '';   // 2.6.1: Cancel tanpa review (satu-satunya keputusan dulu "Setujui"); alasan tercatat di Log
+    r['Peringatan pada'] = '';
+    writeObj_(APP.SHEETS.MAINT, r);
+    log_(now, r['Maintenance ID'], APP.EVENTS.CANCEL, user.email, f.summary.join(' · ') + (owner ? '' : ' (oleh Admin)'));
+    syncReports_(r, rows);
+    return { line: r['Line'], rows: rows };
+  });
+  return lineView_(res.line, res.rows, ctx_(), user);
+}
+
+/** Pola umum: lock -> baca -> cek pemilik & status -> ubah -> tulis -> log. */
+function mutate_(id, user, allowed, fn) {
+  var res = withLock_(function () {
+    var rows = readTable_(APP.SHEETS.MAINT);
+    var r = findById_(rows, id);
+    assertOwner_(r, user, allowed);
+    var now = new Date();
+    var ev = fn(r, now);    // [kejadian, detail log, sparepart (khusus Selesai)]
+    setNames_(r);
+    writeObj_(APP.SHEETS.MAINT, r);
+    log_(now, r['Maintenance ID'], ev[0], user.email, ev[1]);
+    syncReports_(r, rows, ev[2]);
+    return { line: r['Line'], rows: rows };
+  });
+  // Tampilan dihitung dari data yang sudah ada di memori (r ikut berubah di dalam rows) → tanpa baca ulang.
+  return lineView_(res.line, res.rows, ctx_(), user);
+}
+
+// ---------- Trigger: peringatan & Abandoned ----------
+
+/**
+ * Dijalankan time-driven trigger tiap 15 menit.
+ * Acuan = Konfirmasi terakhir (diperbarui saat mulai, lanjut, pause, resume, "Masih lanjut").
+ *  - >= WARN_HOURS dan belum diperingatkan -> Peringatan pada = now, email ke teknisi (jika diizinkan).
+ *  - Sudah diperingatkan, >= ABANDON_HOURS dari acuan, dan sudah diberi waktu >= (ABANDON-WARN) sejak
+ *    peringatan -> Abandoned. Syarat kedua mencegah Abandoned tanpa sempat diperingatkan bila trigger telat.
+ */
+function checkTimeouts() {
+  resetMaster_();
+  var lim = getLimits_();
+  var graceMs = (lim.abandonHours - lim.warnHours) * 3600000;
+  var emails = [];
+  var result = { warned: 0, abandoned: 0 };
 
   withLock_(function () {
-    var r = findMaintenance_(id);
-    if (!r) throw new Error('Maintenance tidak ditemukan.');
-    if (r['Status'] !== APP.STATUS.ABANDONED || r['Reviewed By']) throw new Error('Record ini tidak ada di antrian review.');
     var now = new Date();
+    var rows = readTable_(APP.SHEETS.MAINT);
+    rows.forEach(function (r) {
+      if (!isOpen_(r)) return;
+      var ref = r['Konfirmasi terakhir'] instanceof Date ? r['Konfirmasi terakhir'] : r['Mulai'];
+      if (!(ref instanceof Date)) return;
+      var age = now.getTime() - ref.getTime();
+      var warned = r['Peringatan pada'] instanceof Date ? r['Peringatan pada'] : null;
 
-    if (p.decision === 'COMPLETE') {
-      if (!p.finishTime) throw new Error('Finish Time wajib diisi.');
-      var finish = Utilities.parseDate(String(p.finishTime), APP.TZ, "yyyy-MM-dd'T'HH:mm");
-      if (!(finish instanceof Date) || isNaN(finish.getTime())) throw new Error('Format Finish Time tidak valid.');
-      if (finish <= r['Start Time']) throw new Error('Finish Time harus setelah Start Time.');
-      if (finish > now) throw new Error('Finish Time tidak boleh di masa depan.');
-      var testing = String(p.testingResult || '').toUpperCase();
-      if (testing && APP.TESTING.indexOf(testing) === -1) throw new Error('Testing Result harus OK atau NG.');
-      r['Finish Time'] = finish;
-      r['Status'] = APP.STATUS.COMPLETED;
-      r['Duration (min)'] = durationMinutes_(r['Start Time'], finish);
-      r['Problem'] = cleanText_(p.problem);
-      r['Action Taken'] = cleanText_(p.actionTaken);
-      r['Part Replaced'] = cleanText_(p.partReplaced);
-      r['Testing Result'] = testing;
-      r['Note'] = 'REVIEW (finish manual): ' + note;
-    } else if (p.decision === 'CANCEL') {
-      r['Status'] = APP.STATUS.CANCELLED;
-      r['Note'] = 'REVIEW (cancel): ' + note;
-    } else {
-      throw new Error('Keputusan review tidak dikenal.');
-    }
-    r['Closed By'] = user.email;
-    r['Reviewed By'] = user.email;
-    r['Reviewed At'] = now;
-    writeObj_(APP.SHEETS.MAINT, r);
+      if (!warned && age >= lim.warnHours * 3600000) {
+        r['Peringatan pada'] = now;
+        writeObj_(APP.SHEETS.MAINT, r);
+        log_(now, r['Maintenance ID'], APP.EVENTS.WARN, APP.SYSTEM_USER, '> ' + lim.warnHours + ' jam tanpa konfirmasi (' + r['Status'] + ')');
+        syncReports_(r, rows);
+        emails.push(r);
+        result.warned++;
+      } else if (warned && age >= lim.abandonHours * 3600000 && now.getTime() - warned.getTime() >= graceMs) {
+        transition_(r, APP.STATUS.ABANDONED, now);
+        r['Masuk MTTR'] = APP.MTTR.WAITING;
+        r['Status review'] = APP.REVIEW.NEEDED;
+        writeObj_(APP.SHEETS.MAINT, r);
+        log_(now, r['Maintenance ID'], APP.EVENTS.ABANDON, APP.SYSTEM_USER, 'Peringatan tidak dijawab');
+        syncReports_(r, rows);
+        result.abandoned++;
+      }
+    });
   });
-  return apiListAbandoned();
-}
 
-/** Daftar semua line + URL QR (Admin). */
-function apiListLinesForQr() {
-  requireUser_([APP.ROLES.ADMIN]);
-  return {
-    baseUrl: ScriptApp.getService().getUrl(),
-    lines: readTable_(APP.SHEETS.LINES).map(serializeLine_)
-  };
+  if (emails.length && isYes_(getConfig_('EMAIL_PERINGATAN'))) {
+    var url = ScriptApp.getService().getUrl();
+    emails.forEach(function (r) {
+      try {
+        MailApp.sendEmail({
+          to: String(r['Teknisi terakhir']),
+          subject: '[MTTR] ' + r['Maintenance ID'] + ' sudah > ' + lim.warnHours + ' jam',
+          body: 'Maintenance ' + r['Maintenance ID'] + ' di line ' + r['Line'] + ' berstatus ' + r['Status'] +
+            ' lebih dari ' + lim.warnHours + ' jam tanpa konfirmasi.\n\n' +
+            'Buka aplikasi dan pilih: Masih lanjut, Pending, atau Cancel.\n' +
+            'Jika tidak dijawab sampai ' + lim.abandonHours + ' jam, status otomatis menjadi Abandoned.\n\n' + url
+        });
+      } catch (e) {
+        console.warn('Email peringatan gagal untuk ' + r['Maintenance ID'] + ': ' + e);
+      }
+    });
+  }
+  if (result.warned || result.abandoned) console.log('checkTimeouts: ' + JSON.stringify(result));
+  return result;
 }
