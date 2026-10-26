@@ -42,6 +42,20 @@ class Range {
     return this;
   }
   getSheet() { return this.sh; }
+  // TextFinder (sebagian): cari teks di range ini, baris demi baris; matchEntireCell = sel sama persis
+  createTextFinder(text) {
+    const rg = this, f = { whole: false,
+      matchEntireCell(v) { f.whole = v !== false; return f; },
+      findNext() {
+        const vals = rg.getValues();
+        for (let i = 0; i < vals.length; i++) for (let j = 0; j < vals[i].length; j++) {
+          const s = String(vals[i][j]);
+          if (f.whole ? s === String(text) : s.indexOf(String(text)) !== -1) return new Range(rg.sh, rg.r + i, rg.c + j, 1, 1);
+        }
+        return null;
+      } };
+    return f;
+  }
   clearContent() {
     for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) delete this.sh.formulas[(this.r + i) + ',' + (this.c + j)];
     for (let i = 0; i < this.nr; i++) {

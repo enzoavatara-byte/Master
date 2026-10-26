@@ -20,6 +20,7 @@ function ujtMenu_() {
     .addItem('5 · Input Manual & tutup ulang', 'ujtManual')
     .addItem('6 · Periksa isi', 'ujtPeriksa')
     .addItem('7 · Arsip tahun lalu + tombol ulang', 'ujtArsip')
+    .addItem('9 · Profil tombol (diagnosis, ±5 menit)', 'ujtProfil')
     .addSeparator()
     .addItem('8 · Selesai: hapus trigger uji', 'ujtSelesai')
     .addToUi();
@@ -97,9 +98,13 @@ function ujtRunner_(tahap) {
     mark: function (part) { props.setProperty(UJT_MARK_, JSON.stringify({ tahap: tahap, part: part, t0: T0, t: Date.now() })); },
     timed: function (label, batas, fn) {
       R.mark(label);
+      if (UJT_PROF_) UJT_PROF_.cur = {};
       var t = Date.now(), v = fn(), ms = Date.now() - t;
       props.deleteProperty(UJT_MARK_);
-      if (batas) R.ok('Waktu: ' + label, ms <= batas, ms + ' ms (batas ' + batas + ')', ms);
+      if (UJT_PROF_) {   // tahap 9: rincian per fungsi menggantikan baris waktu biasa
+        R.info('Profil: ' + label, ujtProfTeks_(UJT_PROF_.cur, ms), ms);
+        if (UJT_PROF_.probe) ujtProbe_(R, label);
+      } else if (batas) R.ok('Waktu: ' + label, ms <= batas, ms + ' ms (batas ' + batas + ')', ms);
       else R.info('Waktu: ' + label, ms + ' ms', ms);
       return { v: v, ms: ms };
     },
@@ -207,8 +212,13 @@ function ujtMalam() {
 
 // ---------- 4 · tombol & layar ----------
 
-/** Aksi teknisi & layar admin dengan data penuh; pekerjaan uji dibersihkan sesudahnya. @return {string[]} ID uji */
-function ujtAlur_(R, label) {
+/**
+ * Aksi teknisi & layar admin dengan data penuh; pekerjaan uji dibersihkan sesudahnya.
+ * @param {{layar?: boolean}=} opts layar: false = hanya tombol (tahap 9, putaran kedua)
+ * @return {string[]} ID uji
+ */
+function ujtAlur_(R, label, opts) {
+  opts = opts || {};
   var ss = SpreadsheetApp.getActive(), ids = [], tag = label ? ' (' + label + ')' : '', B = UJT_BATAS_;
   var L = findSheet_('Lines', ss), h = headers_(L, 'Lines');
   if (!lineOf_(masterData_(), UJT_LINE_)) {
@@ -238,6 +248,7 @@ function ujtAlur_(R, label) {
     R.ok('Alur: Completed dengan 2 part & PIC tambahan' + tag, r && r['Status'] === 'Completed' && /\n/.test(String(r['Part'])) && String(r['Teknisi terlibat']).indexOf(UJT_.meta.pic) !== -1,
       r ? r['Status'] + ' · ' + String(r['Part']).replace(/\n/g, ' | ') : 'tidak ada');
   });
+  if (opts.layar === false) return ids;
   R.safe('Layar' + tag, function () {
     timed('Buka aplikasi (apiBootstrap)' + tag, B.layar, function () { return apiBootstrap('', '', {}); });
     timed('Halaman line (scan QR)' + tag, B.layar, function () { return apiGetLine(UJT_LINE_); });
@@ -439,6 +450,128 @@ function ujtArsip() {
   });
   try { ids = ujtAlur_(R, 'setelah arsip'); } finally { R.safe('Bersihkan data uji', function () { ujtBersih_(ids, R); }); }
   return R.selesai('Coba aplikasi di HP, lalu menu 8.');
+}
+
+// ---------- 9 · profil tombol (diagnosis) ----------
+
+/**
+ * Rincian waktu per fungsi untuk tiap aksi (tahap 4 hanya memberi total). Fungsi global dibungkus pengukur selama menu ini:
+ * waktu INKLUSIF (fungsi di dalam fungsi lain ikut terhitung di keduanya), ×n = jumlah panggilan.
+ * Putaran 2 juga membaca beberapa sel tab berumus sesudah tiap aksi (= menunggu hitung ulang rumus akibat tulisan tadi).
+ */
+var UJT_PROF_ = null;   // { cur: {kunci: [ms, n]}, probe: bool, asli: {nama: fungsi} }
+var UJT_PROF_FN_ = ['readTable_', 'readTail_', 'readOptional_', 'buildMaster_', 'readMasterCache_', 'writeMasterCache_', 'masterData_',
+  'requireUser_', 'userNameMap_', 'writeObj_', 'appendObj_', 'log_', 'syncReports_', 'syncLaporan_', 'usageRows_', 'lineView_', 'serialize_',
+  'bootstrap_', 'validateParts_', 'ensureMaintColumns_', 'setNames_', 'checkTimeouts'];
+var UJT_PROF_ARG_ = { readTable_: 1, readTail_: 1, readOptional_: 1, writeObj_: 1, appendObj_: 1 };   // kunci per nama tab
+
+function ujtProfAdd_(k, ms) {
+  if (!UJT_PROF_ || !UJT_PROF_.cur) return;
+  var x = UJT_PROF_.cur[k] || (UJT_PROF_.cur[k] = [0, 0]);
+  x[0] += ms; x[1]++;
+}
+
+function ujtProfPasang_() {
+  var G = globalThis, asli = {};
+  UJT_PROF_ = { cur: null, probe: false, asli: asli };
+  UJT_PROF_FN_.forEach(function (name) {
+    var f = G[name];
+    if (typeof f !== 'function') return;
+    asli[name] = f;
+    G[name] = function () {
+      var t = Date.now();
+      try { return f.apply(this, arguments); } finally { ujtProfAdd_(UJT_PROF_ARG_[name] ? name + '(' + arguments[0] + ')' : name, Date.now() - t); }
+    };
+  });
+  // kunci dipecah: tunggu kunci · isi · flush (flush = tulisan diterapkan; sering menunggu hitung ulang rumus)
+  asli.withLock_ = G.withLock_;
+  G.withLock_ = function (fn) {
+    var t0 = Date.now(), lock = LockService.getScriptLock();
+    if (!lock.tryLock(APP.LOCK_TIMEOUT_MS)) throw new Error('Server sedang sibuk, coba lagi beberapa detik.');
+    ujtProfAdd_('kunci: tunggu', Date.now() - t0);
+    var t1 = Date.now();
+    try { return fn(); } finally {
+      ujtProfAdd_('kunci: isi', Date.now() - t1);
+      var t2 = Date.now();
+      SpreadsheetApp.flush();
+      ujtProfAdd_('flush', Date.now() - t2);
+      lock.releaseLock();
+    }
+  };
+}
+
+function ujtProfLepas_() {
+  if (!UJT_PROF_) return;
+  var asli = UJT_PROF_.asli;
+  Object.keys(asli).forEach(function (n) { globalThis[n] = asli[n]; });
+  UJT_PROF_ = null;
+}
+
+/** "total 5757 ms · kunci: isi 3900 · readTable_(Maintenance) 2100 · …" (≥ 20 ms, terbesar dulu). */
+function ujtProfTeks_(p, total) {
+  var keys = Object.keys(p || {}).sort(function (a, b) { return p[b][0] - p[a][0]; });
+  return 'total ' + total + ' ms · ' + keys.filter(function (k) { return p[k][0] >= 20; }).slice(0, 16).map(function (k) {
+    return k + ' ' + p[k][0] + (p[k][1] > 1 ? ' ×' + p[k][1] : '');
+  }).join(' · ');
+}
+
+/** Sesudah aksi: baca blok kecil di tab berumus (menunggu hitung ulang FILTER / COUNTIFS akibat tulisan aksi tadi). */
+function ujtProbe_(R, label) {
+  var ss = SpreadsheetApp.getActive(), out = [];
+  ['Pending Work', 'Maintenance Limo7', 'Ringkasan', laporanName_(UJT_.meta.year)].forEach(function (n) {
+    var sh = ss.getSheetByName(n);
+    if (!sh) return;
+    var t = Date.now();
+    sh.getRange(1, 1, Math.min(5, sh.getMaxRows()), Math.min(5, sh.getMaxColumns())).getValues();
+    out.push(n + ' ' + (Date.now() - t));
+  });
+  R.info('Rumus sesudah: ' + label, 'baca 5×5 sel (ms): ' + out.join(' · '));
+}
+
+/** Biaya baca Maintenance per bentuk (3× masing-masing): dasar memilih perbaikan. */
+function ujtUkurBaca_(R) {
+  var ss = SpreadsheetApp.getActive(), sh = sheet_(APP.SHEETS.MAINT), last = sh.getLastRow(), lc = sh.getLastColumn();
+  var id = String(sh.getRange(Math.max(2, last - 300), 1).getValue());
+  var ukur = function (label, fn, n) {
+    var ts = [];
+    for (var i = 0; i < (n || 3); i++) { var t = Date.now(); fn(); ts.push(Date.now() - t); }
+    R.info('Ukur: ' + label, ts.join(' / ') + ' ms', ts.slice().sort(function (a, b) { return a - b; })[Math.floor(ts.length / 2)]);
+  };
+  ukur('Maintenance penuh ' + (last - 1) + ' baris × ' + lc + ' kolom (getDataRange)', function () { sh.getDataRange().getValues(); });
+  ukur('Maintenance kolom A:G saja', function () { sh.getRange(1, 1, last, 7).getValues(); });
+  ukur('Maintenance kolom ID saja', function () { sh.getRange(1, 1, last, 1).getValues(); });
+  ukur('Maintenance 1 baris penuh', function () { sh.getRange(last, 1, 1, lc).getValues(); });
+  ukur('TextFinder: cari 1 ID di kolom A', function () { sh.getRange(2, 1, last - 1, 1).createTextFinder(id).matchEntireCell(true).findNext(); });
+  var vals = sh.getDataRange().getValues(), h = vals[0].map(function (x) { return String(x).trim(); });
+  ukur('Ubah ' + (vals.length - 1) + ' baris jadi object (JS saja, tanpa Sheets)', function () { rowsToObjs_(h, vals.slice(1), 2); });
+  var L = ss.getSheetByName(laporanName_(UJT_.meta.year));
+  if (L) ukur('Laporan: kolom kunci ' + (L.getLastRow() - 1) + ' baris', function () { L.getRange(2, L.getLastColumn(), L.getLastRow() - 1, 1).getValues(); });
+  ukur('Log: getLastRow', function () { sheet_(APP.SHEETS.LOG).getLastRow(); });
+  ukur('Cache master (CacheService)', function () { resetMaster_(); readMasterCache_(); });
+  ukur('Bangun master dari sheet (tanpa cache)', function () { resetMaster_(); resetHeaders_(); buildMaster_(); }, 1);   // ±9 dtk: sekali saja
+}
+
+function ujtProfil() {
+  var R = ujtRunner_(9), ids = [];
+  resetMaster_();
+  try {
+    R.safe('Pengukur dipasang', function () {
+      ujtProfPasang_();
+      UJT_PROF_.cur = {};
+      readOptional_(APP.SHEETS.FACTORY);   // dipanggil lewat nama global → harus tercatat
+      R.ok('Pengukur fungsi aktif (pembungkus global berlaku)', !!UJT_PROF_.cur['readTable_(Factory)'], JSON.stringify(UJT_PROF_.cur));
+    });
+    ids = ids.concat(ujtAlur_(R, 'profil 1'));
+    UJT_PROF_.probe = true;
+    ids = ids.concat(ujtAlur_(R, 'profil 2 + cek rumus', { layar: false }));
+    UJT_PROF_.probe = false;
+    UJT_PROF_.cur = null;
+    R.safe('Ukur baca Maintenance', function () { ujtUkurBaca_(R); });
+  } finally {
+    ujtProfLepas_();
+    R.safe('Bersihkan data uji', function () { ujtBersih_(ids, R); });
+  }
+  return R.selesai('Kirim "sudah" ke Claude.');
 }
 
 // ---------- 8 · selesai ----------
