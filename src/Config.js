@@ -5,7 +5,7 @@
  */
 var APP = {
   NAME: 'MTTR',          // nama default; per lokasi diubah lewat Config → NAMA_APLIKASI
-  VERSION: '2.6.1',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
+  VERSION: '2.6.2',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
   TZ: 'Asia/Jakarta',
   DATE_FMT: 'yyyy-MM-dd HH:mm:ss',
 
@@ -291,7 +291,7 @@ var APP = {
   REKAP_HOUR: 1,
   HISTORY_LIMIT: 500,
   /** Download Riwayat (.xlsx / CSV): batas baris per file. */
-  EXPORT_LIMIT: 5000
+  EXPORT_LIMIT: 12000   // 2.6.2: rentang maksimal 2 tahun (±11.000 pekerjaan pada 15/hari); 5000 memotong Download setahun
 };
 
 /** Membaca nilai dari sheet Config, fallback ke default. */

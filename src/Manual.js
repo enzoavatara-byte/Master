@@ -42,15 +42,15 @@ function apiInputManual(opts) {
       var ym = ymOf_(it.r['Selesai']);
       if (idx[ym] && closed.indexOf(ym) === -1) closed.push(ym);
     });
-    // seperti apiBuildReports: Laporan & Rekap di dalam lock, TPM & KPI di luar
+    // Laporan & Rekap di dalam lock, KPI di luar. 2.6.2: TPM (menerjemahkan teks baru) tidak di sini — 1 baris sempat 99 dtk
+    // dengan data setahun; tab TPM diperbarui trigger malam / Dashboard → Perbarui.
     Object.keys(years).forEach(function (y) { y = Number(y); withLock_(function () { buildRekap_(y); buildLaporan_(y); }); });
-    try { buildTpm_(); } catch (e) { console.warn('TPM: ' + e); }
     Object.keys(years).forEach(function (y) { try { buildKpi_(Number(y)); } catch (e) { console.warn('KPI: ' + e); } });
   }
   var ok = res.items.length, bad = res.errors.length;
   var summary = opts.periksa
     ? (ok || bad ? ok + ' baris benar' + (bad ? ', ' + bad + ' salah (alasan di kolom Hasil)' : '') : 'Tidak ada baris baru di tab ' + APP.SHEETS.MANUAL + '.')
-    : ok + ' pekerjaan dimasukkan' + (bad ? ', ' + bad + ' baris salah tidak dimasukkan (alasan di kolom Hasil)' : '') + '. Laporan, Rekap, TPM & KPI sudah diperbarui.';
+    : ok + ' pekerjaan dimasukkan' + (bad ? ', ' + bad + ' baris salah tidak dimasukkan (alasan di kolom Hasil)' : '') + '. Laporan, Rekap & KPI sudah diperbarui; tab TPM menyusul malam ini (atau Dashboard → Perbarui).';
   if (res.more) summary += ' · ' + res.more + ' baris lagi menunggu jalan berikutnya (maks ' + MANUAL_MAX_ + ' per jalan).';
   if (closed.length) summary += '\n⚠ Bulan KPI ' + closed.map(ymLabel_).join(', ') + ' sudah ditutup: tutup ulang supaya pekerjaan ini ikut dihitung.';
   return { ok: ok, bad: bad, more: res.more, ids: res.items.map(function (it) { return it.r['Maintenance ID']; }), closed: closed, summary: summary };
@@ -153,7 +153,7 @@ function manualRow_(md, o, d, all, user, now) {
 
 /** Tanggal: sel tanggal asli, atau teks dd/mm/yyyy · d-m-yy · yyyy-mm-dd → "yyyy-MM-dd". */
 function manualDate_(v, txt) {
-  if (v instanceof Date && v.getFullYear() > 1900) return Utilities.formatDate(v, APP.TZ, 'yyyy-MM-dd');
+  if (v instanceof Date && v.getFullYear() > 1900) return fmtTz_(v, 'yyyy-MM-dd');
   var m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2}|\d{4})$/.exec(txt), y, mo, dd;
   if (m) { dd = +m[1]; mo = +m[2]; y = +m[3] < 100 ? 2000 + +m[3] : +m[3]; }
   else if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(txt))) { y = +m[1]; mo = +m[2]; dd = +m[3]; }
@@ -227,12 +227,12 @@ function manualWrite_(md, plan, user) {
     sh.getRange(at, 1, rows.length, rows[0].length).setValues(rows);
   };
   var mh = headers_(sheet_(APP.SHEETS.MAINT), APP.SHEETS.MAINT), uh = headers_(sheet_(APP.SHEETS.PEMAKAIAN)), lh = headers_(sheet_(APP.SHEETS.LOG));
-  put(APP.SHEETS.MAINT, plan.items.map(function (it) { return objToRow_(mh, it.r); }));
+  put(APP.SHEETS.MAINT, plan.items.map(function (it) { return objToRow_(mh, it.r, true); }));
   var usage = [];
   plan.items.forEach(function (it) { usage = usage.concat(usageRows_(uh, it.r, it.parts, it.r['Selesai'])); });
   put(APP.SHEETS.PEMAKAIAN, usage);
   put(APP.SHEETS.LOG, plan.items.map(function (it) {
-    var r = it.r, f = function (d, p) { return Utilities.formatDate(d, APP.TZ, p); };
+    var r = it.r, f = function (d, p) { return fmtTz_(d, p); };
     return objToRow_(lh, { 'Timestamp': now, 'Maintenance ID': r['Maintenance ID'], 'Kejadian': APP.EVENTS.INPUT_MANUAL, 'User': user.email,
       'Detail': cleanText_(['Mulai ' + f(r['Mulai'], 'dd/MM/yyyy HH:mm') + ', selesai ' + f(r['Selesai'], 'dd/MM HH:mm'), 'PIC ' + r['Nama teknisi terlibat'],
         'baris ' + it.row + ' tab ' + APP.SHEETS.MANUAL].concat(it.summary, ['Sparepart: ' + r['Part'].replace(/\n/g, '; ')]).join(' · '), 1000) });
@@ -243,7 +243,7 @@ function manualWrite_(md, plan, user) {
 function manualHasil_(sh, plan, written) {
   var c = plan.h.indexOf('Hasil');
   if (c < 0 || plan.last < 2) return;
-  var rg = sh.getRange(2, c + 1, plan.last - 1, 1), v = rg.getValues(), stamp = Utilities.formatDate(new Date(), APP.TZ, 'dd/MM HH:mm');
+  var rg = sh.getRange(2, c + 1, plan.last - 1, 1), v = rg.getValues(), stamp = fmtTz_(new Date(), 'dd/MM HH:mm');
   var closed = written ? kpiClosed_() : {};
   plan.errors.forEach(function (e) { v[e.row - 2][0] = '✗ ' + e.msg; });
   plan.items.forEach(function (it) {

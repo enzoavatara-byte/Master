@@ -126,20 +126,42 @@ function readTail_(name, n) {
   return rowsToObjs_(headers, sh.getRange(first, 1, last - first + 1, headers.length).getValues(), first);
 }
 
-function objToRow_(headers, obj) {
-  return headers.map(function (h) { return obj.hasOwnProperty(h) ? obj[h] : ''; });
+/**
+ * Teks yang akan diubah Sheets saat ditulis diberi awalan ' (Sheets tidak menyimpan tanda itu, teks tetap apa adanya):
+ * angka / jam / tanggal ("16:53", "3/4", "1-2", "10.30"), TRUE/FALSE, atau tanda di depan ("- ganti sensor", "+62…", "=…"
+ * dibaca sebagai rumus → #ERROR!). 2.6.2: "16:53" sempat tersimpan sebagai jam 1899 → Laporan "Sat Dec 30 1899 …".
+ */
+function cellText_(v) {
+  return typeof v === 'string' && (/^[=+\-@']/.test(v) || /^(true|false)$/i.test(v) || /^[\d\s.,:\/\-%]*\d[\d\s.,:\/\-%]*$/.test(v)) ? "'" + v : v;
+}
+
+/** Sheet berisi teks bebas user: nilai teks ditulis lewat cellText_. KPI data & Laporan tidak (kolom berformat teks / angka). */
+var TEXT_SHEETS_ = ['Maintenance', 'Log', 'Pemakaian Sparepart', 'Saran'];
+
+function objToRow_(headers, obj, asText) {
+  return headers.map(function (h) { var v = obj.hasOwnProperty(h) ? obj[h] : ''; return asText ? cellText_(v) : v; });
+}
+
+/** Nilai sel kolom teks → teks. Data lama yang sudah diubah Sheets menjadi jam / tanggal tampil seperti diketik ("16:53"). */
+function textOf_(v) {
+  if (v instanceof Date) {
+    if (v.getTime() < 0) return fmtTz_(v, 'HH:mm');   // jam tanpa tanggal = 30/12/1899
+    var t = fmtTz_(v, 'HH:mm');
+    return fmtTz_(v, 'dd/MM/yyyy') + (t === '00:00' ? '' : ' ' + t);
+  }
+  return v == null ? '' : String(v);
 }
 
 function appendObj_(name, obj) {
   var sh = sheet_(name);
-  sh.appendRow(objToRow_(headers_(sh, name), obj));
+  sh.appendRow(objToRow_(headers_(sh, name), obj, TEXT_SHEETS_.indexOf(name) !== -1));
 }
 
 /** Menulis ulang satu baris penuh (satu panggilan API, bukan per sel). */
 function writeObj_(name, obj) {
   var sh = sheet_(name);
   var headers = headers_(sh, name);
-  sh.getRange(obj._row, 1, 1, headers.length).setValues([objToRow_(headers, obj)]);
+  sh.getRange(obj._row, 1, 1, headers.length).setValues([objToRow_(headers, obj, TEXT_SHEETS_.indexOf(name) !== -1)]);
 }
 
 /** Selalu cari berdasarkan Maintenance ID, tidak pernah berdasarkan nomor baris dari client. */
@@ -164,7 +186,37 @@ function withLock_(fn) {
 }
 
 function fmtDate_(d) {
-  return (d instanceof Date) ? Utilities.formatDate(d, APP.TZ, APP.DATE_FMT) : '';
+  return (d instanceof Date) ? fmtTz_(d, APP.DATE_FMT) : '';
+}
+
+/**
+ * Utilities.formatDate(d, APP.TZ, fmt) tanpa panggilan layanan (2.6.2). Dipanggil per baris di KPI / Laporan / Dashboard /
+ * Statistik: dengan data setahun Utilities.formatDate di sana ±130.000 panggilan lambat (Dashboard 11 dtk, setup 283 dtk).
+ * WIB = UTC+7 tetap sejak 1964 → cukup aritmetika. Tanggal sebelum 1970 (mis. jam tanpa tanggal dari Sheets = 30/12/1899,
+ * saat itu Jakarta +07:07) dan pola selain yyyy yy MM dd HH mm ss u '…' tetap lewat Utilities.
+ */
+var FMT_TZ_RE_ = /'([^']*)'|yyyy|yy|MM|dd|HH|mm|ss|u|[A-Za-z]/g;
+function fmtTz_(d, fmt) {
+  var t = d.getTime();
+  if (!(t >= 0) || APP.TZ !== 'Asia/Jakarta') return Utilities.formatDate(d, APP.TZ, fmt);
+  var j = new Date(t + 7 * 3600000), other = false;
+  var p2 = function (n) { return n < 10 ? '0' + n : String(n); };
+  var out = String(fmt).replace(FMT_TZ_RE_, function (m, lit) {
+    if (lit !== undefined) return lit;
+    switch (m) {
+      case 'yyyy': return String(j.getUTCFullYear());
+      case 'yy': return p2(j.getUTCFullYear() % 100);
+      case 'MM': return p2(j.getUTCMonth() + 1);
+      case 'dd': return p2(j.getUTCDate());
+      case 'HH': return p2(j.getUTCHours());
+      case 'mm': return p2(j.getUTCMinutes());
+      case 'ss': return p2(j.getUTCSeconds());
+      case 'u': return String(j.getUTCDay() || 7);
+    }
+    other = true;
+    return m;
+  });
+  return other ? Utilities.formatDate(d, APP.TZ, fmt) : out;
 }
 
 function iso_(d) {

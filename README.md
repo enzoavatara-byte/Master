@@ -88,6 +88,11 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 
 ## 2. Upgrade
 
+### Ke 2.6.2 (dari 2.6.1)
+Ganti `Api`, `Code`, `Config`, `Db`, `Kpi`, `Maintenance`, `Manual`, `Master`, `Rekap`, `Tpm` (Script) dan `App` (HTML), lalu Deploy → Manage
+deployments → ✏️ → **New version**. Tidak ada sheet / kolom / trigger / izin baru; Run `setup` tidak wajib. Dari 2.6.0 atau lebih lama: ikuti
+langkah 2.6.1 di bawah dengan file 2.6.2 (cukup satu kali Run `setup`).
+
 ### Ke 2.6.1 (dari 2.6.0)
 Buat file Script **`Manual`**; ganti `Api`, `Auth`, `Code`, `Config`, `Db`, `Kpi`, `Maintenance`, `Master`, `Rekap`, `Tampilan`, `Tpm`, `Translate` (Script) dan `App`, `I18n` (HTML). **Run `setup`**: terjemahan Inggris lama yang salah di tab `Terjemahan` dikosongkan sekali (koreksi admin tidak disentuh; tab TPM menerjemahkan ulang malam berikutnya atau lewat Dashboard → Perbarui); tab `Maintenance <baterai>` diganti format laporan per project; tab `Input Manual` dibuat; Cancelled lama keluar dari antrian review; `Rekap` & `Pending Work` disembunyikan, `KPI` setelah Laporan; 3 kunci Config baru (`TPM_DIMATIKAN`, `TAB_BATERAI_DIMATIKAN`, `KPI_TUTUP_OTOMATIS`). Lalu New version. Tidak ada izin baru.
 

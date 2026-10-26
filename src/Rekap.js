@@ -16,8 +16,8 @@ var REKAP_HEADERS_ = ['Bulan\n月份', 'Pekerjaan selesai\n完成数', 'Correcti
   'Total waktu aktif (jam)\n有效时间（小时）', 'Total waktu pause (jam)\n暂停时间（小时）', 'Total waktu pending (jam)\n挂起时间（小时）',
   'Cancelled\n已取消', 'Abandoned\n已放弃', 'Abandoned dihitung ke MTTR\n计入 MTTR 的已放弃'];
 
-function yearOf_(d) { return Number(Utilities.formatDate(d, APP.TZ, 'yyyy')); }
-function monthOf_(d) { return Number(Utilities.formatDate(d, APP.TZ, 'MM')); }
+function yearOf_(d) { return Number(fmtTz_(d, 'yyyy')); }
+function monthOf_(d) { return Number(fmtTz_(d, 'MM')); }
 
 /** Tanggal yang menentukan tahun/bulan rekap; null jika pekerjaan belum final. */
 function finalDate_(r) {
@@ -247,7 +247,7 @@ function stripOther_(v) {
 }
 
 function withDetail_(choice, detail) {
-  var a = stripOther_(choice), b = String(detail || '').trim();
+  var a = stripOther_(choice), b = textOf_(detail).trim();
   return a && b ? a + ' – ' + b : (a || b);
 }
 
@@ -295,8 +295,8 @@ function laporanValue_(src, r, i, used, md, names) {
     case 'Line': return r['Line'];
     case 'Station': return stripOther_(r['Nama Mesin']) || (line ? line.name || line.id : r['Line']);
     case 'Tanggal': return r['Mulai'];
-    case 'Jam mulai': return Utilities.formatDate(r['Mulai'], APP.TZ, 'HH.mm');
-    case 'Jam selesai': return r['Selesai'] instanceof Date ? Utilities.formatDate(r['Selesai'], APP.TZ, 'HH.mm') : '';
+    case 'Jam mulai': return fmtTz_(r['Mulai'], 'HH.mm');
+    case 'Jam selesai': return r['Selesai'] instanceof Date ? fmtTz_(r['Selesai'], 'HH.mm') : '';
     case 'Stop line (1/0)': return r['Stop line'] === APP.YES ? 1 : (r['Stop line'] === APP.NO ? 0 : '');
     case 'Durasi stop line':
       if (r['Stop line'] === APP.NO) return 0;
@@ -450,7 +450,7 @@ function appendArchive_(name, srcHeaders, srcRows, keyOf) {
     srcHeaders.forEach(function (k, i) { o[k] = row[i]; });
     if (existing[keyOf(o)]) return; // jalankan ulang setelah gagal di tengah → tidak dobel
     existing[keyOf(o)] = true;
-    out.push(objToRow_(h, o));
+    out.push(objToRow_(h, o, true));   // teks seperti "16:53" tetap teks di tab arsip
   });
   if (out.length) {
     var at = sh.getLastRow() + 1;
@@ -466,8 +466,9 @@ function appendArchive_(name, srcHeaders, srcRows, keyOf) {
 
 /** Tulis ulang isi sheet hanya dengan baris yang dipertahankan (satu kali tulis, format kolom tetap). */
 function rewriteKeeping_(sh, values, keep) {
-  var head = values[0];
+  var head = values[0], text = TEXT_SHEETS_.indexOf(sh.getName()) !== -1;
   var body = values.slice(1).filter(function (row) { return row[0] !== '' && row[0] !== null && keep(row); });
+  if (text) body = body.map(function (row) { return row.map(cellText_); });   // ditulis ulang: teks "16:53" tidak berubah jadi jam
   var oldN = values.length - 1;
   if (oldN > 0) sh.getRange(2, 1, oldN, head.length).clearContent();
   if (body.length) sh.getRange(2, 1, body.length, head.length).setValues(body);
@@ -567,7 +568,7 @@ function parseTanggalWib_(s) {
   var d = Number(m[1]), mo = Number(m[2]), y = Number(m[3]);
   var t = new Date(Date.UTC(y, mo - 1, d) - 7 * 3600000);   // WIB = UTC+7, tanpa DST
   var two = function (n) { return (n < 10 ? '0' : '') + n; };
-  if (Utilities.formatDate(t, APP.TZ, 'dd/MM/yyyy') !== two(d) + '/' + two(mo) + '/' + y) throw new Error('Tanggal tidak valid: ' + s);
+  if (fmtTz_(t, 'dd/MM/yyyy') !== two(d) + '/' + two(mo) + '/' + y) throw new Error('Tanggal tidak valid: ' + s);
   return t;
 }
 
@@ -661,7 +662,7 @@ function menuHapusDataTesting() {
   if (!n.maintenance) { ui.alert('Tidak ada data yang cocok. Tidak ada yang dihapus.'); return; }
   var r2 = ui.prompt('Konfirmasi hapus permanen',
     'Akan DIHAPUS: ' + n.maintenance + ' pekerjaan, ' + n.log + ' baris Log, ' + n.sparepart + ' baris pemakaian sparepart' +
-    (cutoff ? ' (dimulai sebelum ' + Utilities.formatDate(cutoff, APP.TZ, 'dd/MM/yyyy') + ').' : ' (SEMUA DATA).') + '\n\n' +
+    (cutoff ? ' (dimulai sebelum ' + fmtTz_(cutoff, 'dd/MM/yyyy') + ').' : ' (SEMUA DATA).') + '\n\n' +
     'Sebaiknya backup dulu: File → Make a copy. Bisa juga dikembalikan lewat File → Version history.\n\n' +
     'Ketik HAPUS untuk melanjutkan:', ui.ButtonSet.OK_CANCEL);
   if (r2.getSelectedButton() !== ui.Button.OK || String(r2.getResponseText() || '').trim().toUpperCase() !== 'HAPUS') {

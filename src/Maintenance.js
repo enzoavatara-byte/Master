@@ -87,7 +87,7 @@ function conflictMsg_(r, names) {
 
 /** Format ID: <LINE>-<yyMMdd>-<NN>, nomor urut per line per hari. Dipanggil di dalam lock. */
 function newMaintenanceId_(rows, lineId, now) {
-  var prefix = normLine_(lineId) + '-' + Utilities.formatDate(now, APP.TZ, 'yyMMdd') + '-';
+  var prefix = normLine_(lineId) + '-' + fmtTz_(now, 'yyMMdd') + '-';
   var max = 0;
   rows.forEach(function (r) {
     var id = String(r['Maintenance ID']);
@@ -125,7 +125,7 @@ function assertOwner_(r, user, allowedStatuses) {
 // ---------- Tenggat pending ----------
 
 function wibDayStart_(d, addDays) {
-  var s = Utilities.formatDate(new Date(d.getTime() + (addDays || 0) * 86400000), APP.TZ, 'yyyy-MM-dd');
+  var s = fmtTz_(new Date(d.getTime() + (addDays || 0) * 86400000), 'yyyy-MM-dd');
   return Utilities.parseDate(s + ' 00:00:00', APP.TZ, 'yyyy-MM-dd HH:mm:ss');
 }
 
@@ -201,7 +201,7 @@ function stopLineValue_(md, value, tipe) {
 
 function appendStamped_(r, col, text, now, user) {
   if (!text) return;
-  var stamp = '[' + Utilities.formatDate(now, APP.TZ, 'dd/MM HH:mm') + ' ' + user.name + '] ';
+  var stamp = '[' + fmtTz_(now, 'dd/MM HH:mm') + ' ' + user.name + '] ';
   r[col] = (r[col] ? r[col] + '\n' : '') + stamp + text;
 }
 
@@ -436,7 +436,7 @@ function usageRows_(h, r, parts, now) {
       'Mesin': String(r['Nama Mesin'] || '').replace(APP.OTHER_PREFIX, ''), 'Baterai': r['Baterai'], 'Jenis kerusakan': r['Jenis kerusakan'],
       'Jenis Sparepart': p.jenis, 'Nama Sparepart': p.nama, 'Model': p.model, 'Jumlah': p.qty, 'Satuan': p.satuan,
       'Manual': p.manual ? APP.YES : APP.NO, 'PIC': r['Nama PIC'], 'Email PIC': r['Teknisi terakhir']
-    });
+    }, true);
   });
 }
 

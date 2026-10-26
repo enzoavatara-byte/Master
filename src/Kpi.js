@@ -21,7 +21,7 @@ var KPI_HEADERS_ = [['Bulan', '月份'], ['Level', '层级'], ['Nama', '名称']
 var HARI_ = { min: 0, sen: 1, sel: 2, rab: 3, kam: 4, jum: 5, sab: 6, sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 
 function kpiName_(year) { return KPI_PREFIX_ + year; }
-function ymOf_(d) { return Utilities.formatDate(d, APP.TZ, 'yyyy-MM'); }
+function ymOf_(d) { return fmtTz_(d, 'yyyy-MM'); }
 function ymKey_(year, month) { return year + '-' + (month < 10 ? '0' : '') + month; }
 function ymLabel_(key) { var m = /^(\d{4})-(\d{2})$/.exec(key); return m ? BULAN_[Number(m[2]) - 1] + ' ' + m[1] : key; }
 
@@ -60,7 +60,7 @@ function kpiDate_(v, label, warn) {
 }
 
 function kpiSettings_() {
-  var warn = [], ymd = function (d) { return Utilities.formatDate(d, APP.TZ, 'yyyy-MM-dd'); };
+  var warn = [], ymd = function (d) { return fmtTz_(d, 'yyyy-MM-dd'); };
   var h = Number(String(getConfig_('JAM_OPERASI_PER_HARI')).replace(',', '.'));
   if (!(h > 0 && h <= 24)) {
     warn.push('Config JAM_OPERASI_PER_HARI "' + getConfig_('JAM_OPERASI_PER_HARI') + '" harus 1–24; dipakai 24.');
@@ -77,7 +77,7 @@ function kpiSettings_() {
 
 /** Jumlah hari operasi satu bulan: hari operasi, bukan libur, sejak KPI_MULAI; bulan berjalan s/d hari ini. */
 function kpiDays_(year, month, s, now) {
-  var today = Utilities.formatDate(now, APP.TZ, 'yyyy-MM-dd'), last = new Date(Date.UTC(year, month, 0)).getUTCDate(), n = 0;
+  var today = fmtTz_(now, 'yyyy-MM-dd'), last = new Date(Date.UTC(year, month, 0)).getUTCDate(), n = 0;
   for (var d = 1; d <= last; d++) {
     var key = ymKey_(year, month) + '-' + (d < 10 ? '0' : '') + d;
     if (key > today) break;
@@ -112,7 +112,7 @@ function computeKpi_(year, month, rows, md, s, now, opts) {
     var st = r['Status'];
     if (r['Masuk MTTR'] !== APP.MTTR.YES || (st !== APP.STATUS.COMPLETED && st !== APP.STATUS.ABANDONED)) return;
     var d = finalDate_(r);
-    if (!d || ymOf_(d) !== key || (s.mulai && Utilities.formatDate(d, APP.TZ, 'yyyy-MM-dd') < s.mulai)) return;
+    if (!d || ymOf_(d) !== key || (s.mulai && fmtTz_(d, 'yyyy-MM-dd') < s.mulai)) return;
     var act = Number(r['Total aktif (menit)'] || 0);
     var down = r['Stop line'] === APP.YES && r['Selesai'] instanceof Date && r['Mulai'] instanceof Date
       ? Math.max(0, r['Selesai'].getTime() - r['Mulai'].getTime()) / 3600000 : 0;
@@ -284,7 +284,7 @@ function buildKpi_(year) {
   var nz = function (v) { return v == null ? '' : v; };
   months.forEach(function (m) {
     var key = ymKey_(year, m), c = closed[key];
-    var status = c ? 'Ditutup ' + (c.at instanceof Date ? Utilities.formatDate(c.at, APP.TZ, 'dd/MM/yyyy') : String(c.at || '')) + ' oleh ' + closerName_(names, c.by)
+    var status = c ? 'Ditutup ' + (c.at instanceof Date ? fmtTz_(c.at, 'dd/MM/yyyy') : String(c.at || '')) + ' oleh ' + closerName_(names, c.by)
       : (key === cur ? 'Berjalan' : 'Belum ditutup');
     (c ? c.rows : computeKpi_(year, m, rows, md, s, now)).forEach(function (x) {
       data.push([x.bulan, x.level, x.nama, x.kerusakan, nz(x.mttr), nz(x.targetMttr), x.downtime, x.jamOperasi, nz(x.mtbf), nz(x.targetMtbf), x.tercapai, status]);
@@ -346,7 +346,7 @@ function kpiTutup_(ym, email, note) {
     var plantOf = function (l) { return l.filter(function (x) { return x.level === KPI_LEVEL_.PLANT; })[0]; };
     var plant = plantOf(list);
     log_(now, 'KPI ' + key, APP.EVENTS.TUTUP_BULAN, email, ymLabel_(key) + ': ' + kpiBrief_(plant) + (note ? ' · ' + note : '') +
-      (before ? ' · ditutup ulang; sebelumnya' + (before.at instanceof Date ? ' (' + Utilities.formatDate(before.at, APP.TZ, 'dd/MM/yyyy HH:mm') + ')' : '') +
+      (before ? ' · ditutup ulang; sebelumnya' + (before.at instanceof Date ? ' (' + fmtTz_(before.at, 'dd/MM/yyyy HH:mm') + ')' : '') +
         ': ' + kpiBrief_(plantOf(before.rows)) : ''));
     return { plant: plant, reclosed: !!before, reviews: kpiReviewsOpen_(rows, key) };
   });
@@ -362,7 +362,7 @@ function kpiTutup_(ym, email, note) {
 function kpiTutupOtomatis_(now) {
   now = now || new Date();
   var day = kpiAutoDay_();
-  if (!day || Number(Utilities.formatDate(now, APP.TZ, 'dd')) < day) return '';
+  if (!day || Number(fmtTz_(now, 'dd')) < day) return '';
   var y = yearOf_(now), mo = monthOf_(now), pk = mo === 1 ? ymKey_(y - 1, 12) : ymKey_(y, mo - 1);
   if (kpiClosed_()[pk]) return '';
   var rows = rekapRows_(Number(pk.slice(0, 4))), s = kpiSettings_();
@@ -438,7 +438,7 @@ var STATS_MEASURES_ = ['frek', 'mttr', 'downtime', 'mtbf'];
 var STATS_MTBF_BY_ = ['line', 'proses', 'project'];   // MTBF butuh jam operasi = jumlah line
 var STATS_TOP_ = 30, STATS_DAYS_MAX_ = 93, STATS_ITEMS_MAX_ = 100;
 
-function ymdOf_(d) { return Utilities.formatDate(d, APP.TZ, 'yyyy-MM-dd'); }
+function ymdOf_(d) { return fmtTz_(d, 'yyyy-MM-dd'); }
 
 /** Rentang dari klien: 'yyyy-mm-dd' s/d 'yyyy-mm-dd' (inklusif, WIB). */
 function statsRange_(f) {

@@ -118,9 +118,9 @@ function tpmSpec_(md, r, used, names, ask) {
   return {
     bat: String(r['Baterai']).trim(),
     machine: [P(mesin, true)],
-    issue: [P(r['Masalah'], true), P(r['Detail masalah'])],
-    cause: [P(r['Penyebab'], true), P(r['Detail penyebab'])],
-    sol: [P(r['Penanganan'], true), P(r['Detail penanganan'])],
+    issue: [P(r['Masalah'], true), P(textOf_(r['Detail masalah']))],
+    cause: [P(r['Penyebab'], true), P(textOf_(r['Detail penyebab']))],
+    sol: [P(r['Penanganan'], true), P(textOf_(r['Detail penanganan']))],
     notes: [P(tpmNote_(r['Catatan']))],
     parts: parts,
     end: r['Selesai'] instanceof Date ? r['Selesai'] : '',
@@ -163,15 +163,15 @@ function tpmRow_(sp, i, zhMap, enMap) {
 /** Notes seperti Excel manager: "开始：22:10，影响时长：20分钟 / (Start: 22:10; Downtime: 20 min)". Stop line kosong (data lama) → jam mulai saja. */
 function tpmImpact_(sp) {
   if (!(sp.start instanceof Date)) return '';
-  var hm = Utilities.formatDate(sp.start, APP.TZ, 'HH:mm');
+  var hm = fmtTz_(sp.start, 'HH:mm');
   if (sp.down === '' || sp.down == null) return '开始：' + hm + '\n(Start: ' + hm + ')';
   return '开始：' + hm + '，影响时长：' + sp.down + '分钟\n(Start: ' + hm + '; Downtime: ' + sp.down + ' min)';
 }
 
-function tpmTranslate_(texts, lang, stats) {
+function tpmTranslate_(texts, lang, stats, max) {
   var map = {};
   if (!texts.length) return map;
-  var res = translate_(texts, lang, { max: TPM_TR_MAX_, stats: stats });
+  var res = translate_(texts, lang, { max: max == null ? TPM_TR_MAX_ : max, stats: stats });
   texts.forEach(function (s, i) { map[s] = res[i]; });
   return map;
 }
@@ -181,7 +181,9 @@ function tpmTranslate_(texts, lang, stats) {
  * Jangan dipanggil di dalam withLock_ (terjemahan baru disimpan ke sheet Terjemahan dengan lock sendiri).
  * @return {{sheets: Array<{sheet:string, rows:number}>, from: Date, untranslated: number, warn: string}}
  */
-function buildTpm_() {
+/** @param {{trMax?: number}=} opts trMax = teks baru per bahasa (setup memakai batas kecil; sisanya trigger malam) */
+function buildTpm_(opts) {
+  opts = opts || {};
   var md = masterData_(), names = userNameMap_(), ss = SpreadsheetApp.getActive(), f = tpmFrom_();
   var own = md.projects.map(function (p) { return p.battery; });
   if (/^semua$/i.test(String(getConfig_('TPM_DIMATIKAN') || '').trim())) {   // dimatikan total: tanpa baca data & terjemahan
@@ -194,7 +196,7 @@ function buildTpm_() {
   var specs = rows.map(function (r) { return tpmSpec_(md, r, data.usage[String(r['Maintenance ID'])] || [], names, ask); });
   // Kuota habis / batas per pembangunan → teks tetap asli; diterjemahkan di pembangunan berikutnya (stats.left = jumlahnya).
   var stats = { left: 0 };
-  var zhMap = tpmTranslate_(Object.keys(ask.zh), 'zh', stats), enMap = tpmTranslate_(Object.keys(ask.en), 'en', stats);
+  var zhMap = tpmTranslate_(Object.keys(ask.zh), 'zh', stats, opts.trMax), enMap = tpmTranslate_(Object.keys(ask.en), 'en', stats, opts.trMax);
   var sheets = tabs.on.map(function (bat) {
     var mine = specs.filter(function (sp) { return sp.bat === bat; });
     writeTpmSheet_(ss, bat, mine.map(function (sp, i) { return tpmRow_(sp, i, zhMap, enMap); }), f.date);
@@ -216,7 +218,7 @@ function writeTpmSheet_(ss, bat, rows, from) {
   sh.setConditionalFormatRules([]);
   sh.setHiddenGridlines(true);
 
-  var tipe = String(getConfig_('TPM_TIPE')), day = function (d, f) { return Utilities.formatDate(d, APP.TZ, f); };
+  var tipe = String(getConfig_('TPM_TIPE')), day = function (d, f) { return fmtTz_(d, f); };
   var g = [];
   for (var i = 0; i < 8; i++) { g.push([]); for (var j = 0; j < W; j++) g[i].push(''); }
   var put = function (r, c, v) { g[r - 1][c - 1] = v; };   // c: 1 = kolom A
@@ -271,7 +273,7 @@ function styleTpm_(sh, last) {
 function tpmSummary_(res) {
   if (res.off) return 'Tab TPM dimatikan: Config TPM_DIMATIKAN = Semua. Kosongkan nilainya untuk membuat tab TPM lagi.';
   var lines = res.sheets.map(function (s) { return '• ' + s.sheet + ': ' + s.rows + ' baris'; });
-  return 'Tab TPM diperbarui (' + getConfig_('TPM_TIPE') + ' selesai sejak ' + Utilities.formatDate(res.from, APP.TZ, 'dd/MM/yyyy') + '):\n' +
+  return 'Tab TPM diperbarui (' + getConfig_('TPM_TIPE') + ' selesai sejak ' + fmtTz_(res.from, 'dd/MM/yyyy') + '):\n' +
     (lines.join('\n') || '• (belum ada project di sheet Projects)') +
     (String(getConfig_('TPM_DIMATIKAN') || '').trim() ? '\nTanpa tab TPM (Config TPM_DIMATIKAN): ' + getConfig_('TPM_DIMATIKAN') : '') +
     (res.warn ? '\n\n⚠ ' + res.warn : '') +

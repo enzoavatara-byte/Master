@@ -162,7 +162,14 @@ function cekFile() {
   return APP.VERSION;
 }
 
+// 2.6.2: setup dengan data setahun sempat 283 dtk (batas Apps Script 360). Bangun ulang laporan hanya dimulai bila
+// waktu sejak setup mulai masih di bawah batas ini; yang dilewati dibangun trigger malam / Dashboard → Perbarui.
+var SETUP_BATAS_MS_ = { laporan: 200000, tpm: 220000, kpi: 270000, tampilan: 290000 };
+var SETUP_TR_MAX_ = 100;   // terjemahan TPM baru per bahasa di dalam setup (trigger malam: TPM_TR_MAX_)
+
 function setup() {
+  var t0 = Date.now(), lewat = [];
+  var cukup = function (k) { if (Date.now() - t0 < SETUP_BATAS_MS_[k]) return true; lewat.push(k); return false; };
   cekFile();
   invalidateMaster_();
   var ss = SpreadsheetApp.getActive();
@@ -288,19 +295,27 @@ function setup() {
   var hasChange = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'onMasterChange'; });
   if (!hasChange) ScriptApp.newTrigger('onMasterChange').forSpreadsheet(ss).onChange().create(); // hapus/sisip baris → cache dihapus
   // Lock: setup boleh dijalankan saat teknisi sedang bekerja tanpa bentrok dengan sinkron laporan per aksi.
-  withLock_(function () { buildRekap_(yearOf_(new Date())); buildLaporan_(yearOf_(new Date()), { forceBaterai: true }); });
+  if (cukup('laporan')) withLock_(function () { buildRekap_(yearOf_(new Date())); buildLaporan_(yearOf_(new Date()), { forceBaterai: true }); });
   // Di luar lock (terjemahan baru disimpan dengan lock sendiri). Gagal di sini tidak menggagalkan setup.
   var tpmErr = '';
-  try { buildTpm_(); } catch (e) { tpmErr = 'TPM: ' + (e && e.message || e); console.warn(tpmErr); }
-  try { var kpi = buildKpi_(); if (kpi.warn) notes.push(kpi.warn); } catch (e) { tpmErr += (tpmErr ? ' · ' : '') + 'KPI: ' + (e && e.message || e); console.warn('KPI: ' + e); }
+  if (cukup('tpm')) { try { buildTpm_({ trMax: SETUP_TR_MAX_ }); } catch (e) { tpmErr = 'TPM: ' + (e && e.message || e); console.warn(tpmErr); } }
+  if (cukup('kpi')) {
+    try { var kpi = buildKpi_(); if (kpi.warn) notes.push(kpi.warn); } catch (e) { tpmErr += (tpmErr ? ' · ' : '') + 'KPI: ' + (e && e.message || e); console.warn('KPI: ' + e); }
+  }
 
   var blank = ss.getSheetByName('Sheet1');
   if (blank && ss.getSheets().length > 1 && blank.getLastRow() === 0) ss.deleteSheet(blank);
 
   invalidateMaster_();
   // Tab Ringkasan & Baca Saya, warna, belang, filter, dropdown, urutan & sembunyikan tab. Gagal di sini tidak menggagalkan setup.
-  var p = rapikanTampilan_({ full: true });
+  var p = cukup('tampilan') ? rapikanTampilan_({ full: true }) : [];
   if (tpmErr) p.push(tpmErr);
+  if (lewat.length) {
+    var label = { laporan: 'Laporan & Rekap', tpm: 'tab TPM', kpi: 'tab KPI', tampilan: 'rapikan tampilan' };
+    notes.push('Waktu hampir habis (batas Apps Script 6 menit, ' + Math.round((Date.now() - t0) / 1000) + ' dtk): ' +
+      lewat.map(function (k) { return label[k]; }).join(', ') + ' dilewati. Dibangun trigger malam nanti, atau sekarang lewat ' +
+      'Dashboard → Perbarui' + (lewat.indexOf('tampilan') !== -1 ? ' dan menu Rapikan tampilan spreadsheet' : '') + '.');
+  }
   return 'Setup selesai.' + (notes.length ? ' Catatan: ' + notes.join(' ') : '') + (p.length ? ' Tampilan belum lengkap: ' + p.join(' · ') : '');
 }
 

@@ -5,7 +5,7 @@
  * Kecepatan: membaca 9 sheet di setiap request = puluhan panggilan ke Sheets (lambat). Karena itu master
  * disimpan di CacheService (dipakai bersama semua user) dan HANYA dibaca ulang jika:
  *  - ada yang mengedit spreadsheet secara manual (onEdit / onChange → cache dihapus), atau
- *  - cache kedaluwarsa (MD_CACHE_TTL_, pengaman jika trigger tidak jalan), atau
+ *  - cache kedaluwarsa (MD_CACHE_TTL_ = 6 jam, pengaman jika trigger tidak jalan), atau
  *  - admin memilih menu "Muat ulang data master".
  * Perubahan di sheet tetap langsung terlihat di request berikutnya.
  *
@@ -15,7 +15,9 @@
 
 var MD_MEMO_ = null;
 var MD_CACHE_KEY_ = 'mttr-md-25a';   // naikkan jika struktur md berubah (cache lama otomatis diabaikan)
-var MD_CACHE_TTL_ = 600;             // detik
+// 6 jam = batas CacheService. Edit sel tab pengaturan sudah menghapus cache (onEdit), jadi TTL hanya pengaman. Dulu 600 dtk:
+// setiap jeda >10 menit tombol pertama membaca ulang ±12 tab (Mulai 9–11 dtk di Apps Script asli; uji 2.6.1 & uji 1 tahun).
+var MD_CACHE_TTL_ = 21600;           // detik
 var MD_CHUNK_ = 24000;               // karakter per potongan (batas CacheService 100 KB per nilai)
 
 /** Lupakan data per-request (memo master & header). Cache bersama TIDAK dihapus. */

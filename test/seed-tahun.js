@@ -412,7 +412,8 @@ for (let d = 0; d < 365; d++) {
 // satu laporan WeChat Februari yang baru masuk setelah tutup bulan (⚠) → admin menutup ulang Februari
 planManual(at0(2026, 2, 26) + 14 * H, at0(2026, 3, 8) + 10 * H, true);
 // perubahan master selama setahun
-ev(JOIN.galih.masuk + 7 * H, () => { ss.getSheetByName('Users').appendRow(rowOf('Users', userRow('galih@example.com'))); ctx.invalidateMaster_(); });
+// tepat saat mulai bertugas (dulu 07:00): sebelumnya ia bisa dipilih sebagai PIC tambahan sebelum ada di Users
+ev(JOIN.galih.masuk, () => { ss.getSheetByName('Users').appendRow(rowOf('Users', userRow('galih@example.com'))); ctx.invalidateMaster_(); });
 ev(LEAVE.rizal + 7 * H, () => { const U = ss.getSheetByName('Users'), h = U.data[0]; U.data.find(r => r[0] === 'rizal@example.com')[h.indexOf('Aktif')] = 'Tidak'; ctx.invalidateMaster_(); });
 ev(at0(2026, 6, 1) + 7 * H, () => { const L = ss.getSheetByName('Lines'), h = L.data[0];
   L.data.forEach((r, i) => { if (i && r[h.indexOf('Factory ID')] === 'F10') r[h.indexOf('Aktif')] = 'Tidak'; }); ctx.invalidateMaster_(); });

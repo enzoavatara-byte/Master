@@ -49,9 +49,9 @@ function serialize_(r, c) {
     proses: prosesOfRecord_(c.md, r),
     stopLine: String(r['Stop line'] || ''),
     jenisKerusakan: String(r['Jenis kerusakan'] || ''),
-    detailMasalah: String(r['Detail masalah'] || ''),
-    detailPenyebab: String(r['Detail penyebab'] || ''),
-    detailPenanganan: String(r['Detail penanganan'] || ''),
+    detailMasalah: textOf_(r['Detail masalah']),
+    detailPenyebab: textOf_(r['Detail penyebab']),
+    detailPenanganan: textOf_(r['Detail penanganan']),
     tertunda: String(r['Yang tertunda'] || ''),
     tenggatIso: iso_(tenggat),
     tenggatText: fmtDate_(tenggat),
@@ -79,7 +79,7 @@ function extraFields_(r, c) {
     (c.md.forms[f] || []).forEach(function (d) {
       if (d.type === 'sistem' || system.indexOf(d.field) !== -1) return;
       if (r[d.field] !== undefined && r[d.field] !== '' && !out.some(function (o) { return o.label === d.label; })) {
-        out.push({ label: d.label, value: String(r[d.field]) });
+        out.push({ label: d.label, value: textOf_(r[d.field]) });
       }
     });
   });
@@ -181,8 +181,8 @@ function stats_(rows, c, filter) {
   var names = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
   for (var i = 6; i >= 0; i--) {
     var d = new Date(c.now.getTime() - i * 86400000);
-    var key = Utilities.formatDate(d, APP.TZ, 'yyyy-MM-dd');
-    var dow = Number(Utilities.formatDate(d, APP.TZ, 'u')) % 7; // 1=Senin..7=Minggu -> 0=Minggu
+    var key = fmtTz_(d, 'yyyy-MM-dd');
+    var dow = Number(fmtTz_(d, 'u')) % 7; // 1=Senin..7=Minggu -> 0=Minggu
     idx[key] = days.length;
     days.push({ key: key, label: i === 0 ? 'Hari ini' : names[dow], count: 0 });
   }
@@ -192,7 +192,7 @@ function stats_(rows, c, filter) {
     if (!matchFilter_(c.md, r, filter, c.names)) return;
     var when = r['Selesai'] instanceof Date ? r['Selesai'] : r['Status sejak'];
     if (!(when instanceof Date)) return;
-    var k = Utilities.formatDate(when, APP.TZ, 'yyyy-MM-dd');
+    var k = fmtTz_(when, 'yyyy-MM-dd');
     if (!idx.hasOwnProperty(k)) return;
     days[idx[k]].count++;
     if (r['Masuk MTTR'] === APP.MTTR.YES) { sum += Number(r['Total aktif (menit)'] || 0); n++; }
@@ -534,7 +534,7 @@ function apiDashboard(f) {
   var weekMs = 7 * 86400000;
   for (var w = 11; w >= 0; w--) {
     var end = new Date(c.now.getTime() - w * weekMs);
-    weeks.push({ startMs: end.getTime() - weekMs, endMs: end.getTime(), label: Utilities.formatDate(new Date(end.getTime() - weekMs + 86400000), APP.TZ, 'dd/MM'), count: 0, sum: 0, n: 0 });
+    weeks.push({ startMs: end.getTime() - weekMs, endMs: end.getTime(), label: fmtTz_(new Date(end.getTime() - weekMs + 86400000), 'dd/MM'), count: 0, sum: 0, n: 0 });
   }
   all.forEach(function (r) {
     if (r['Status'] !== APP.STATUS.COMPLETED && r['Masuk MTTR'] !== APP.MTTR.YES) return;
@@ -663,7 +663,7 @@ function apiSaranKirim(p) {
   withLock_(function () {
     var now = new Date();
     appendObj_(APP.SHEETS.SARAN, {
-      'ID': 'S' + Utilities.formatDate(now, APP.TZ, 'yyMMddHHmmss') + '-' + Math.floor(Math.random() * 46656).toString(36),
+      'ID': 'S' + fmtTz_(now, 'yyMMddHHmmss') + '-' + Math.floor(Math.random() * 46656).toString(36),
       'Tanggal': now, 'Email': user.email, 'Nama': user.name, 'Kategori': kat, 'Isi': isi, 'Bahasa': lang,
       'Terjemahan': tr === isi ? '' : tr, 'Status': 'Baru'
     });

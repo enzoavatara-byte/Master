@@ -2461,4 +2461,120 @@ test('2.6.1 format tanggal baris baru (appendRow) dipasang ulang tiap malam, tan
   ['Mulai', 'Selesai'].forEach(n => assert.ok(M.fmt.some(f => f[0] === 'setNumberFormat' && f[1] === '2,' + (mh.indexOf(n) + 1) + ':' + (M.getMaxRows() - 1) + 'x1'), 'Maintenance ' + n));
 });
 
+test('2.6.2 fmtTz_ = zona waktu asli (Intl Asia/Jakarta) untuk semua pola dipakai; sebelum 1970 & pola lain lewat Utilities', () => {
+  const p2 = (n) => String(n).padStart(2, '0');
+  const ref = (t, fmt) => {   // basis data zona waktu sungguhan (ICU), bukan aritmetika +7 seperti mock
+    const o = {};
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+      second: '2-digit', weekday: 'short', hourCycle: 'h23' }).formatToParts(new Date(t)).forEach(x => { o[x.type] = x.value; });
+    const u = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }[o.weekday];
+    return fmt.replace(/'([^']*)'|yyyy|yy|MM|dd|HH|mm|ss|u/g, (m, lit) => lit !== undefined ? lit
+      : { yyyy: o.year, yy: o.year.slice(2), MM: o.month, dd: o.day, HH: o.hour, mm: o.minute, ss: o.second, u: String(u) }[m]);
+  };
+  const pola = ['HH.mm', 'HH:mm', 'MM', 'dd', 'dd/MM HH:mm', 'dd/MM', 'dd/MM/yyyy HH:mm', 'dd/MM/yyyy', 'u', 'yyMMdd', 'yyMMddHHmmss', 'yyyy', 'yyyy-MM',
+    'yyyy-MM-dd', ctx.APP.DATE_FMT, "dd'月'"];
+  let x = 12345;
+  for (let i = 0; i < 1500; i++) {
+    x = (x * 1103515245 + 12345) % 2147483648;
+    const t = Date.UTC(1971, 0, 1) + (x / 2147483648) * (Date.UTC(2045, 0, 1) - Date.UTC(1971, 0, 1));
+    pola.forEach(p => assert.strictEqual(ctx.fmtTz_(new FakeDate(t), p), ref(t, p), p + ' @ ' + new Date(t).toISOString()));
+  }
+  // batas hari WIB: 16:59:59Z = 23:59:59 WIB, 17:00Z = 00:00 hari berikutnya
+  assert.strictEqual(ctx.fmtTz_(new FakeDate(Date.UTC(2026, 11, 31, 16, 59, 59)), 'yyyy-MM-dd HH:mm:ss'), '2026-12-31 23:59:59');
+  assert.strictEqual(ctx.fmtTz_(new FakeDate(Date.UTC(2026, 11, 31, 17, 0, 0)), 'yyyy-MM-dd HH:mm'), '2027-01-01 00:00');
+  const real = ctx.Utilities.formatDate;
+  let calls = 0;
+  ctx.Utilities.formatDate = function () { calls++; return real.apply(this, arguments); };
+  try {
+    ctx.fmtTz_(new FakeDate(Date.UTC(1899, 11, 30, 9, 53)), 'HH:mm');   // jam tanpa tanggal dari Sheets (Jakarta 1899 = +07:07)
+    ctx.fmtTz_(new FakeDate(Date.UTC(2026, 0, 1)), 'yyyy');
+    assert.strictEqual(calls, 1, 'hanya tanggal sebelum 1970 yang lewat Utilities');
+  } finally { ctx.Utilities.formatDate = real; }
+});
+
+test('2.6.2 cache master 6 jam; edit sel tab pengaturan (juga yang diganti nama) menghapus cache, tab lain tidak', () => {
+  assert.strictEqual(ctx.MD_CACHE_TTL_, 21600);
+  cache.enabled = true;
+  try {
+    const key = ctx.MD_CACHE_KEY_ + ':n', warm = () => { ctx.invalidateMaster_(); ctx.masterData_(); assert.ok(cache.store[key], 'cache terisi'); };
+    warm();
+    ctx.onEdit({ range: ss.getSheetByName('Laporan 2026').getRange(3, 1) });
+    assert.ok(cache.store[key], 'edit Laporan tidak menghapus cache');
+    ctx.onEdit({ range: ss.getSheetByName('Users').getRange(2, 2) });
+    assert.ok(!cache.store[key], 'edit Users menghapus cache');
+    warm();
+    const L = ctx.findSheet_('Lines'), old = L.getName();
+    L.setName('Daftar Mesin');
+    try { ctx.resetMaster_(); ctx.onEdit({ range: L.getRange(2, 2) }); assert.ok(!cache.store[key], 'tab pengaturan yang diganti nama tetap dikenali'); }
+    finally { L.setName(old); ctx.resetMaster_(); }
+  } finally { cache.enabled = false; cache.store = {}; ctx.invalidateMaster_(); }
+});
+
+test('2.6.2 teks bebas tidak diubah Sheets: "16:53", "- ganti", "+62…" disimpan sebagai teks; data lama Date tampil "16:53"', () => {
+  const q = ctx.cellText_;
+  ['16:53', '16:53:00', '10.30', '3/4', '1-2', '2026-10-01', '- ganti sensor', '+62 812 1234', '=SUM(A1)', '@budi', 'TRUE', "'kutip", '50%']
+    .forEach(s => assert.strictEqual(q(s), "'" + s, s));
+  ['Sensor 3/4 kendur', 'L01-261022-02', 'GX-YN-01-4109', 'Ganti fuse 10A', '', 'Lainnya: 16:53'].forEach(s => assert.strictEqual(q(s), s, s));
+  [12, null, true].forEach(v => assert.strictEqual(q(v), v));
+  const M = ss.getSheetByName('Maintenance'), q0 = M.quoted || 0;
+  const id = as('budi@gmail.com', () => ctx.apiStart('L01', { baterai: 'E22H' })).open.id;
+  as('budi@gmail.com', () => ctx.apiComplete(id, sel('Sensor error', { tanpaPart: true,
+    values: { 'Jenis kerusakan': 'Elektrikal', Masalah: 'Sensor error', Penyebab: 'Komponen aus', Penanganan: 'Ganti part',
+      'Detail masalah': '16:53', 'Detail penyebab': '- konektor longgar', 'Detail penanganan': 'Kencangkan konektor' } })));
+  assert.ok((M.quoted || 0) - q0 >= 2, 'ditulis dengan awalan \' (Sheets menyimpannya sebagai teks)');
+  const r = rec(id);
+  assert.strictEqual(r['Detail masalah'], '16:53');
+  assert.strictEqual(r['Detail penyebab'], '- konektor longgar');
+  // data lama: Sheets sudah mengubah "16:53" menjadi jam 30/12/1899
+  r['Detail penyebab'] = new FakeDate(Date.UTC(1899, 11, 30, 9, 53));
+  const md = ctx.masterData_();
+  assert.strictEqual(ctx.laporanValue_('Penyebab + detail', r, 0, [], md, {}), 'Komponen aus – 16:53');
+  assert.strictEqual(ctx.textOf_(new FakeDate(Date.UTC(2026, 2, 3, 17))), '04/03/2026');
+  assert.strictEqual(ctx.textOf_(new FakeDate(Date.UTC(2026, 2, 3, 3, 30))), '03/03/2026 10:30');
+});
+
+test('2.6.2 setup tidak melewati batas waktu: bila waktu habis, struktur & trigger selesai, bangun ulang dilewati dengan catatan', () => {
+  const real = ctx.SETUP_BATAS_MS_, realTpm = ctx.buildTpm_;
+  let tpmOpts = null;
+  ctx.buildTpm_ = function (opts) { tpmOpts = opts; return realTpm.apply(this, arguments); };
+  try {
+    as('owner@gmail.com', () => ctx.setup());
+    assert.strictEqual(tpmOpts && tpmOpts.trMax, ctx.SETUP_TR_MAX_, 'TPM di dalam setup memakai batas terjemahan kecil');
+    ctx.SETUP_BATAS_MS_ = { laporan: -1, tpm: -1, kpi: -1, tampilan: -1 };
+    tpmOpts = null;
+    const msg = as('owner@gmail.com', () => ctx.setup());
+    assert.match(msg, /Waktu hampir habis .*Laporan & Rekap, tab TPM, tab KPI, rapikan tampilan dilewati/, msg);
+    assert.strictEqual(tpmOpts, null, 'TPM tidak dibangun');
+    ['checkTimeouts', 'refreshRekap', 'onMasterChange'].forEach(fn => assert.ok(triggers.some(t => t.getHandlerFunction() === fn), fn));
+  } finally { ctx.SETUP_BATAS_MS_ = real; ctx.buildTpm_ = realTpm; }
+});
+
+test('2.6.2 Input Manual tidak membangun TPM (trigger malam); Laporan & KPI tetap', () => {
+  const realTpm = ctx.buildTpm_, M = ss.getSheetByName('Input Manual');
+  let n = 0;
+  ctx.buildTpm_ = function () { n++; return realTpm.apply(this, arguments); };
+  try {
+    const A = ctx.readTable_('Users').filter(u => u.Peran === 'Teknisi' && u.Aktif === 'Ya' && u.Nama)[0];
+    const d = new FakeDate(new FakeDate().getTime() - 3 * 86400000);
+    M.appendRow(rowOf('Input Manual', { Tanggal: ctx.Utilities.formatDate(d, 'Asia/Jakarta', 'dd/MM/yyyy'), 'Jam mulai': '05:10', 'Jam selesai': '05:40',
+      Line: 'L10', Baterai: 'E22H', 'Stop line': 'Ya', 'Jenis kerusakan': 'Elektrikal', Masalah: 'Sensor error', Penyebab: 'Komponen aus',
+      Penanganan: 'Ganti part', PIC: A.Nama }));
+    const res = as('owner@gmail.com', () => ctx.apiInputManual({}));
+    assert.strictEqual(res.ok, 1, res.summary);
+    assert.strictEqual(n, 0, 'TPM tidak dibangun di Input Manual');
+    assert.match(res.summary, /tab TPM menyusul malam ini/);
+    const lap = ss.getSheetByName(ctx.laporanName_(ctx.yearOf_(new FakeDate()))).data;
+    assert.ok(lap.some(r => r[r.length - 1] === res.ids[0]), 'langsung ada di Laporan');
+  } finally { ctx.buildTpm_ = realTpm; }
+});
+
+test('2.6.2 Download: batas 12000 baris (setahun penuh); file Excel tanpa warna teks / isian eksplisit (mode gelap HP)', () => {
+  assert.strictEqual(ctx.APP.EXPORT_LIMIT, 12000);
+  const html = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'App.html'), 'utf8');
+  const i = html.indexOf('  function xlsxOf('), src = html.slice(i, html.indexOf('\n  }\n', i));
+  assert.ok(i > 0 && !/argb|fgColor|color\s*:/.test(src), 'xlsxOf tanpa warna eksplisit');
+  assert.match(src, /row\.font = plain/);
+  assert.match(src, /head\.height = /);
+});
+
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

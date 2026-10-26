@@ -3,6 +3,24 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.2 — perbaikan dari uji beban 1 tahun
+Ditemukan oleh uji beban 1 tahun di Apps Script asli (spreadsheet uji Cikarang, 5.580 pekerjaan ±15/hari, isi dari Troublelog F1).
+Ganti `Api`, `Code`, `Config`, `Db`, `Kpi`, `Maintenance`, `Manual`, `Master`, `Rekap`, `Tpm` (Script) dan `App` (HTML), lalu New version.
+Tidak ada sheet, kolom, trigger, atau izin baru (Run `setup` tidak wajib).
+
+**Berlaku sejak hari pertama**
+- **Tombol pertama tidak lagi ±10 dtk.** Cache data pengaturan hanya 10 menit, jadi setelah jeda >10 menit tombol pertama membaca ulang ±12 tab (uji 1 tahun: Mulai 10,4 dtk; uji 2.6.1: 9,5 dtk). Sekarang 6 jam; edit sel di tab pengaturan tetap langsung terlihat (onEdit sudah menghapus cache). Trigger 15 menit ikut lebih ringan.
+- **Download Excel tampak kosong di HP mode gelap.** Datanya ada, tetapi teks ditulis dengan warna tema hitam eksplisit → hitam di atas hitam di Google Sheets mode gelap; judul kolom dua baris (中文 + Indonesia) terpotong di baris setinggi satu baris. Sekarang teks tanpa warna eksplisit (ikut tema terang / gelap), judul kolom tebal + garis bawah setinggi isinya, tinggi baris data mengikuti isi (sparepart ke bawah, teks panjang).
+- **Teks bebas diubah Sheets.** Detail seperti "16:53" tersimpan sebagai jam 1899 dan tampil "Sat Dec 30 1899 16:53:00 GMT+0707" di Laporan; teks berawalan "-" / "+" / "=" ("- ganti sensor", "+62…") bisa menjadi rumus #ERROR!. Teks yang akan diubah Sheets kini ditulis sebagai teks (Maintenance, Log, Pemakaian Sparepart, Saran, Input Manual, arsip); data lama yang sudah berubah ditampilkan kembali "16:53" di Laporan, Riwayat, TPM & Download.
+
+**Data setahun**
+- **Format tanggal tanpa panggilan layanan Google:** `Utilities.formatDate` dipanggil per baris (±130.000× untuk KPI setahun) → Dashboard 11–12 dtk, Statistik 9–10 dtk, `setup` 283 dtk. Sekarang dihitung langsung (WIB = UTC+7 tetap; tanggal sebelum 1970 tetap lewat Google). Hasil dicek sama dengan basis data zona waktu sungguhan.
+- **Download Riwayat setahun terpotong di 5.000 baris** (setahun 5.458) → batas 12.000 (rentang maksimal 2 tahun).
+- **`setup` tidak pernah menyentuh batas 6 menit:** bangun ulang Laporan / TPM / KPI / tampilan hanya dimulai bila waktu masih cukup; yang dilewati disebut di pesan setup dan dibangun trigger malam (atau Dashboard → Perbarui). Terjemahan TPM baru di dalam setup dibatasi 100 per bahasa (sisanya trigger malam).
+- **Input Manual lebih cepat:** tidak lagi membangun tab TPM (yang menerjemahkan teks baru; 1 baris sempat 99 dtk). Laporan, Rekap & KPI tetap langsung; TPM menyusul malam itu.
+
+**Uji:** 6 test baru (100 test). Uji 1 tahun dipecah menjadi 8 menu (Input Manual & tutup ulang menu sendiri; aksi diukur sebagai permintaan web baru; satu ukuran "pertama setelah tab pengaturan diedit"); catatan "di produksi akan gagal" untuk tahap 4 & 6 putaran pertama keliru (menu uji yang terlalu panjang, bukan aplikasi).
+
 ## 2.6.1 — perbaikan dari uji di Apps Script asli
 Ditemukan saat 2.6 dijalankan di Apps Script & Google Sheets asli (spreadsheet uji kosong, 104 pekerjaan berbeda-beda → Laporan 100 baris).
 Buat file Script `Manual`; ganti `Api`, `Auth`, `Code`, `Config`, `Db`, `Kpi`, `Maintenance`, `Master`, `Rekap`, `Tampilan`, `Tpm`, `Translate` (Script) dan `App`, `I18n` (HTML). Run `setup`, New version.

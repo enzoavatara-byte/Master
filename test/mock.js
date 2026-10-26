@@ -10,6 +10,8 @@ const assert = require('assert');
 
 // ---------- Jam palsu ----------
 const clock = { now: Date.UTC(2026, 8, 30, 1, 0, 0) }; // 30 Sep 2026 08:00 WIB
+// Seperti Sheets: awalan ' = paksa teks; tandanya tidak ikut tersimpan (sh.quoted menghitung, untuk test 2.6.2)
+const unquote = (sh, v) => { if (typeof v === 'string' && v[0] === "'") { sh.quoted = (sh.quoted || 0) + 1; return v.slice(1); } return v; };
 class FakeDate extends Date {
   constructor(...a) { if (a.length === 0) super(clock.now); else super(...a); }
   static now() { return clock.now; }
@@ -35,7 +37,7 @@ class Range {
     for (let i = 0; i < this.nr; i++) {
       const idx = this.r - 1 + i;
       while (this.sh.data.length <= idx) this.sh.data.push([]);
-      for (let j = 0; j < this.nc; j++) this.sh.data[idx][this.c - 1 + j] = v[i][j];
+      for (let j = 0; j < this.nc; j++) this.sh.data[idx][this.c - 1 + j] = unquote(this.sh, v[i][j]);
     }
     return this;
   }
@@ -124,7 +126,7 @@ class Sheet {
     return new Range(this, r, c, nr || 1, nc || 1);
   }
   getDataRange() { return new Range(this, 1, 1, this.getLastRow(), this.getLastColumn()); }
-  appendRow(row) { this.data.length = this._last(); this.data.push(row.slice()); }
+  appendRow(row) { this.data.length = this._last(); this.data.push(row.map(v => unquote(this, v))); }
   setFrozenRows(n) { this.frozenRows = n; }
   setFrozenColumns(n) { this.frozenCols = n; }
   clear() { this.data = []; this.formulas = {}; this.fmt = []; }

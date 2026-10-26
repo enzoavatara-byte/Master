@@ -1497,11 +1497,17 @@
     ws.addRow([res.title || res.appName]);
     ws.mergeCells(1, 1, 1, Math.max(1, n));
     ws.getRow(1).font = { bold: true, size: 13 };
+    // 2.6.2: tanpa warna teks / isian eksplisit. Font bawaan ExcelJS berwarna tema hitam → di Google Sheets HP mode gelap
+    // hitam di atas hitam, file tampak kosong. Font tanpa warna ikut tema (terang / gelap).
+    var plain = { name: 'Calibri', size: 11 };
     var head = ws.addRow(res.columns.map(function (c) { return c.name; }));
-    head.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    head.alignment = { wrapText: true, vertical: 'middle' };
-    head.eachCell(function (c) { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F4B6E' } }; });
-    var width = res.columns.map(function (c) { return Math.min(40, Math.max(8, String(c.name).length + 2)); });
+    head.font = { name: 'Calibri', size: 11, bold: true };
+    head.alignment = { wrapText: true, vertical: 'top' };
+    head.eachCell(function (c) { c.border = { bottom: { style: 'medium' } }; });
+    // judul dua bahasa ("序号\nNO") = 2 baris: tinggi baris mengikuti, tidak terpotong
+    head.height = 15 * Math.max.apply(null, res.columns.map(function (c) { return String(c.name).split('\n').length; })) + 3;
+    var width = res.columns.map(function (c) { return Math.min(40, Math.max(8, Math.max.apply(null, String(c.name).split('\n').map(function (x) { return x.length + 2; })))); });
+    var rows = [];
     res.rows.forEach(function (r) {
       var row = ws.addRow(r.map(function (v) { return v && typeof v === 'object' && v.d ? wib(v) : v; }));
       r.forEach(function (v, i) {
@@ -1510,9 +1516,21 @@
         var lines = String(v && v.d ? '00/00/0000 00:00' : v).split('\n');   // sparepart ke bawah: satu baris per part
         width[i] = Math.min(50, Math.max(width[i], Math.max.apply(null, lines.map(function (x) { return x.length + 2; }))));
       });
+      row.font = plain;
       row.alignment = { wrapText: true, vertical: 'top' };
+      rows.push([row, r]);
     });
     ws.columns.forEach(function (col, i) { col.width = width[i]; });
+    // tinggi baris = baris teks terpanjang setelah dibungkus lebar kolom (Google Sheets tidak menyesuaikan sendiri)
+    rows.forEach(function (x) {
+      var lines = 1;
+      x[1].forEach(function (v, i) {
+        if (v == null || (typeof v === 'object' && v.d)) return;
+        var k = String(v).split('\n').reduce(function (a, s) { return a + Math.max(1, Math.ceil(s.replace(/[^\x00-\xff]/g, 'xx').length / Math.max(1, width[i] - 1))); }, 0);
+        if (k > lines) lines = k;
+      });
+      if (lines > 1) x[0].height = 15 * Math.min(lines, 15);
+    });
     ws.views = [{ state: 'frozen', ySplit: 2 }];
     ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: n } };
     return wb.xlsx.writeBuffer().then(function (buf) {
