@@ -135,8 +135,11 @@ function projectTabs_(key, nameOf, bats) {
   if (gone.length) {
     var val = (raw ? raw + ', ' : '') + gone.join(', ');
     setConfig_(key, val);
-    log_(new Date(), key, 'tab dimatikan', currentEmail_() || 'SYSTEM', 'Tab ' + gone.map(nameOf).join(', ') + ' dihapus → Config ' + key + ' = ' + val +
-      '. Hapus namanya dari Config untuk membuat tabnya lagi.');
+    var tulis = function () {
+      log_(new Date(), key, 'tab dimatikan', currentEmail_() || 'SYSTEM', 'Tab ' + gone.map(nameOf).join(', ') + ' dihapus → Config ' + key + ' = ' + val +
+        '. Hapus namanya dari Config untuk membuat tabnya lagi.');
+    };
+    if (LOCK_DEPTH_) tulis(); else withLock_(tulis);   // 2.6.3: Log hanya ditulis di dalam kunci (appendObj_ jalur cepat)
     off = off.concat(gone.map(function (b) { return b.toLowerCase(); }));
   }
   var on = bats.filter(function (b) { return !isOff(b); });

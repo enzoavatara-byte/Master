@@ -241,7 +241,7 @@ function apiStart(lineId, p) {
   var stop = stopLineValue_(md, p.stopLine, tipe);
 
   var rows = withLock_(function () {
-    var rows = readTable_(APP.SHEETS.MAINT);
+    var rows = readHot_();   // 2.6.3: ekor + pekerjaan terbuka/pending (pekerjaan saya, bentrok line, ID hari ini ada di sini)
     var mine = openForUser_(rows, user.email);
     if (mine) throw new Error('Anda masih punya maintenance ' + mine['Status'] + ' (' + mine['Maintenance ID'] + '). Selesaikan, pending, atau cancel dulu.');
     var other = openConflict_(rows, line.id, '');
@@ -339,8 +339,8 @@ function apiPending(id, input) {
 function apiContinue(id, scannedLineId) {
   var user = requireUser_();
   var res = withLock_(function () {
-    var rows = readTable_(APP.SHEETS.MAINT);
-    var r = findById_(rows, id);
+    var rows = readHot_();
+    var r = findHot_(rows, id);
     if (!r) throw new Error('Maintenance tidak ditemukan.');
     if (r['Status'] !== APP.STATUS.PENDING) throw new Error('Maintenance ' + id + ' tidak lagi Pending (status ' + r['Status'] + ').');
     if (normLine_(scannedLineId) !== normLine_(r['Line'])) {
@@ -506,8 +506,8 @@ function apiCancel(id, input, catatan) {
   var f = validateForm_(md, 'Cancel', input);
 
   var res = withLock_(function () {
-    var rows = readTable_(APP.SHEETS.MAINT);
-    var r = findById_(rows, id);
+    var rows = readHot_();
+    var r = findHot_(rows, id);
     if (!r) throw new Error('Maintenance tidak ditemukan.');
     if (!isOpen_(r)) throw new Error('Maintenance ' + id + ' berstatus ' + r['Status'] + '; tidak bisa di-cancel.');
     var owner = String(r['Teknisi terakhir']).toLowerCase() === user.email;
@@ -530,8 +530,8 @@ function apiCancel(id, input, catatan) {
 /** Pola umum: lock -> baca -> cek pemilik & status -> ubah -> tulis -> log. */
 function mutate_(id, user, allowed, fn) {
   var res = withLock_(function () {
-    var rows = readTable_(APP.SHEETS.MAINT);
-    var r = findById_(rows, id);
+    var rows = readHot_();
+    var r = findHot_(rows, id);
     assertOwner_(r, user, allowed);
     var now = new Date();
     var ev = fn(r, now);    // [kejadian, detail log, sparepart (khusus Selesai)]
@@ -563,7 +563,7 @@ function checkTimeouts() {
 
   withLock_(function () {
     var now = new Date();
-    var rows = readTable_(APP.SHEETS.MAINT);
+    var rows = readHot_();   // hanya pekerjaan terbuka yang diperiksa: semuanya ada di baris panas
     rows.forEach(function (r) {
       if (!isOpen_(r)) return;
       var ref = r['Konfirmasi terakhir'] instanceof Date ? r['Konfirmasi terakhir'] : r['Mulai'];

@@ -194,10 +194,11 @@ function syncLaporan_(r, parts) {
   var md = masterData_(), cols = md.report, w = Math.max(1, cols.length);
   if (!sh) { buildLaporan_(year); return; }
   var last = sh.getLastRow();
-  var keyCol = last >= 2 ? sh.getRange(2, w + 1, last - 1, 1).getValues() : [];
-  if (!keyCol.length || keyCol[0][0] !== lapKeyHeader_(cols)) { buildLaporan_(year); return; }   // tab lama / format diubah
-  var id = String(r['Maintenance ID']), n = keyCol.length - 1, at = -1;
-  for (var i = 1; i <= n; i++) if (String(keyCol[i][0]) === id) { at = i - 1; break; }
+  if (last < 2 || sh.getRange(2, w + 1).getValue() !== lapKeyHeader_(cols)) { buildLaporan_(year); return; }   // tab lama / format diubah
+  // 2.6.3: baris pekerjaan dicari di server (TextFinder ±0,13 dtk), bukan membaca seluruh kolom kunci (±0,4–1,4 dtk setahun)
+  var id = String(r['Maintenance ID']), n = last - 2, at = -1;
+  var hit = n > 0 ? sh.getRange(3, w + 1, n, 1).createTextFinder(id).matchEntireCell(true).findNext() : null;
+  if (hit) at = hit.getRow() - 3;
 
   if (r['Status'] === APP.STATUS.CANCELLED) {       // Cancelled tidak masuk laporan → barisnya dihapus, NO diurutkan ulang
     if (at < 0) return;

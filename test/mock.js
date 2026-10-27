@@ -42,18 +42,25 @@ class Range {
     return this;
   }
   getSheet() { return this.sh; }
-  // TextFinder (sebagian): cari teks di range ini, baris demi baris; matchEntireCell = sel sama persis
+  // TextFinder (sebagian): cari teks di range ini, baris demi baris; matchEntireCell = sel sama persis,
+  // useRegularExpression = teks dibaca sebagai regex (dengan matchEntireCell: seluruh sel harus cocok). Hitungan dicatat
+  // di sh.finds supaya test bisa memastikan pencarian terjadi di server, bukan lewat baca seluruh tab.
   createTextFinder(text) {
-    const rg = this, f = { whole: false,
+    const rg = this, f = { whole: false, regex: false,
       matchEntireCell(v) { f.whole = v !== false; return f; },
-      findNext() {
+      useRegularExpression(v) { f.regex = v !== false; return f; },
+      hits() {
+        rg.sh.finds = (rg.sh.finds || 0) + 1;
+        const re = f.regex ? new RegExp(f.whole ? '^(?:' + text + ')$' : text) : null, out = [];
         const vals = rg.getValues();
         for (let i = 0; i < vals.length; i++) for (let j = 0; j < vals[i].length; j++) {
-          const s = String(vals[i][j]);
-          if (f.whole ? s === String(text) : s.indexOf(String(text)) !== -1) return new Range(rg.sh, rg.r + i, rg.c + j, 1, 1);
+          const v = vals[i][j], s = v instanceof Date ? v.toISOString() : String(v);
+          if (re ? re.test(s) : (f.whole ? s === String(text) : s.indexOf(String(text)) !== -1)) out.push(new Range(rg.sh, rg.r + i, rg.c + j, 1, 1));
         }
-        return null;
-      } };
+        return out;
+      },
+      findNext() { return f.hits()[0] || null; },
+      findAll() { return f.hits(); } };
     return f;
   }
   clearContent() {

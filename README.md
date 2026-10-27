@@ -88,6 +88,11 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 
 ## 2. Upgrade
 
+### Ke 2.6.3 (dari 2.6.2)
+Ganti `Api`, `Code`, `Config`, `Db`, `Maintenance`, `Rekap`, `Tampilan` (Script), lalu Deploy → Manage deployments → ✏️ → **New version**.
+Tidak ada sheet / kolom / trigger / izin baru; Run `setup` tidak wajib. Dari 2.6.1: ganti juga file 2.6.2 (`Kpi`, `Manual`, `Master`, `Tpm`, `App`) — paling mudah
+paste semua file `src/`.
+
 ### Ke 2.6.2 (dari 2.6.1)
 Ganti `Api`, `Code`, `Config`, `Db`, `Kpi`, `Maintenance`, `Manual`, `Master`, `Rekap`, `Tpm` (Script) dan `App` (HTML), lalu Deploy → Manage
 deployments → ✏️ → **New version**. Tidak ada sheet / kolom / trigger / izin baru; Run `setup` tidak wajib. Dari 2.6.0 atau lebih lama: ikuti

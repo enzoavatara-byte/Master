@@ -116,6 +116,80 @@ function readTable_(name, anyCol) {
   return rowsToObjs_(headers, values.slice(1), 2, anyCol);
 }
 
+/** Baris terakhir Maintenance yang selalu dibaca tombol (readHot_): ±27 hari pada 15 pekerjaan/hari. */
+var HOT_TAIL_ = 400;
+var HOT_BLOCKS_MAX_ = 8;
+
+/**
+ * Baris Maintenance untuk tombol & layar teknisi tanpa membaca seluruh tab (2.6.3). Profil di Apps Script asli dengan
+ * 4.500 pekerjaan: baca penuh 1,7 dtk dan biayanya mengikuti jumlah BARIS (kolom ID saja 1,3 dtk); 1 baris ±0,1 dtk,
+ * cari di server dengan TextFinder ±0,13 dtk.
+ * Isi: `tail` (bawaan HOT_TAIL_) baris terakhir + baris lebih lama yang masih Aktif / Pause / Pending atau menunggu review.
+ * Syarat: baris baru selalu ditambah di bawah (Mulai, Input Manual) dan arsip / hapus data testing mempertahankan urutan,
+ * jadi ID hari ini & pekerjaan beberapa minggu terakhir ada di ekor. Bentuk hasil = readTable_ (object + _row), urut baris.
+ * Riwayat, Dashboard, Statistik, Download, KPI & Laporan tetap membaca penuh.
+ */
+function readHot_(tail) {
+  var sh = sheet_(APP.SHEETS.MAINT), last = sh.getLastRow();
+  tail = tail || HOT_TAIL_;
+  if (last - 1 <= tail) return readTable_(APP.SHEETS.MAINT);   // tab masih kecil (awal pemakaian): satu baca biasa
+  var h = headers_(sh, APP.SHEETS.MAINT), first = last - tail + 1, out = [], want = {};
+  hotFind_(sh, h, 'Status', [APP.STATUS.ACTIVE, APP.STATUS.PAUSE, APP.STATUS.PENDING], first - 1)
+    .concat(hotFind_(sh, h, 'Status review', [APP.REVIEW.NEEDED], first - 1)).forEach(function (n) { want[n] = true; });
+  var blocks = rowBlocks_(Object.keys(want).map(Number));
+  // tiap blok = satu panggilan (±0,1 dtk): banyak pending lama yang tersebar → baca penuh (tidak lebih lambat dari 2.6.2)
+  if (blocks.length > HOT_BLOCKS_MAX_) return readTable_(APP.SHEETS.MAINT);
+  blocks.forEach(function (b) {
+    out = out.concat(rowsToObjs_(h, sh.getRange(b[0], 1, b[1] - b[0] + 1, h.length).getValues(), b[0]));
+  });
+  return out.concat(rowsToObjs_(h, sh.getRange(first, 1, last - first + 1, h.length).getValues(), first));
+}
+
+/** Nomor baris 2..lastRow yang selnya di kolom `col` persis salah satu `values` (dicari di server, tanpa membaca kolomnya). */
+function hotFind_(sh, h, col, values, lastRow) {
+  var c = h.indexOf(col);
+  if (c < 0 || lastRow < 2) return [];
+  var re = '^(' + values.map(function (v) { return String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|') + ')$';
+  return sh.getRange(2, c + 1, lastRow - 1, 1).createTextFinder(re).useRegularExpression(true).matchEntireCell(true)
+    .findAll().map(function (rg) { return rg.getRow(); });
+}
+
+/** [9, 3, 4, 5] → [[3, 5], [9, 9]]: baris berurutan dibaca dalam satu panggilan. */
+function rowBlocks_(nums) {
+  var out = [];
+  nums.slice().sort(function (a, b) { return a - b; }).forEach(function (n) {
+    var b = out[out.length - 1];
+    if (b && n === b[1] + 1) b[1] = n; else out.push([n, n]);
+  });
+  return out;
+}
+
+/**
+ * Pekerjaan berdasarkan ID dari baris panas; bila tidak ada (mis. Selesai diketuk dua kali → sudah Completed), satu baris
+ * dicari di server (TextFinder kolom ID) dan ditambahkan ke `rows`, supaya pesan error tetap menyebut statusnya.
+ */
+function findHot_(rows, id) {
+  var r = findById_(rows, id);
+  if (r || !id) return r;
+  r = readWhere_(APP.SHEETS.MAINT, 'Maintenance ID', id)[0] || null;
+  if (r) rows.push(r);
+  return r;
+}
+
+/** Semua baris tab `name` yang kolom `col`-nya persis `value`, dicari di server (TextFinder) tanpa membaca seluruh tab. */
+function readWhere_(name, col, value) {
+  var sh = sheet_(name), last = sh.getLastRow();
+  if (last < 2) return [];
+  var h = headers_(sh, name), c = h.indexOf(col), out = [];
+  if (c < 0) return [];
+  var hits = sh.getRange(2, c + 1, last - 1, 1).createTextFinder(String(value)).matchEntireCell(true).findAll()
+    .map(function (rg) { return rg.getRow(); });
+  rowBlocks_(hits).forEach(function (b) {
+    out = out.concat(rowsToObjs_(h, sh.getRange(b[0], 1, b[1] - b[0] + 1, h.length).getValues(), b[0]));
+  });
+  return out;
+}
+
 /** N baris terakhir saja (untuk Log yang terus bertambah). */
 function readTail_(name, n) {
   var sh = sheet_(name);
@@ -153,8 +227,13 @@ function textOf_(v) {
 }
 
 function appendObj_(name, obj) {
-  var sh = sheet_(name);
-  sh.appendRow(objToRow_(headers_(sh, name), obj, TEXT_SHEETS_.indexOf(name) !== -1));
+  var sh = sheet_(name), row = objToRow_(headers_(sh, name), obj, TEXT_SHEETS_.indexOf(name) !== -1);
+  if (!LOCK_DEPTH_ || [APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN].indexOf(name) === -1) { sh.appendRow(row); return; }
+  // 2.6.3: tab ini hanya ditulis di dalam withLock_ → tidak ada penulis lain; setValues masuk antrean & terkirim saat flush,
+  // appendRow dijalankan langsung (profil Apps Script asli: 0,6–1,6 dtk per baris Log)
+  var at = sh.getLastRow() + 1;
+  ensureRows_(sh, at, 500);
+  sh.getRange(at, 1, 1, row.length).setValues([row]);
 }
 
 /** Menulis ulang satu baris penuh (satu panggilan API, bukan per sel). */
@@ -172,14 +251,19 @@ function findById_(rows, id) {
   return null;
 }
 
+/** > 0 selama kode berjalan di dalam withLock_ (appendObj_ memakai jalur cepat). */
+var LOCK_DEPTH_ = 0;
+
 function withLock_(fn) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(APP.LOCK_TIMEOUT_MS)) {
     throw new Error('Server sedang sibuk, coba lagi beberapa detik.');
   }
+  LOCK_DEPTH_++;
   try {
     return fn();
   } finally {
+    LOCK_DEPTH_--;
     SpreadsheetApp.flush();
     lock.releaseLock();
   }

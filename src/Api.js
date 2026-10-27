@@ -115,7 +115,8 @@ function apiBootstrap(lineId, mesinId, filter) {
 
 /** Data awal. Dipanggil doGet (ditanam di halaman → hemat satu perjalanan) atau apiBootstrap. */
 function bootstrap_(user, lineId, mesinId, filter) {
-  var rows = readTable_(APP.SHEETS.MAINT);
+  // 2.6.3: baris panas cukup untuk pekerjaan saya, jumlah pending / review, grafik 7 hari (ekor ±4 minggu) & aktivitas terakhir
+  var rows = readHot_();
   var c = ctx_();
   var mine = openForUser_(rows, user.email);
   return {
@@ -149,7 +150,7 @@ function apiWhoAmI() {
  */
 function apiRefresh(filter, clientVersion) {
   var user = requireUser_();
-  var rows = readTable_(APP.SHEETS.MAINT);
+  var rows = readHot_();
   var c = ctx_();
   var mine = openForUser_(rows, user.email);
   var out = {
@@ -226,7 +227,7 @@ function recent_(rows, c, filter) {
 
 function apiGetLine(lineId) {
   var user = requireUser_();
-  return lineView_(lineId, readTable_(APP.SHEETS.MAINT), ctx_(), user);
+  return lineView_(lineId, readHot_(), ctx_(), user);
 }
 
 /** Halaman line. 2.6: line = unit kerja → satu pekerjaan terbuka per line, tanpa pilih mesin. */
@@ -270,7 +271,7 @@ function lineView_(lineId, rows, c, user) {
 function apiListPending(filter) {
   requireUser_();
   var c = ctx_();
-  var list = readTable_(APP.SHEETS.MAINT)
+  var list = readHot_()
     .filter(function (r) { return r['Status'] === APP.STATUS.PENDING && matchFilter_(c.md, r, filter, c.names); })
     .map(function (r) { return serialize_(r, c); });
   return { serverNowIso: c.now.toISOString(), items: sortPending_(list) };
@@ -280,10 +281,10 @@ function apiListPending(filter) {
 function apiGetDetail(id) {
   var user = requireUser_();
   var c = ctx_();
-  var r = findById_(readTable_(APP.SHEETS.MAINT), id);
+  // 2.6.3: satu pekerjaan & Log-nya dicari di server, bukan membaca seluruh Maintenance + Log (±14.000 baris setahun)
+  var r = findHot_([], id);
   if (!r) throw new Error('Maintenance tidak ditemukan.');
-  var events = readTable_(APP.SHEETS.LOG)
-    .filter(function (e) { return String(e['Maintenance ID']) === String(id); })
+  var events = readWhere_(APP.SHEETS.LOG, 'Maintenance ID', id)
     .map(function (e) {
       return { whenIso: iso_(e['Timestamp']), whenText: fmtDate_(e['Timestamp']), event: String(e['Kejadian']), userName: nameOf_(c, e['User']), detail: String(e['Detail'] || '') };
     });
@@ -363,7 +364,8 @@ function apiExport(f) {
 function apiListReview(filter) {
   var user = requireUser_();
   var c = ctx_();
-  var rows = readTable_(APP.SHEETS.MAINT).filter(function (r) { return matchFilter_(c.md, r, filter, c.names); });
+  // review = Abandoned "Perlu review", peringatan = terbuka → semuanya ada di baris panas
+  var rows = readHot_().filter(function (r) { return matchFilter_(c.md, r, filter, c.names); });
   var items = rows.filter(function (r) { return reviewVisible_(r, user); }).map(function (r) {
     var s = serialize_(r, c);
     s.canDecide = canDecide_(r, user);
@@ -390,8 +392,8 @@ function apiReview(id, p, filter) {
   p = p || {};
   var note = cleanText_(p.note, 500);
   withLock_(function () {
-    var rows = readTable_(APP.SHEETS.MAINT);
-    var r = findById_(rows, id);
+    var rows = readHot_();
+    var r = findHot_(rows, id);
     if (!r) throw new Error('Maintenance tidak ditemukan.');
     if (r['Status review'] !== APP.REVIEW.NEEDED) throw new Error('Record ini tidak ada di antrian review.');
     if (!canDecide_(r, user)) throw new Error('Anda tidak berwenang mereview record ini.');

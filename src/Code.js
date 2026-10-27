@@ -164,7 +164,8 @@ function cekFile() {
 
 // 2.6.2: setup dengan data setahun sempat 283 dtk (batas Apps Script 360). Bangun ulang laporan hanya dimulai bila
 // waktu sejak setup mulai masih di bawah batas ini; yang dilewati dibangun trigger malam / Dashboard → Perbarui.
-var SETUP_BATAS_MS_ = { laporan: 200000, tpm: 220000, kpi: 270000, tampilan: 290000 };
+// 2.6.3: batas mulai + lama terlama yang terukur ≤ ±300 dtk (TPM dengan terjemahan sampai 113 dtk, rapikan tampilan ±40).
+var SETUP_BATAS_MS_ = { laporan: 200000, tpm: 180000, kpi: 260000, tampilan: 250000 };
 var SETUP_TR_MAX_ = 100;   // terjemahan TPM baru per bahasa di dalam setup (trigger malam: TPM_TR_MAX_)
 
 function setup() {

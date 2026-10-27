@@ -3,6 +3,21 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.3 — tombol tidak melambat seiring data setahun
+Diukur dengan profil per fungsi di Apps Script asli (uji 1 tahun, menu 9; 4.484–5.489 pekerjaan, ±14.000 baris Log).
+Ganti `Api`, `Code`, `Config`, `Db`, `Maintenance`, `Rekap`, `Tampilan` (Script), lalu New version.
+Tidak ada sheet, kolom, trigger, atau izin baru (Run `setup` tidak wajib).
+
+- **Tombol teknisi 3–7 dtk dengan data setahun.** Separuh waktunya untuk membaca seluruh tab Maintenance (4.500 baris: 1,7 dtk; biayanya mengikuti jumlah baris, bukan kolom). Tombol, halaman line (scan QR), Beranda, refresh tiap menit, tab Pending & Review, review admin dan trigger 15 menit kini hanya membaca **400 baris terakhir + pekerjaan lebih lama yang masih terbuka / pending / menunggu review** (dicari di server dengan TextFinder). Riwayat, Dashboard, Statistik, Download, KPI & Laporan tetap membaca penuh. Selama tab masih kecil (≤ 400 pekerjaan) tetap satu baca biasa.
+- **Satu baris Log 0,6–1,6 dtk.** `appendRow` dijalankan langsung oleh Google, tidak ikut antrean tulis. Di dalam kunci (semua tulisan Maintenance / Log / Pemakaian Sparepart) baris baru kini ditulis di bawah baris terakhir bersama tulisan lain; satu-satunya Log di luar kunci (tab per project dihapus admin) kini juga lewat kunci.
+- **Laporan per tombol:** baris pekerjaan dicari dengan TextFinder, bukan membaca seluruh kolom kunci Laporan (0,4–1,4 dtk setahun).
+- **Detail pekerjaan:** riwayat Log satu pekerjaan dicari di server, bukan membaca ±14.000 baris Log.
+- **`setup`:** batas mulai bangun ulang diperketat (TPM 180 dtk, rapikan tampilan 250 dtk) supaya kasus terburuk ±300 dtk, jauh dari batas 360 dtk (dengan data setahun sempat 246 dtk; TPM dengan terjemahan bisa 113 dtk).
+- Dibuktikan **bukan** penyebab: hitung ulang rumus FILTER / Ringkasan (±0,1–0,3 dtk, sama dengan satu panggilan biasa) dan cache pengaturan (30 ms).
+- Perbedaan kecil yang diterima: baterai bawaan saat Mulai mengikuti pekerjaan terakhir line itu dalam ±400 pekerjaan terakhir (±4 minggu); line yang lebih lama tidak dipakai → baterai pertama line.
+
+**Uji:** 3 test baru (103 test). Uji 1 tahun: tombol & buka pertama diukur 2× (rata-rata), layar 3× (median) — satu layar yang sama sempat terukur 2,5 dan 11,9 dtk; tahap 1 menghapus tab Arsip sisa putaran sebelumnya (penyebab Laporan 2025 1.737 baris, harap 984); tahap 6 membuktikan baca panas = baca penuh di data asli; batas setup uji 300 dtk (240 dulu margin pilihan sendiri, bukan batas yang membuat setup gagal).
+
 ## 2.6.2 — perbaikan dari uji beban 1 tahun
 Ditemukan oleh uji beban 1 tahun di Apps Script asli (spreadsheet uji Cikarang, 5.580 pekerjaan ±15/hari, isi dari Troublelog F1).
 Ganti `Api`, `Code`, `Config`, `Db`, `Kpi`, `Maintenance`, `Manual`, `Master`, `Rekap`, `Tpm` (Script) dan `App` (HTML), lalu New version.

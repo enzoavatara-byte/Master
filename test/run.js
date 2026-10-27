@@ -2577,4 +2577,69 @@ test('2.6.2 Download: batas 12000 baris (setahun penuh); file Excel tanpa warna 
   assert.match(src, /head\.height = /);
 });
 
+test('2.6.3 readHot_: ekor + baris lama terbuka / pending / menunggu review = baca penuh; ID di luar set itu → pesan status benar', () => {
+  const hotStatus = (r) => ['Aktif', 'Pause', 'Pending'].indexOf(r.Status) !== -1 || r['Status review'] === 'Perlu review';
+  const P = as('budi@gmail.com', () => ctx.apiStart('L03', 'E22H')).open.id;
+  as('budi@gmail.com', () => ctx.apiPending(P, pend('Cek wiring', 'Menunggu part', 'BESOK')));
+  const ids = [];
+  for (let i = 0; i < 3; i++) {   // menutupi pending tadi dari ekor kecil
+    const id = as('andi@gmail.com', () => ctx.apiStart('L02', 'E22H')).open.id;
+    as('andi@gmail.com', () => ctx.apiComplete(id, done));
+    ids.push(id);
+  }
+  const M = ss.getSheetByName('Maintenance'), f0 = M.finds || 0, full = ctx.readTable_('Maintenance');
+  const hot = ctx.readHot_(3);
+  jeq(hot, full.filter((r, i) => i >= full.length - 3 || hotStatus(r)), 'isi & _row sama dengan baca penuh difilter');
+  assert.ok(full.length - full.findIndex(r => r['Maintenance ID'] === P) > 3 && hot.some(r => r['Maintenance ID'] === P), 'pending di luar ekor tetap ada');
+  assert.ok((M.finds || 0) > f0, 'baris lama dicari di server (TextFinder), bukan baca seluruh tab');
+  jeq(ctx.readHot_(), full.filter((r, i) => i >= full.length - ctx.HOT_TAIL_ || hotStatus(r)), 'ekor bawaan');
+  const maxB = ctx.HOT_BLOCKS_MAX_;
+  ctx.HOT_BLOCKS_MAX_ = 0;   // terlalu banyak blok lama → baca penuh (tidak lebih lambat dari 2.6.2)
+  try { jeq(ctx.readHot_(3), full); } finally { ctx.HOT_BLOCKS_MAX_ = maxB; }
+  const tail = ctx.HOT_TAIL_;
+  ctx.HOT_TAIL_ = 2;
+  try {
+    assert.ok(!ctx.readHot_().some(r => r['Maintenance ID'] === ids[0]), 'ids[0] di luar ekor 2 → jalur cadangan (cari ID di server) terpakai');
+    throwsMsg(() => as('andi@gmail.com', () => ctx.apiComplete(ids[0], done)), /berstatus Completed; aksi ini tidak bisa dilakukan/);
+    const v = as('budi@gmail.com', () => ctx.apiContinue(P, 'L03'));
+    assert.ok(v.open && v.open.id === P && v.openIsMine, 'pending lama dilanjutkan dengan ekor kecil');
+    as('budi@gmail.com', () => ctx.apiComplete(P, done));
+    const d = as('budi@gmail.com', () => ctx.apiGetDetail(P));
+    jeq(d.events.map(e => e.event), logOf(P), 'Detail: Log dicari lewat TextFinder = baca penuh');
+    assert.strictEqual(d.record.status, 'Completed');
+  } finally { ctx.HOT_TAIL_ = tail; }
+});
+
+test('2.6.3 baris baru Maintenance / Log di dalam kunci lewat setValues (tanpa appendRow), di luar kunci tetap appendRow; Laporan lewat TextFinder', () => {
+  const proto = Object.getPrototypeOf(ss.getSheetByName('Log')), orig = proto.appendRow, n = {};
+  proto.appendRow = function () { n[this.getName()] = (n[this.getName()] || 0) + 1; return orig.apply(this, arguments); };
+  const L = ss.getSheetByName('Log'), M = ss.getSheetByName('Maintenance'), S = ss.getSheetByName(ctx.laporanName_(ctx.yearOf_(new FakeDate())));
+  const l0 = L.getLastRow(), m0 = M.getLastRow(), s0 = S.finds || 0;
+  try {
+    const id = as('budi@gmail.com', () => ctx.apiStart('L01', 'E22H')).open.id;
+    as('budi@gmail.com', () => ctx.apiPause(id, { values: { 'Alasan pause': 'Istirahat' } }));
+    as('budi@gmail.com', () => ctx.apiResume(id));
+    as('budi@gmail.com', () => ctx.apiComplete(id, done));
+    assert.ok(!n.Log && !n.Maintenance && !n['Pemakaian Sparepart'], 'tanpa appendRow: ' + JSON.stringify(n));
+    assert.strictEqual(M.getLastRow(), m0 + 1);
+    assert.strictEqual(M.data[m0][0], id, 'pekerjaan baru tepat di bawah baris terakhir');
+    assert.strictEqual(rec(id).Status, 'Completed');
+    assert.strictEqual(L.getLastRow(), l0 + 4, 'tidak menimpa, tidak ada baris kosong');
+    jeq(logOf(id), ['start', 'pause', 'resume', 'complete']);
+    assert.ok((S.finds || 0) - s0 >= 3, 'baris Laporan dicari lewat TextFinder');
+    assert.strictEqual(ctx.LOCK_DEPTH_, 0);
+    ctx.log_(new FakeDate(), 'UJI-263', 'uji', 'SYSTEM', 'di luar kunci');
+    assert.strictEqual(n.Log, 1, 'di luar kunci: appendRow (atomik, tidak bentrok dengan penulis lain)');
+    assert.strictEqual(L.data[L.getLastRow() - 1][1], 'UJI-263');
+    L.data.splice(L.getLastRow() - 1, 1);
+  } finally { proto.appendRow = orig; }
+});
+
+test('2.6.3 setup: batas mulai bangun ulang + lama terlama yang terukur ≤ 300 dtk (batas Apps Script 360)', () => {
+  const B = ctx.SETUP_BATAS_MS_;
+  // terukur di Apps Script asli dengan data setahun: Laporan+Rekap 30 dtk, TPM s/d 113 (dengan terjemahan), KPI 13, rapikan 38
+  const terlama = { laporan: 30000, tpm: 113000, kpi: 13000, tampilan: 40000 };
+  Object.keys(terlama).forEach(k => assert.ok(B[k] + terlama[k] <= 300000, k + ': ' + B[k] + ' + ' + terlama[k]));
+});
+
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));
