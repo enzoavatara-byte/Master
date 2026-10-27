@@ -100,12 +100,13 @@ function ujtRunner_(tahap) {
     mark: function (part) { props.setProperty(UJT_MARK_, JSON.stringify({ tahap: tahap, part: part, t0: T0, t: Date.now() })); },
     timed: function (label, batas, fn) {
       R.mark(label);
-      if (UJT_PROF_) UJT_PROF_.cur = {};
+      var P = UJT_PROF_ && !UJT_PROF_.lambat ? UJT_PROF_ : null;
+      if (P) P.cur = {};
       var t = Date.now(), v = fn(), ms = Date.now() - t;
       props.deleteProperty(UJT_MARK_);
-      if (UJT_PROF_) {   // tahap 9: rincian per fungsi menggantikan baris waktu biasa
-        R.info('Profil: ' + label, ujtProfTeks_(UJT_PROF_.cur, ms), ms);
-        if (UJT_PROF_.probe) ujtProbe_(R, label);
+      if (P) {   // tahap 9: rincian per fungsi menggantikan baris waktu biasa
+        R.info('Profil: ' + label, ujtProfTeks_(P.cur, ms), ms);
+        if (P.probe) ujtProbe_(R, label);
       } else if (batas) R.ok('Waktu: ' + label, ms <= batas, ms + ' ms (batas ' + batas + ')', ms);
       else R.info('Waktu: ' + label, ms + ' ms', ms);
       return { v: v, ms: ms };
@@ -113,12 +114,21 @@ function ujtRunner_(tahap) {
     // 2.6.3: satu layar yang sama terukur 2,5–11,9 dtk antar-ronde → diukur berulang, kriteria pada rata-rata / median
     sample: function (label, fn) {
       R.mark(label);
-      if (UJT_PROF_) UJT_PROF_.cur = {};
+      var P = UJT_PROF_, pertama = /pertama/.test(label), dingin = false;
+      if (P && P.lambat && !pertama) {   // diagnosis: cache master sudah hilang SEBELUM aksi? (di luar waktu yang diukur)
+        P.cur = null;
+        try { dingin = !readMasterCache_(); } catch (e) { dingin = true; }
+        P.n++;
+        if (dingin) P.kosong.push(label);
+      }
+      if (P) P.cur = {};
       var t = Date.now(), v = fn(), ms = Date.now() - t;
       props.deleteProperty(UJT_MARK_);
-      if (UJT_PROF_) {
-        R.info('Profil: ' + label, ujtProfTeks_(UJT_PROF_.cur, ms), ms);
-        if (UJT_PROF_.probe) ujtProbe_(R, label);
+      if (P && !P.lambat) {
+        R.info('Profil: ' + label, ujtProfTeks_(P.cur, ms), ms);
+        if (P.probe) ujtProbe_(R, label);
+      } else if (P && ms > (pertama ? 10000 : UJT_BATAS_.tombol)) {
+        R.info('Lambat: ' + label, (pertama ? '' : dingin ? 'cache master KOSONG sebelum aksi · ' : 'cache master ada sebelum aksi · ') + ujtProfTeks_(P.cur, ms), ms);
       }
       (R.samples[label] = R.samples[label] || []).push(ms);
       return { v: v, ms: ms };
@@ -129,7 +139,7 @@ function ujtRunner_(tahap) {
       if (!s.length) return 0;
       var srt = s.slice().sort(function (a, b) { return a - b; });
       var val = how === 'median' ? srt[Math.floor(srt.length / 2)] : Math.round(s.reduce(function (a, b) { return a + b; }, 0) / s.length);
-      if (!UJT_PROF_) R.ok('Waktu: ' + label, val <= batas, (s.length > 1 ? (how === 'median' ? 'median ' : 'rata-rata ') : '') + val + ' ms' +
+      if (!UJT_PROF_ || UJT_PROF_.lambat) R.ok('Waktu: ' + label, val <= batas, (s.length > 1 ? (how === 'median' ? 'median ' : 'rata-rata ') : '') + val + ' ms' +
         (s.length > 1 ? ' dari ' + s.join(' / ') : '') + ' (batas ' + batas + ')', val);
       return val;
     },
@@ -247,7 +257,8 @@ function ujtMalam() {
 function ujtAlur_(R, label, opts) {
   opts = opts || {};
   var ss = SpreadsheetApp.getActive(), ids = [], tag = label ? ' (' + label + ')' : '', B = UJT_BATAS_;
-  var n = UJT_PROF_ ? 1 : (opts.ulang || 2), nLayar = UJT_PROF_ ? 1 : (opts.ulangLayar || 3);
+  var prof = UJT_PROF_ && !UJT_PROF_.lambat;   // menu 9: sekali per aksi; tahap 4/7 (mode lambat): diulang seperti biasa
+  var n = prof ? 1 : (opts.ulang || 2), nLayar = prof ? 1 : (opts.ulangLayar || 3);
   var L = findSheet_('Lines', ss), h = headers_(L, 'Lines');
   if (!lineOf_(masterData_(), UJT_LINE_)) {
     L.appendRow(objToRow_(h, { 'Line ID': UJT_LINE_, 'Nama Line': 'Line uji (dihapus otomatis)', 'Proses': 'Modul Line', 'Factory ID': 'F1', 'Baterai': 'Limo7', 'Area': '-', 'Aktif': 'Ya' }));
@@ -340,7 +351,11 @@ function ujtBersih_(ids, R) {
 function ujtTombol() {
   var R = ujtRunner_(4), ids = [];
   resetMaster_();
-  try { ids = ujtAlur_(R, ''); } finally { R.safe('Bersihkan data uji', function () { ujtBersih_(ids, R); }); }
+  try { ujtProfPasang_(true); ids = ujtAlur_(R, ''); } finally {
+    ujtCacheInfo_(R, '');
+    ujtProfLepas_();
+    R.safe('Bersihkan data uji', function () { ujtBersih_(ids, R); });
+  }
   return R.selesai('Lanjut menu 5.');
 }
 
@@ -512,7 +527,11 @@ function ujtArsip() {
     R.info('Maintenance setelah arsip', readTable_(APP.SHEETS.MAINT).length + ' baris');
   });
   // arsip ±90 dtk: layar diukur 2× (bukan 3×) supaya tahap ini tetap ≤ 6 menit
-  try { ids = ujtAlur_(R, 'setelah arsip', { ulangLayar: 2 }); } finally { R.safe('Bersihkan data uji', function () { ujtBersih_(ids, R); }); }
+  try { ujtProfPasang_(true); ids = ujtAlur_(R, 'setelah arsip', { ulangLayar: 2 }); } finally {
+    ujtCacheInfo_(R, ' (setelah arsip)');
+    ujtProfLepas_();
+    R.safe('Bersihkan data uji', function () { ujtBersih_(ids, R); });
+  }
   return R.selesai('Coba aplikasi di HP, lalu menu 8.');
 }
 
@@ -523,7 +542,9 @@ function ujtArsip() {
  * waktu INKLUSIF (fungsi di dalam fungsi lain ikut terhitung di keduanya), ×n = jumlah panggilan.
  * Putaran 2 juga membaca beberapa sel tab berumus sesudah tiap aksi (= menunggu hitung ulang rumus akibat tulisan tadi).
  */
-var UJT_PROF_ = null;   // { cur: {kunci: [ms, n]}, probe: bool, asli: {nama: fungsi} }
+// { cur: {kunci: [ms, n]}, probe: bool, asli: {nama: fungsi}, lambat: bool, kosong: [label], n: jumlah aksi }
+// lambat = tahap 4/7: rincian hanya untuk sampel di atas batas + cek cache master sebelum tiap aksi
+var UJT_PROF_ = null;
 var UJT_PROF_FN_ = ['readTable_', 'readTail_', 'readOptional_', 'buildMaster_', 'readMasterCache_', 'writeMasterCache_', 'masterData_',
   'requireUser_', 'userNameMap_', 'writeObj_', 'appendObj_', 'log_', 'syncReports_', 'syncLaporan_', 'usageRows_', 'lineView_', 'serialize_',
   'bootstrap_', 'validateParts_', 'ensureMaintColumns_', 'setNames_', 'checkTimeouts'];
@@ -535,9 +556,9 @@ function ujtProfAdd_(k, ms) {
   x[0] += ms; x[1]++;
 }
 
-function ujtProfPasang_() {
+function ujtProfPasang_(lambat) {
   var G = globalThis, asli = {};
-  UJT_PROF_ = { cur: null, probe: false, asli: asli };
+  UJT_PROF_ = { cur: null, probe: false, asli: asli, lambat: !!lambat, kosong: [], n: 0 };
   UJT_PROF_FN_.forEach(function (name) {
     var f = G[name];
     if (typeof f !== 'function') return;
@@ -564,6 +585,14 @@ function ujtProfPasang_() {
   };
 }
 
+/** Tahap 4/7: berapa aksi yang mendapati cache master sudah kosong (dugaan: trigger onMasterChange menghapusnya). */
+function ujtCacheInfo_(R, tag) {
+  var P = UJT_PROF_;
+  if (!P || !P.lambat) return;
+  R.info('Cache master kosong sebelum aksi (selain "buka pertama")' + tag, P.kosong.length + ' dari ' + P.n + ' aksi' +
+    (P.kosong.length ? ': ' + P.kosong.join(' · ') : ''));
+}
+
 function ujtProfLepas_() {
   if (!UJT_PROF_) return;
   var asli = UJT_PROF_.asli;
@@ -582,14 +611,15 @@ function ujtProfTeks_(p, total) {
 /** Sesudah aksi: baca blok kecil di tab berumus (menunggu hitung ulang FILTER / COUNTIFS akibat tulisan aksi tadi). */
 function ujtProbe_(R, label) {
   var ss = SpreadsheetApp.getActive(), out = [];
-  ['Pending Work', 'Maintenance Limo7', 'Ringkasan', laporanName_(UJT_.meta.year)].forEach(function (n) {
-    var sh = ss.getSheetByName(n);
+  // Ringkasan & Pending Work dibaca seluruhnya = menunggu SEMUA rumusnya; tab besar cukup 5×5 sel
+  [['Ringkasan', 1], ['Pending Work', 1], ['Maintenance Limo7', 0], [laporanName_(UJT_.meta.year), 0]].forEach(function (x) {
+    var sh = ss.getSheetByName(x[0]);
     if (!sh) return;
     var t = Date.now();
-    sh.getRange(1, 1, Math.min(5, sh.getMaxRows()), Math.min(5, sh.getMaxColumns())).getValues();
-    out.push(n + ' ' + (Date.now() - t));
+    (x[1] ? sh.getDataRange() : sh.getRange(1, 1, Math.min(5, sh.getMaxRows()), Math.min(5, sh.getMaxColumns()))).getValues();
+    out.push(x[0] + (x[1] ? ' (penuh) ' : ' ') + (Date.now() - t));
   });
-  R.info('Rumus sesudah: ' + label, 'baca 5×5 sel (ms): ' + out.join(' · '));
+  R.info('Rumus sesudah: ' + label, 'baca (ms): ' + out.join(' · '));
 }
 
 /** Biaya baca Maintenance per bentuk (3× masing-masing): dasar memilih perbaikan. */
