@@ -14,6 +14,11 @@ Ganti `Db`, `Maintenance`, `Rekap`, `Config` (Script), lalu New version. Tidak a
 - **Isi data tidak berubah**, hanya urutan baca. Generator uji (13.969 kejadian tombol, Laporan langsung menyala, jam dibekukan) dijalankan di 2.6.7 dan 2.6.8: Maintenance, Log, Pemakaian, Input Manual, KPI data, Laporan (hasil sinkron per tombol dan bangun ulang) **identik, 0 dari 588.343 sel berbeda**.
 - Nomor baris yang sudah dibaca hanya berlaku selama satu tombol. Arsip, Input Manual, trigger 15 menit, review admin, dan sejenisnya tetap membaca sendiri seperti dulu.
 - **Cadangan:** bila uji di Apps Script asli gagal, 2.6.7 (tanpa K8) tetap versi yang terbukti.
+- **Terukur di Apps Script asli** (uji 2 tahun, 28 Okt 15:25, rata-rata 2 ketukan per tombol, 10 jenis tombol):
+  - sebelum arsip 4,61 → **4,02 dtk**; sesudah arsip 4,71 → **3,93 dtk**;
+  - tombol di atas 5 dtk: 5 dari 20 → **0 dari 20**;
+  - profil menu 9: tiap tombol 1× kirim (flush 0,25–1,3 dtk).
+  - Sisa ±3,5–4 dtk = ±20 panggilan ke Google Sheets × ±0,1–0,15 dtk per panggilan, jadi bukan lagi kirim terpaksa.
 
 **Uji:** 1 test baru (109 test). Mock menghitung "kirim terpaksa" (baca saat ada tulisan tertunda) per tombol: 2.6.7 = 2 per tombol, 2.6.8 = 0. E2E browser 42 + 20 OK.
 
