@@ -94,7 +94,9 @@ class Range {
   }
   createFilter() {
     if (this.sh.filter) throw new Error('Sheet sudah punya filter');
-    const f = { range: this, remove: () => { this.sh.filter = null; } };
+    const f = { range: this, remove: () => { this.sh.filter = null; }, criteria: {},
+      setColumnFilterCriteria: (c, crit) => { f.criteria[c] = crit; return f; }, removeColumnFilterCriteria: (c) => { delete f.criteria[c]; return f; },
+      sort: (c, asc) => { this.sh.getRange(2, 1, Math.max(1, this.sh.getLastRow() - 1), this.sh.getLastColumn()).sort({ column: c, ascending: asc }); return f; } };
     this.sh.filter = f;
     return f;
   }
@@ -174,6 +176,11 @@ class Sheet {
   clear() { this.data = []; this.formulas = {}; this.fmt = []; }
   clearContents() { this.data = this.data.length ? [] : this.data; this.formulas = {}; return this; }
   insertColumnsAfter(after, n) { this.maxCols = this.getMaxColumns() + (n || 0); return this; }
+  // 2.6.9 (uji "admin ceroboh"): sisip / hapus satu kolom menggeser isi seperti Sheets
+  insertColumnBefore(c) { this.data.forEach(row => { if (row.length >= c) row.splice(c - 1, 0, ''); }); this.maxCols = this.getMaxColumns() + 1; return this; }
+  insertColumnAfter(c) { return this.insertColumnBefore(c + 1); }
+  deleteColumn(c) { return this.deleteColumns(c, 1); }
+  createTextFinder(text) { return this.getDataRange().createTextFinder(text); }
   getProtections() { return this.protections; }
   protect() {
     const p = { unprotected: [], setDescription() { return p; }, setWarningOnly() { return p; },
@@ -222,6 +229,7 @@ class Spreadsheet {
 
 // ---------- Mock globals ----------
 const ss = new Spreadsheet();
+let TRIG_N_ = 0;
 const user = { email: 'owner@gmail.com' };
 const triggers = [];
 const mails = [];
@@ -278,6 +286,7 @@ const ctx = {
     WrapStrategy: { CLIP: 'CLIP', OVERFLOW: 'OVERFLOW', WRAP: 'WRAP' },
     BorderStyle: { SOLID: 'SOLID', SOLID_MEDIUM: 'SOLID_MEDIUM', SOLID_THICK: 'SOLID_THICK' },
     newConditionalFormatRule: () => recorder('cf'),
+    newFilterCriteria: () => recorder('filter'),
     newDataValidation: () => recorder('dv'),
     RecalculationInterval: { HOUR: 'HOUR' },
     getUi: () => ({ createMenu: (name) => { ui.menus.push(name); return { addItem() { return this; }, addSeparator() { return this; }, addToUi() {} }; },
@@ -293,7 +302,8 @@ const ctx = {
     getScriptLock: () => ({
       tryLock() { if (lock.held) return false; lock.held = true; return true; },
       releaseLock() { lock.held = false; }
-    })
+    }),
+    getDocumentLock: () => ({ tryLock() { return true; }, releaseLock() {} })   // terpisah dari lock aplikasi
   },
   MailApp: { sendEmail: (m) => mails.push(m) },
   // Google Translate palsu: "[zh-CN] teks" — cukup untuk menguji cache & alur, bukan kualitas terjemahan.
@@ -315,9 +325,10 @@ const ctx = {
   ScriptApp: {
     getProjectTriggers: () => triggers,
     newTrigger: (fn) => {
-      const make = (every) => ({ create: () => triggers.push({ getHandlerFunction: () => fn, every }) });
+      const make = (every) => ({ create: () => { const t = { getHandlerFunction: () => fn, every, uid: 'trig' + (++TRIG_N_) }; t.getUniqueId = () => t.uid; triggers.push(t); return t; } });
       return {
-        timeBased: () => ({ everyMinutes: (n) => make('menit:' + n), everyHours: (n) => make('jam:' + n), everyDays: (n) => ({ atHour: (h) => make('hari:' + n + '@' + h) }) }),
+        timeBased: () => ({ everyMinutes: (n) => make('menit:' + n), everyHours: (n) => make('jam:' + n), everyDays: (n) => ({ atHour: (h) => make('hari:' + n + '@' + h) }),
+          after: (ms) => make('sekali:' + ms) }),
         forSpreadsheet: () => ({ onChange: () => make('onChange') })
       };
     },

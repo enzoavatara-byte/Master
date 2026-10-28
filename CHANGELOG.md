@@ -3,6 +3,52 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.9 — final serah terima: Availability per proses, spreadsheet kosong siap pakai, tahan admin ceroboh, kesehatan sistem
+Paste **semua** file `src/` (banyak file berubah), lalu Deploy → Manage deployments → ✏️ → **New version**, lalu **Run `setup`**
+(kolom `Availability (%)` di `KPI data`, Pilihan `Proses`, dropdown baru). Tidak ada izin Google baru. Spreadsheet produksi baru: lihat README → *Mulai dari spreadsheet kosong*.
+
+**Availability per proses** (rumus manajer):
+- (running hour − downtime) ÷ running hour × 100, per **factory × proses** (Modul Line / Pack Line / Pre-Assy, atau proses lain di `Pilihan` → `Proses`), plus **rata-rata semua proses**.
+- **Running hour dihitung sekali per proses** = hari operasi × `JAM_OPERASI_PER_HARI`, tidak dikali jumlah line. Downtime = jumlah downtime stop line semua line proses itu (definisi KPI yang sudah ada: Mulai → Selesai pekerjaan stop line).
+- Akibatnya: waktu **pending ikut terhitung downtime**, dan downtime yang tumpang tindih dijumlah. Satu proses dengan banyak line bisa jatuh rendah, bahkan 0 % bila downtime > running hour (ditandai "downtime lebih besar dari running hour"). Contoh data uji: F1 Modul Line 28,5 %. **Perlu konfirmasi manajer** apakah memang begini maksudnya.
+- Tampil di: tab `KPI <tahun>` (level `Proses` + kolom **M** `Availability (%)`; level Line juga diberi availability per line), salinan `KPI data` saat tutup bulan, kartu KPI Dashboard, dan tabel baru di `Ringkasan`.
+- Bulan yang ditutup **sebelum** 2.6.9 tidak punya baris Proses. Tutup ulang bulan itu bila perlu.
+- Ejaan proses dibakukan: `modul line `, `Pre Assy`, `PreAssy` → satu kelompok (ejaan di `Pilihan` → `Proses` menang). Dashboard memberi satu peringatan per ejaan yang berbeda.
+
+**Spreadsheet baru diserahkan kosong:**
+- `setup` di spreadsheet kosong menulis **3 baris CONTOH** di `Factory`, `Projects`, `Lines`, `Sparepart` (abu-abu miring, `Aktif = Contoh`, ID berawalan `CONTOH-`). Contoh menunjukkan cara mengisi dan **diabaikan aplikasi di mana pun** (scan, QR, pilihan part, KPI, dropdown), aman dibiarkan.
+- Ditulis sekali saja. Contoh yang dihapus admin tidak muncul lagi, dan spreadsheet yang sudah berisi data tidak pernah diberi contoh.
+- Contoh yang ditimpa data asli tetapi `Aktif` masih `Contoh` → peringatan di Dashboard ("diabaikan … isi Aktif = Ya").
+- Tidak ada lagi factory / project / sparepart palsu yang aktif (dulu `F1`, `VF7`, `Motor Listrik`, …), dan tidak ada tab `Maintenance VF7` dsb. tanpa project.
+- **Dropdown** (peringatan saja; ketikan lain tetap boleh): `Lines` → Factory ID & Proses, `Projects` → Factory ID, `Sparepart` → Jenis Sparepart.
+- **Paste katalog dari Excel** aman: baris kosong, baris judul yang ikut ter-paste, spasi, Model berupa angka, baris dobel → tidak error, dan diberi peringatan jelas.
+- Layar kosong yang memandu: teknisi melihat "Belum ada line…"; admin melihat langkah **Mulai dari spreadsheet kosong** di Beranda.
+
+**Tahan admin ceroboh** (temuan baca kode; belum pernah diuji sebelumnya):
+- **ID dobel bila tab Maintenance diurutkan.** ID baru dihitung dari ±400 baris terakhir. Admin mengurutkan per Line → pekerjaan hari ini keluar dari ekor → Mulai berikutnya memakai ID yang sudah ada. Kini ID calon dicek ke server (TextFinder kolom ID, ±0,1 dtk, masih sebelum tulisan pertama sehingga K8 tetap 1× kirim).
+- **Kolom disisipkan di kiri** (mis. `No.` di `Maintenance` atau `Users`) dulu membuat semua baris terbaca kosong: data "hilang", tidak ada yang bisa login, dan arsip bisa membuang baris. Kini baris kosong ditentukan dari **kolom kunci menurut nama** (Maintenance ID, Timestamp, Line ID, Email, …).
+- Trigger malam memeriksa urutan tab Maintenance. Bila tidak urut (diurutkan manual, atau Input Manual bertanggal mundur), tab diurutkan ulang menurut Mulai di dalam lock dan dicatat di Log (`urut ulang`).
+
+**Tombol bersamaan:**
+- Lock menunggu 10 → **25 dtk** (±6 tombol bersamaan, mis. listrik turun dan banyak line berhenti).
+- HP yang mendapat "Server sedang sibuk" **mencoba ulang otomatis sekali** sesudah 5 dtk dengan ID permintaan yang sama (tidak dobel).
+- Trigger malam menunggu lock sampai 120 dtk (teknisi shift malam didahulukan).
+- Jam trigger malam tetap 01:00: data Troublelog tidak menunjukkan jam malam yang jelas lebih sepi (01:00 = 15 kejadian, 02:00 = 13).
+
+**Kesehatan sistem — tidak ada lagi gagal diam-diam:**
+- Trigger malam: tiap langkah (Laporan & Rekap, TPM, KPI, Tampilan) tetap dicoba walau langkah lain gagal. Status dicatat, dan bila ada yang gagal, trigger berakhir error supaya Google juga mengirim email kegagalan ke pemilik.
+- Dashboard admin memperingatkan bila pembaruan malam gagal / tidak selesai (batas 6 menit) / tidak jalan lebih dari sehari, cek pekerjaan lewat waktu tidak jalan > 2 jam, atau tab backup gagal. Setiap peringatan menyebut cara memperbaikinya.
+
+**Uji 2 tahun (proyek uji) lebih nyata & bisa dijalankan sendiri:**
+- Simulasi dimulai dari **spreadsheet kosong**: 4 user hari pertama, line diisi bertahap minggu 1–6, katalog **1.500 part** di-paste minggu ke-2 (dengan baris kotor), +200 part Mar 2026, 40 part dinonaktifkan Jun 2026.
+- Ditambah: hari sibuk (2,5×), "listrik turun" (4–6 line mulai di menit yang sama), teknisi lain mencoba Mulai di line yang sedang dikerjakan, dan baris CONTOH dibiarkan admin.
+- Menu baru:
+  - **6c** Admin ceroboh (urutkan, saring, sisip kolom di kiri/tengah, ketik di bawah data, lalu cek semua);
+  - **6e/6f** Serbuan (6 HP menekan Mulai + Selesai di detik yang sama; 2 HP menekan saat pembaruan malam memegang lock);
+  - **▶ Jalankan SEMUA otomatis** (satu klik, ±1–2 jam, lewat trigger; tahap yang terbunuh di batas 6 menit dicatat GAGAL lalu rantai lanjut).
+
+**Uji:** 4 test baru di `test/run.js` (118 total) + `test/kosong.js` (spreadsheet kosong, 4 test). `npm test` menjalankan keduanya.
+
 ## 2.6.8 — tombol lebih cepat: baca dulu, tulis sekali (K8)
 Ganti `Db`, `Maintenance`, `Rekap`, `Config` (Script), lalu New version. Tidak ada sheet, kolom, trigger, atau izin baru (Run `setup` tidak wajib).
 

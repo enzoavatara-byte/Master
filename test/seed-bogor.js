@@ -1,5 +1,5 @@
 /**
- * Bahan profil uji UJI=bogor2 (test/seed-tahun.js): katalog uji 483 part, aturan teks Troublelog → Pilihan Bogor,
+ * Bahan profil uji UJI=bogor2 (test/seed-tahun.js): katalog uji 1.500 part (483 nama/model + varian berkode part), aturan teks Troublelog → Pilihan Bogor,
  * libur nasional, tim teknisi fiktif (@example.com). Master Bogor sendiri ada di test/data/master-bogor.json.
  */
 'use strict';
@@ -99,12 +99,22 @@ const VARIAN_ = [
   ['Pneumatik', 'Fitting push-in', 'pcs', (i) => ['Lurus', 'Elbow', 'Tee', 'Reducer'][i % 4] + ' ' + [4, 6, 8, 10, 12, 16][Math.floor(i / 4) % 6] + ' mm ' + ['PT1/8', 'PT1/4', 'PT3/8'][Math.floor(i / 24) % 3]],
   ['Mekanikal', 'Bearing', 'pcs', (i) => ['60', '62', '63', '68', '69'][i % 5] + String(Math.floor(i / 5) % 12).padStart(2, '0') + ['-2RS', '-ZZ', ''][Math.floor(i / 60) % 3]]
 ];
-function katalog() {
+/**
+ * Katalog uji: 483 baris pertama tetap (nama & model realistis), lalu (2.6.9, ±1.500 part seperti rencana pabrik) varian
+ * dengan KODE PART di kolom Model ("6205-2RS · P10483"). Baris terakhir bermodel angka murni (16004): di sheet ditulis sebagai
+ * angka, aplikasi harus membacanya sebagai teks yang sama.
+ * @param {number=} n jumlah baris (bawaan 1500)
+ */
+function katalog(n) {
+  n = n || 1500;
   const out = [], seen = new Set();
-  const add = (j, n, s, m) => { const k = (j + '|' + n + '|' + m).toLowerCase(); if (seen.has(k)) return; seen.add(k); out.push([j, n, m, s]); };
-  KATALOG_.forEach(([j, n, s, models]) => models.forEach(m => add(j, n, s, m)));
-  for (let i = 0, v = 0; out.length < 483 && i < 4000; i++) { const [j, n, s, f] = VARIAN_[v]; add(j, n, s, f(i)); if (i % 40 === 39) v = (v + 1) % VARIAN_.length; }
+  const add = (j, nm, s, m) => { const k = (j + '|' + nm + '|' + m).toLowerCase(); if (seen.has(k)) return; seen.add(k); out.push([j, nm, m, s]); };
+  KATALOG_.forEach(([j, nm, s, models]) => models.forEach(m => add(j, nm, s, m)));
+  for (let i = 0, v = 0; out.length < 483 && i < 4000; i++) { const [j, nm, s, f] = VARIAN_[v]; add(j, nm, s, f(i)); if (i % 40 === 39) v = (v + 1) % VARIAN_.length; }
   if (out.length !== 483) throw new Error('katalog uji: ' + out.length + ' ≠ 483');
+  for (let i = 0; out.length < n - 1; i++) { const b = out[i % 483]; add(b[0], b[1], b[3], (b[2] ? b[2] + ' · ' : '') + 'P' + (10000 + out.length)); }
+  if (n > 483) add('Mekanikal', 'Bearing', 'pcs', '16004');
+  if (out.length !== n) throw new Error('katalog uji: ' + out.length + ' ≠ ' + n);
   return out;
 }
 

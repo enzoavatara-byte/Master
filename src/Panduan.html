@@ -66,6 +66,7 @@
 <template id="guide-admin">
   <h3>Semua diatur dari Google Sheet</h3>
   <p class="small">Edit sheet → muat ulang aplikasi → perubahan terlihat. Tidak perlu mengubah kode.</p>
+  <p class="small">Spreadsheet baru: baris abu-abu <b>CONTOH</b> (Aktif = Contoh) di Factory, Projects, Lines, Sparepart hanya contoh cara mengisi dan diabaikan aplikasi — timpa (lalu Aktif = Ya) atau hapus. Ingin melihat data per Line / Status: <b>Data → Create filter view</b>, jangan urutkan tab Maintenance (bila terlanjur, aplikasi tetap benar dan mengurutkan ulang malam itu). Dashboard menulis <b>Sistem: …</b> bila pembaruan malam / trigger gagal.</p>
 
   <details class="g" open><summary>Mau ubah apa? → sheet mana</summary><div><ul>
     <li><b>Users</b>: tambah teknisi (Email, Nama, Peran Teknisi/Admin, Aktif, <b>Bahasa</b> id/zh). Nama ini yang tampil di laporan.</li>
@@ -109,6 +110,7 @@
     <li>Tab <b>KPI &lt;tahun&gt;</b>: per bulan, per <b>Plant / Project / Line</b>: kerusakan, MTTR, downtime, jam operasi, MTBF, target & ✓ / ✗.</li>
     <li><b>MTTR</b> = rata-rata waktu aktif. <b>MTBF</b> = (jam operasi − downtime) ÷ jumlah kerusakan. <b>Jam operasi</b> = hari operasi × JAM_OPERASI_PER_HARI × jumlah line (Config).</li>
     <li>Isi <b>Target MTBF (jam)</b> di Projects dan jadwal operasi di Config. Jadwal salah → MTBF salah.</li>
+    <li><b>Availability</b> (%) per factory × proses = (running hour − downtime) ÷ running hour × 100. <b>Running hour</b> = hari operasi × JAM_OPERASI_PER_HARI, dihitung <b>sekali per proses</b>; downtime = jumlah downtime stop line semua line proses itu (waktu pending ikut). Ada juga rata-rata semua proses. Isi kolom <b>Proses</b> di Lines dari dropdown (daftarnya di Pilihan → Proses).</li>
     <li><b>Tutup bulan</b>: awal bulan, selesaikan dulu review (Abandoned / Cancelled), lalu Dashboard → <b>Tutup bulan …</b> (atau menu → Tutup bulan KPI…). Angka bulan itu dikunci. Tutup ulang boleh; dicatat di Log.</li>
     <li>Dashboard → <b>Statistik</b>: lihat per line / proses / project / teknisi / jenis / masalah / sparepart / hari / bulan; Pareto (biru = ±80% kerusakan); tap batang → daftar pekerjaan.</li>
   </ul></div></details>
@@ -159,6 +161,7 @@
 <template id="guide-baru">
   <h3>Apa yang baru di versi <span data-v></span></h3>
   <ul>
+    <li><b>2.6.9</b>: Dashboard menampilkan <b>Availability per proses</b> (running hour − downtime) ÷ running hour; tombol tetap aman bila banyak teknisi menekan bersamaan (dicoba ulang otomatis bila server sibuk).</li>
     <li><b>Sinyal putus tidak membuat repot</b>: isian form tetap tersimpan di HP, ketuk lagi saat ada sinyal — tidak tercatat dua kali. Bisa dipasang di <b>layar utama HP</b> seperti aplikasi (lihat panduan di atas). PIC tambahan s/d 15 orang, sparepart s/d 20 jenis.</li>
     <li><b>Lebih sedikit tap</b>: scan QR line → MULAI. Tidak ada pilih mesin & tipe lagi (satu QR per line / unit).</li>
     <li><b>PIC tambahan</b> saat Selesai: tap nama teman yang ikut mengerjakan.</li>
@@ -236,6 +239,7 @@
 </template>
 
 <template id="guide-admin-zh">
+  <p class="small">新表格：Factory、Projects、Lines、Sparepart 中灰色的 <b>CONTOH</b> 行（Aktif = Contoh）只是填写示例，应用会忽略——可直接覆盖（再把 Aktif 改为 Ya）或删除。想按产线 / 状态查看数据：<b>数据 → 创建筛选视图</b>，不要对 Maintenance 页排序（若已排序，应用仍正确，并在当晚重新排序）。夜间更新 / 触发器失败时，看板会显示 <b>Sistem: …</b>。</p>
   <h3>一切都在 Google Sheet 中设置</h3>
   <p class="small">编辑表格 → 重新加载应用 → 即可看到变化。无需修改代码。表格名称保持印尼语（与 Google Sheet 的标签一致）。</p>
 
@@ -287,6 +291,7 @@
     <li><b>KPI &lt;年份&gt;</b> 页：每月按<b>工厂 / 项目 / 产线</b>：故障次数、MTTR、停机时间、运行时间、MTBF、目标和 ✓ / ✗。</li>
     <li><b>MTTR</b> = 平均有效维修时间。<b>MTBF</b> =（运行时间 − 停机时间）÷ 故障次数。<b>运行时间</b> = 运行天数 × JAM_OPERASI_PER_HARI × 产线数（Config）。</li>
     <li>在 Projects 填写 <b>Target MTBF (jam)</b>，在 Config 填写运行安排。安排不对 → MTBF 不对。</li>
+    <li><b>可用率</b>（%）按工厂 × 工序 =（运行时间 − 停机时间）÷ 运行时间 × 100。<b>运行时间</b> = 运行天数 × JAM_OPERASI_PER_HARI，<b>每个工序只计一次</b>；停机时间 = 该工序所有产线停线时间之和（含挂起时间）。另有所有工序平均。Lines 的 <b>Proses</b> 列请从下拉选择（清单在 Pilihan → Proses）。</li>
     <li><b>关账</b>：月初先完成审核（已放弃 / 已取消），再在看板 → <b>关账 …</b>（或菜单 → Tutup bulan KPI…）。该月数字被锁定。可以重新关账，会记录在 Log 中。</li>
     <li>看板 → <b>统计</b>：按产线 / 工序 / 项目 / 技术员 / 故障类型 / 现象 / 备件 / 日 / 月查看；帕累托（蓝色 = 约 80% 的故障）；点击柱形 → 工作列表。</li>
   </ul></div></details>
@@ -311,6 +316,7 @@
 <template id="guide-baru-zh">
   <h3>版本 <span data-v></span> 新功能</h3>
   <ul>
+    <li><b>2.6.9</b>：看板显示<b>各工序可用率</b>（运行时间 − 停机时间）÷ 运行时间；多名技术员同时操作也安全（服务器繁忙时自动重试）。</li>
     <li><b>信号中断也不怕</b>：表单内容保存在手机里，有信号时再点一次即可，不会重复记录。可以像应用一样<b>添加到手机主屏幕</b>（见上方说明）。其他参与人员最多 15 人，备件最多 20 种。</li>
     <li><b>点击更少</b>：扫描产线二维码 → 开始。不再选择设备和类型（每条产线 / 单元一个二维码）。</li>
     <li>完成时的<b>其他参与人员</b>：点选一起维修的同事。</li>

@@ -191,7 +191,8 @@ function urutkanMaintenance_(now) {
     else prev = t;
   });
   if (!turun) return false;
-  sh.getRange(2, 1, last - 1, sh.getLastColumn()).sort([{ column: cm + 1, ascending: true }, { column: ci + 1, ascending: true }]);
+  try { sh.getRange(2, 1, last - 1, sh.getLastColumn()).sort([{ column: cm + 1, ascending: true }, { column: ci + 1, ascending: true }]); }
+  catch (e) { var f = sh.getFilter(); if (!f) throw e; f.sort(cm + 1, true); }   // tab berfilter yang tidak bisa diurutkan per range: urutkan lewat filternya
   log_(now, 'Tab Maintenance', APP.EVENTS.URUT, APP.SYSTEM_USER, 'Tab Maintenance tidak urut (' + turun + ' baris; mis. diurutkan manual atau Input Manual tanggal mundur) → diurutkan ulang menurut Mulai.');
   return true;
 }

@@ -39,6 +39,7 @@ Riwayat versi: [CHANGELOG.md](CHANGELOG.md). Panduan singkat untuk teknisi & adm
   Jumlah line = line aktif + line yang rusak di bulan itu. Line yang melayani beberapa project dihitung penuh di setiap project.
 - **MTBF** (jam) = (jam operasi − downtime) ÷ kerusakan. Tanpa kerusakan → kosong, target MTBF dianggap tercapai.
 - **Target**: `Projects` → `Target MTTR (menit)` (≤) dan `Target MTBF (jam)` (≥).
+- **Availability** (%) (2.6.9, per factory × proses) = (running hour − downtime) ÷ running hour × 100. **Running hour** = hari operasi × `JAM_OPERASI_PER_HARI`, sekali per proses (tidak dikali jumlah line); downtime = jumlah downtime stop line semua line proses itu (waktu pending ikut, downtime tumpang tindih dijumlah). Plus rata-rata biasa semua proses. Downtime > running hour → 0 % dan ditandai. Proses = kolom `Proses` di `Lines` (ejaan dibakukan menurut `Pilihan` → `Proses`).
 
 ## 0. Yang baru di 2.5.0: bahasa 中文 & teknisi China
 
@@ -87,6 +88,23 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 ---
 
 ## 2. Upgrade
+
+### Ke 2.6.9 (dari 2.6.8)
+Paste **semua** file `src/`, lalu Deploy → Manage deployments → ✏️ → **New version**, lalu **Run `setup`** (kolom `Availability (%)` di `KPI data`, Pilihan `Proses`, dropdown).
+Spreadsheet yang sudah berisi data tidak diberi baris CONTOH. Bulan KPI yang ditutup sebelum 2.6.9 tidak punya baris Availability; tutup ulang bila perlu.
+
+### Mulai dari spreadsheet kosong (produksi baru, mis. Cikarang 2.6.9)
+1. Buat spreadsheet baru → Extensions → Apps Script → paste semua file `src/` (atau `clasp push`) → Run `setup` (izinkan). Lalu Deploy → **New deployment** → Web app (*Execute as: User accessing*, *Who has access*: akun pabrik). URL ini = isi semua QR; selanjutnya update **selalu** lewat Manage deployments → New version.
+2. `setup` membuat semua tab, Config & Pilihan bawaan, trigger, dan **3 baris CONTOH** di `Factory`, `Projects`, `Lines`, `Sparepart` (abu-abu miring, Aktif = `Contoh`). Contoh diabaikan aplikasi; timpa (lalu Aktif = `Ya`) atau hapus.
+3. Isi berurutan, sesuai langkah di Beranda admin:
+   1. `Factory`
+   2. `Projects` (target MTTR / MTBF boleh kosong)
+   3. `Lines`: satu baris = satu QR; isi **Proses** dari dropdown (Modul Line / Pack Line / Pre-Assy, proses baru → tambahkan dulu di `Pilihan` → `Proses`)
+   4. `Sparepart`: paste daftar gudang; kode part di kolom Model
+   5. `Users`: email, nama, Peran
+   6. `Config`: `JAM_OPERASI_PER_HARI`, `HARI_OPERASI`, `TANGGAL_LIBUR`, `KPI_MULAI`
+4. Buka Dashboard sebagai admin: semua peringatan master (ejaan proses, factory tidak ada, part dobel, contoh lupa diaktifkan) harus kosong.
+5. Menu → Cetak QR → tempel di line. Uji 1 pekerjaan dari HP (id + 中文, juga mode pesawat di tengah Selesai), lalu menu → **Hapus data testing**.
 
 ### Ke 2.6.8 (dari 2.6.7)
 Ganti `Db`, `Maintenance`, `Rekap`, `Config` (Script), lalu Deploy → Manage deployments → ✏️ → **New version**. Run `setup` tidak wajib.
@@ -207,6 +225,26 @@ tutup bulan otomatis **berhenti tanpa pesan**; tombol teknisi tetap jalan, jadi 
 4. Baru cabut akses akun lama. Web app (*Execute as: User accessing*), URL, dan QR tidak berubah.
 Cek kapan saja, login sebagai akun yang menjalankan `setup`: Apps Script → ⏰ Triggers → tepat satu `checkTimeouts`, satu
 `refreshRekap`, satu `onMasterChange`. Setiap akun hanya melihat trigger miliknya sendiri, jadi cek dari kedua akun saat serah terima.
+
+### Buku saku admin (2.6.9)
+| Kapan | Apa | Di mana |
+|---|---|---|
+| Tiap hari (1 menit) | Buka Dashboard sebagai admin. Baris berawalan **Sistem:** = trigger gagal / tidak jalan: ikuti langkah di pesannya (Perbarui, atau Run `setup`) | Aplikasi → Dashboard |
+| Tiap Senin | Download tab **Backup minggu …**, simpan di tempat lain, lalu hapus tabnya | Spreadsheet → File → Download |
+| Tanggal 3 | Download & hapus tab **Backup bulan …**. Cek KPI bulan lalu sudah "Ditutup" (otomatis tanggal 2 bila tidak ada review) | Spreadsheet / Dashboard |
+| Ada pekerjaan "Perlu review" | Review Abandoned (hitung / keluarkan), lalu tutup ulang bulan itu bila sudah ditutup | Aplikasi → Review |
+| Tiap Januari (wajib) | Menu → **Arsipkan data tahun lalu** (±3 menit). Lupa = layar admin makin lambat & file makin penuh | Spreadsheet → menu MTTR |
+| Teknisi / line / part berubah | Edit tab `Users` / `Lines` / `Sparepart`; jangan hapus baris yang punya riwayat, cukup `Aktif = Tidak` | Spreadsheet |
+| Ingin melihat data per Line / Status | **Data → Create filter view** (tampilan pribadi). Jangan urutkan tab Maintenance; bila terlanjur, aplikasi tetap benar dan mengurutkan ulang malam itu | Spreadsheet |
+| Serah terima akun pemilik | Lihat *Serah terima ke akun lain* di atas | Apps Script |
+
+### Uji 2 tahun sendiri (sebelum serah terima berikutnya)
+- Tempatnya **proyek uji** (bukan produksi), yang sudah berisi bundel data simulasi. Buka spreadsheet uji → menu **🧪 Uji 2 tahun** → **▶ Jalankan SEMUA otomatis** → tunggu ±1–2 jam (spreadsheet boleh ditutup).
+- Hasil ada di tab **Uji 2 tahun**: per tahap LULUS / GAGAL / INFO; baris tahap 99 "Rantai" menunjukkan kemajuan. Kirim tab itu ke developer / Claude bila ada GAGAL.
+- Membuat data simulasi baru (master lain, lebih banyak tahun, versi kode baru) butuh developer:
+  1. `UJI=bogor2 SEED_PROGRESS=1 node test/gas-tahun.js` (±15 menit);
+  2. `clasp push` dari `build/gas-tahun`.
+- Menu 8 (hapus trigger uji) hanya sesudah selesai, supaya proyek uji tidak memakai kuota trigger akun yang sama dengan produksi.
 
 ---
 
@@ -333,7 +371,7 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
   - Nilai statis, dibangun ulang tiap malam, lewat Dashboard → **Perbarui Laporan, Rekap & TPM**, menu spreadsheet → **Perbarui tab TPM**, dan saat `setup`. Tidak di jalur tombol teknisi (terjemahan butuh waktu).
   - Cara kirim: blok **B9 sampai baris terakhir kolom K** → Copy → paste di Excel manager. Jangan edit tab TPM (tertimpa); perbaiki di `Maintenance` / `Pilihan` / `Terjemahan`.
   - Bedanya dengan contoh Excel: Total tasks = jumlah baris sebenarnya (contoh: `COUNT(...)-3`), judul baris 6 dari `TPM_JUDUL` (contoh masih judul template checklist), kolom A (R/Y/G) dan aturan warna R/Y/G sisa template tidak dipakai.
-- **`KPI <tahun>`** (2.6) = KPI bulanan per **Plant / Project / Line**: Bulan · Level · Nama · Kerusakan · MTTR · Target MTTR · Downtime · Jam operasi · MTBF · Target MTBF · Tercapai (✓ / ✗ MTTR / ✗ MTBF) · Status.
+- **`KPI <tahun>`** (2.6) = KPI bulanan per **Plant / Project / Proses (2.6.9) / Line**: Bulan · Level · Nama · Kerusakan · MTTR · Target MTTR · Downtime · Jam operasi · MTBF · Target MTBF · Tercapai (✓ / ✗ MTTR / ✗ MTBF) · Status · **Availability (%)** (kolom M; level Proses + rata-rata, juga per line).
   - Rumus: lihat "Yang baru di 2.6". Nilai statis, dibangun ulang tiap malam, lewat Dashboard → **Perbarui Laporan, Rekap, TPM & KPI**, menu → **Perbarui tab KPI**, saat tutup bulan dan `setup`.
   - **Tutup bulan**: Dashboard (admin) mengingatkan bulan lalu yang belum ditutup + jumlah pekerjaan bulan itu yang masih menunggu review → **Tutup bulan …**. Atau menu → **Tutup bulan KPI…** (bulan mana pun yang sudah lewat).
     Sejak 2.6.1 **otomatis** oleh trigger malam mulai tanggal `KPI_TUTUP_OTOMATIS` (5) bulan berikutnya, bila tidak ada Abandoned yang menunggu review ("Ditutup … oleh otomatis"; `0` = tetap manual). Tutup ulang manual tetap bisa.

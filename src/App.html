@@ -547,10 +547,8 @@
    */
   function emptyCard() {
     var m = M(), noLine = !(m.lines || []).length, noPart = !(m.spareparts || []).length;
-    if (!noLine && !noPart) return '';
-    if (!isAdmin()) {
-      return noLine ? '<div class="alert warn">' + esc(t('Belum ada line di aplikasi. Minta admin mengisi tab Lines dan mencetak QR.')) + '</div>' : '';
-    }
+    if (!noLine) return isAdmin() && noPart ? '<p class="tiny muted" style="margin:0 4px 12px">' + esc(t('Belum ada sparepart di katalog (tab Sparepart): teknisi mengetik part manual.')) + '</p>' : '';
+    if (!isAdmin()) return '<div class="alert warn">' + esc(t('Belum ada line di aplikasi. Minta admin mengisi tab Lines dan mencetak QR.')) + '</div>';
     var steps = ['Factory: ID & nama factory.', 'Projects: baterai per factory (+ target MTTR / MTBF bila ada).',
       'Lines: satu baris = satu line / mesin ber-QR; isi Proses (Modul Line / Pack Line / Pre-Assy).',
       'Sparepart: paste daftar part (kode part di kolom Model).', 'Users: email, nama, Peran (Teknisi / Admin).',

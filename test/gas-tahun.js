@@ -25,6 +25,7 @@ M.forEach(r => { const k = r['Status'] + (r['Status review'] ? '/' + r['Status r
 const ARSIP_TABS = ss.getSheets().map(s => s.getName()).filter(n => /^Arsip( Log| Sparepart)? \d{4}$/.test(n)).sort();
 const counts = { maintenance: M.length, status, log: ctx.readTable_('Log').length, pemakaian: ctx.readTable_('Pemakaian Sparepart').length,
   kpiData: ctx.readTable_('KPI data').length, lines: ctx.readTable_('Lines').length, users: ctx.readTable_('Users').length,
+  parts: ctx.masterData_().spareparts.length,   // 2.6.9: part aktif (contoh, baris kotor & nonaktif tidak terhitung)
   arsip: Object.fromEntries(ARSIP_TABS.map(n => [n, ctx.readTable_(n).length])) };
 const dashboard = as(seed.ADMIN, () => ctx.apiDashboard({ periode: 'ytd' })).kpi;
 const arsip = M.filter(r => ctx.isArchivable_(r, y0)).length;
@@ -72,7 +73,7 @@ const meta = {
   admin: seed.ADMIN, year: y, years: YEARS, start: seed.start, end: seed.end, days: seed.days, profil: seed.profil, todayKey: seed.todayKey,
   generatedMs: seed.generatedMs, jobs: counts.maintenance, kb: Math.round(gzBytes / 1024), counts, arsip, prevKey, pic, picName: 'Agus Setiawan',
   manualLine: seed.manualLine, isian: seed.isian, pics15: seed.pics15, parts20: seed.parts20, tabel: TABEL, width, rows: nrows, blobs,
-  judul: seed.profil === 'bogor2' ? 'UJI 2 TAHUN (master Bogor, ±24/hari)' : 'UJI 1 TAHUN',
+  judul: seed.profil === 'bogor2' ? 'UJI 2 TAHUN (mulai dari spreadsheet kosong, ±24/hari, 1.500 part)' : 'UJI 1 TAHUN',
   parts: [{ id: ctx.partId_('Elektrikal', 'Sensor photoelectric', 'Omron E3Z-D61'), qty: 1 }, { id: ctx.partId_('Mekanikal', 'Baut', 'M6 x 20 SUS'), qty: 4 }]
 };
 
@@ -95,5 +96,8 @@ const total = fs.readdirSync(OUT).reduce((a, f) => a + fs.statSync(path.join(OUT
 console.log('build/gas-tahun (' + seed.profil + '): ' + fs.readdirSync(OUT).length + ' file, ' + (total / 1048576).toFixed(1) + ' MB · data ' + Math.round(jsonBytes / 1048576) + ' MB JSON → gzip ' + meta.kb + ' KB (' + files.length + ' potongan) · ' +
   counts.maintenance + ' pekerjaan di Maintenance ' + seed.start + ' – ' + seed.end + ' · Log ' + counts.log + ' · Pemakaian ' + counts.pemakaian + ' · arsip ' + JSON.stringify(counts.arsip));
 console.log('alur ' + JSON.stringify(st.flow) + ' · status ' + JSON.stringify(status) + ' · durasi median ' + q(0.5) + ' / p90 ' + q(0.9) + ' · error generator ' + JSON.stringify(seed.errors));
+if (seed.profil === 'bogor2') console.log('2.6.9 siklus: hari sibuk ' + st.sibuk + ' · listrik turun ' + st.listrik + ' · Mulai di line terpakai ditolak ' + (st.konflik || 0) +
+  ' / lolos ' + (st.konflikLolos || 0) + ' · part aktif ' + counts.parts + ' · peringatan master ' + ctx.masterData_().warnings.length + ': ' +
+  ctx.masterData_().warnings.slice(0, 8).join(' | '));
 console.log(YEARS.map(yr => 'Laporan ' + yr + ': ' + LAP[yr].rows.length + ' · KPI ' + yr + ' ' + kpi(yr).length + ' baris (' + kpiClosed(yr) + ' bulan ditutup)').join(' · ') +
   ' · arsip ' + y0 + ' nanti: ' + arsip + ' · TPM ' + JSON.stringify(tpm) + ' · per baterai ' + JSON.stringify(perBaterai));

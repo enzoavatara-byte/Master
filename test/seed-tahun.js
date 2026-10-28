@@ -5,8 +5,11 @@
  * jumlah PIC, jam kejadian) di line asli "Maintenance Bogor" (test/data/lines-bogor.json). Orang fiktif (@example.com),
  * email peringatan mati. PRNG ber-seed: data sama setiap dijalankan pada tanggal yang sama.
  *   node test/seed-tahun.js   → ringkasan sebaran (tanpa menulis file)
- * Profil UJI=bogor2 (2.6.4, uji 2 tahun): 24 bulan s/d kemarin, ±24 laporan per hari, master Bogor (test/data/master-bogor.json, line BGR-…),
- * katalog uji 483 part, PIC tambahan s/d 15, sparepart s/d 20, arsip 2024 di Januari 2025 (2025 sengaja belum diarsip), perubahan manajemen.
+ * Profil UJI=bogor2 (2.6.4, uji 2 tahun): 24 bulan s/d kemarin, ±24 laporan per hari, ukuran & bentuk master Bogor (test/data/master-bogor.json,
+ * line BGR-…), PIC tambahan s/d 15, sparepart s/d 20, arsip 2024 di Januari 2025 (2025 sengaja belum diarsip), perubahan manajemen.
+ * 2.6.9 siklus hidup seperti serah terima Cikarang: spreadsheet KOSONG (baris CONTOH dibiarkan admin), 4 user hari pertama, line diisi
+ * bertahap minggu 1–6, katalog 1.500 part di-paste minggu ke-2 (dengan baris kotor), +200 part Mar 2026, 40 part dinonaktifkan Jun 2026,
+ * hari sibuk (2,5×), "listrik turun" (4–6 line mulai di menit yang sama), teknisi lain mencoba Mulai di line yang sedang dikerjakan.
  *   UJI=bogor2 SEED_PROGRESS=1 node test/seed-tahun.js
  */
 'use strict';
@@ -60,6 +63,11 @@ if (!BOGOR) bawaanLama();   // profil 1 tahun: isi bawaan versi sebelumnya. bogo
 ctx.setup();
 const rowOf = (sheet, obj) => ctx.objToRow_(ss.getSheetByName(sheet).data[0].map(h => String(h).trim()), obj);
 const tableOf = (sheet, objs) => { const sh = ss.getSheetByName(sheet); sh.data = [sh.data[0]].concat(objs.map(o => rowOf(sheet, o))); };
+// 2.6.9: baris CONTOH dari setup dibiarkan di atas (admin tidak menghapusnya) — harus selalu diabaikan aplikasi
+const tableKeep = (sheet, objs) => {
+  const sh = ss.getSheetByName(sheet), a = sh.data[0].indexOf('Aktif');
+  sh.data = [sh.data[0]].concat(sh.data.slice(1).filter(r => r[a] === 'Contoh'), objs.map(o => rowOf(sheet, o)));
+};
 
 const ADMIN = 'admin@uji.invalid';   // diganti email pelaksana di Apps Script
 const SPV = 'spv@example.com';
@@ -77,13 +85,15 @@ Object.keys(GRUP).forEach(g => GRUP[g].forEach(([k, nama, lang]) => {
   TECH[k + '@example.com'] = { nama, zh: lang === 'zh', grup: g, masuk: 0, keluar: LEAVE[k] || Infinity };
 }));
 Object.keys(JOIN).forEach(k => { TECH[k + '@example.com'] = Object.assign({ zh: false, keluar: Infinity }, JOIN[k]); });
+// 2.6.9: hari pertama hanya admin, supervisor, dan 2 teknisi; teknisi lain didaftarkan admin dalam 2 minggu pertama
+if (BOGOR) Object.keys(TECH).filter(e => !TECH[e].masuk).slice(2).forEach(e => { TECH[e].masuk = START + between(1, 14) * DAY + 7 * H; TECH[e].awal = true; });
 const userRow = (email) => { const t = TECH[email]; return { Email: email, Nama: t.nama, Peran: 'Teknisi', Aktif: 'Ya', Bahasa: t.zh ? 'zh' : '' }; };
 tableOf('Users', [{ Email: ADMIN, Nama: 'Admin Uji', Peran: 'Admin', Aktif: 'Ya', Bahasa: '' },
   { Email: SPV, Nama: 'Supervisor Maintenance', Peran: 'Admin', Aktif: 'Ya', Bahasa: '' }]
   .concat(Object.keys(TECH).filter(e => !TECH[e].masuk).map(userRow)));
 
 const mbRows = (name) => { const [h, ...rows] = MB[name]; return rows.map(r => Object.fromEntries(h.map((k, i) => [k, r[i]]))); };
-if (BOGOR) { tableOf('Factory', mbRows('Factory')); tableOf('Projects', mbRows('Projects')); }
+if (BOGOR) { tableKeep('Factory', mbRows('Factory')); tableKeep('Projects', mbRows('Projects')); }
 else tableOf('Factory', [['F1', 'Factory 1 (Limo)'], ['F2', 'Factory 2 (Geely)'], ['F6', 'Factory 6 (2W)'], ['F10', 'Factory 10 (2W)']]
   .map(([id, nama]) => ({ 'Factory ID': id, Nama: nama, Lokasi: 'Bogor', Aktif: 'Ya' })));
 if (!BOGOR) tableOf('Projects', [['F1', 'Limo7', 'Mass Production', 40, 150], ['F1', 'VF7', 'Trial', 45, 120], ['F2', 'E22H', 'Mass Production', 35, 120],
@@ -100,7 +110,8 @@ const LN = BOGOR ? mbRows('Lines').map(l => ({ id: l['Line ID'], nama: l['Nama L
   if (nameCount[k] > 1) { nameSeen[k] = (nameSeen[k] || 0) + 1; nama += ' #' + nameSeen[k]; zh += ' #' + nameSeen[k]; }
   return { id, nama, proses, fac, bat: bat || '2W', area, aktif: 'Ya', zh, w: 1 };
 });
-if (BOGOR) tableOf('Lines', mbRows('Lines'));
+// 2.6.9: Lines mulai kosong (hanya CONTOH); admin mengisi bertahap minggu 1–6 (pekerjaan hanya di line yang sudah ada)
+if (BOGOR) { tableKeep('Lines', []); LN.forEach((l, i) => { l.ada = START + Math.floor(i * 6 / LN.length) * 7 * DAY; }); }
 else tableOf('Lines', LN.map(l => ({ 'Line ID': l.id, 'Nama Line': l.nama, Proses: l.proses, 'Factory ID': l.fac, Baterai: l.bat, Area: l.area,
   Aktif: l.aktif, 'Nama (中文)': l.zh, 'Nama (English)': l.nama })));
 LN.forEach(l => { l.w = chance(0.15) ? 4 : 1; });   // ±15% mesin "kronis" (Pareto)
@@ -123,16 +134,22 @@ const CATALOG = [
   ['Mekanikal', 'Gripper / jig OCV', 'FX021', 'pcs'], ['Mekanikal', 'Baut', 'M6 x 20 SUS', 'pcs'], ['Mekanikal', 'Stopper conveyor', '30 mm', 'pcs'],
   ['Mekanikal', 'Lensa pelindung laser', '120 x 5 mm', 'pcs'], ['Mekanikal', 'Lem 2K', 'Kuning / biru', 'cartridge'],
   ['Mekanikal', 'Bearing', '6205-2RS', 'pcs'], ['Mekanikal', 'Timing belt', 'HTD 5M-450', 'pcs'], ['Program', 'Backup program PLC', '', 'kali']];
-const KAT = BOGOR ? BG.katalog() : CATALOG;   // bogor2: katalog uji 483 part
-tableOf('Sparepart', KAT.map(([j, n, m, s], i) => ({ 'Jenis Sparepart': j, 'Nama Sparepart': n, Model: m, Satuan: s, Urutan: i + 1, Aktif: 'Ya' })));
+const KAT = BOGOR ? BG.katalog() : CATALOG;   // bogor2: katalog uji 1.500 part (2.6.9)
+// bogor2 (2.6.9): katalog belum ada di hari pertama → di-paste minggu ke-2 (1.300 part), +200 part Mar 2026, 40 part nonaktif Jun 2026
+const T_PASTE = START + 8 * DAY + 9 * H, T_TAMBAH = BOGOR ? at0(2026, 3, 1) - MIN : 0, T_NONAKTIF = BOGOR ? at0(2026, 6, 1) + 7 * H : 0;
+const KAT_AWAL = 1300, KAT_MATI = [1260, 1300];
+const avail = (i, t) => !BOGOR || (t >= T_PASTE && (i < KAT_AWAL || t >= T_TAMBAH) && !(i >= KAT_MATI[0] && i < KAT_MATI[1] && t >= T_NONAKTIF));
+const partRow = (c, i) => ({ 'Jenis Sparepart': c[0], 'Nama Sparepart': c[1], Model: /^\d+$/.test(c[2]) ? Number(c[2]) : c[2], Satuan: c[3], Urutan: i + 1, Aktif: 'Ya' });
+if (BOGOR) tableKeep('Sparepart', []);
+else tableOf('Sparepart', KAT.map((c, i) => partRow(c, i)));
 const PART = {}, MODELS = {};
 CATALOG.forEach(([j, n, m]) => { PART[n + (n === 'Selang PU' ? ' ' + m : '')] = ctx.partId_(j, n, m); });
-KAT.forEach(([j, n, m]) => { (MODELS[n] = MODELS[n] || []).push({ id: ctx.partId_(j, n, m), label: n + (m ? ' ' + m : '') }); });
-// part dari teks: bogor2 = model berbobot (model pertama paling sering), profil lama = model tetap
-const partOf = (nama) => {
+KAT.forEach(([j, n, m], idx) => { (MODELS[n] = MODELS[n] || []).push({ id: ctx.partId_(j, n, m), label: n + (m ? ' ' + m : ''), idx }); });
+// part dari teks: bogor2 = model berbobot (model pertama paling sering) dari part yang sudah ada di katalog saat itu; profil lama = model tetap
+const partOf = (nama, t) => {
   if (!BOGOR) { const c = CATALOG.find(c => c[1] === nama.replace(/ 6 mm$/, '')); return { id: PART[nama], label: c[1] + (c[2] ? ' ' + c[2] : '') }; }
-  const ms = MODELS[nama];
-  return ms[weighted(ms.map((_, i) => (i === 0 ? 6 : (i === 1 ? 3 : 1))))];
+  const ms = MODELS[nama].filter(x => avail(x.idx, t));
+  return ms.length ? ms[weighted(ms.map((_, i) => (i === 0 ? 6 : (i === 1 ? 3 : 1))))] : null;
 };
 
 // Pilihan sesuai kasus di Troublelog (label 中文 / English diisi admin)
@@ -166,7 +183,7 @@ else (function () {
 })();
 const LIBUR = BOGOR ? BG.LIBUR : ['2026-01-01', '2026-03-20', '2026-03-21'];
 const CONFIG = BOGOR
-  ? Object.assign(Object.fromEntries(mbRows('Config').map(r => [r.Key, r.Value])), { NAMA_APLIKASI: 'MTTR Uji 2 Tahun (Bogor)', EMAIL_PERINGATAN: 'Tidak',
+  ? Object.assign(Object.fromEntries(mbRows('Config').map(r => [r.Key, r.Value])), { NAMA_APLIKASI: 'MTTR Uji 2 Tahun (mulai kosong)', EMAIL_PERINGATAN: 'Tidak',
     TANGGAL_LIBUR: LIBUR.map(k => k.slice(8) + '/' + k.slice(5, 7) + '/' + k.slice(0, 4)).join(', '), KPI_MULAI: dmy(START), LAPORAN_LANGSUNG: 'Tidak' })
   : { NAMA_APLIKASI: 'MTTR Uji 1 Tahun', EMAIL_PERINGATAN: 'Tidak', JAM_OPERASI_PER_HARI: 22, HARI_OPERASI: 'Sen-Min',
     TANGGAL_LIBUR: '01/01/2026, 20/03/2026, 21/03/2026', KPI_MULAI: dmy(START), LAPORAN_LANGSUNG: 'Tidak' };
@@ -243,8 +260,8 @@ function isian(kasus, zh, t) {
   if (/ganti|penggantian|pergantian|tuker|tukar|replace|\bbaru\b/.test(la)) {
     for (const [re, nama] of PR) {
       if (parts.length < 2 && re.test(lc) && !parts.some(p => p.nama === nama)) {
-        const c = partOf(nama);
-        parts.push({ nama, id: c.id, label: c.label, qty: /Baut|Selang|Mur/.test(nama) ? between(2, 4) : 1 });
+        const c = partOf(nama, t), qty = /Baut|Selang|Mur/.test(nama) ? between(2, 4) : 1;
+        parts.push(c ? { nama, id: c.id, label: c.label, qty } : { manual: true, jenis, nama, model: '', qty });   // katalog belum ada → ketik manual
       }
     }
     if (!parts.length) {   // "ganti <benda>" yang tidak ada di katalog → part manual (nama dari teks)
@@ -278,7 +295,7 @@ const RULES = {
   F10: []
 };
 const FAC_W = BOGOR ? { F1: 0.55, F2: 0.32, F6: 0.13, F10: 0 } : { F1: 0.55, F2: 0.30, F6: 0.13, F10: 0.02 };   // Bogor: line F10 nonaktif
-const activeLine = (l, t) => l.aktif === 'Ya' && !(l.fac === 'F10' && t >= at0(2026, 6, 1)) && !(l.mati && t >= l.mati);
+const activeLine = (l, t) => l.aktif === 'Ya' && t >= (l.ada || 0) && !(l.fac === 'F10' && t >= at0(2026, 6, 1)) && !(l.mati && t >= l.mati);
 function lineCandidates(kasus, fac, t) {
   const pool = LN.filter(l => l.fac === fac && activeLine(l, t));
   const text = kasus.proc + ' ' + kasus.p.toLowerCase();
@@ -358,6 +375,13 @@ function planJob(t0, force) {
     reserve(tech, t0, t0 + span); reserve(line.id, t0, t0 + span);
     const zh = TECH[tech].zh, bat = batteryOf(line, t0), stopLine = kasus.stop ? 'Ya' : 'Tidak';
     ev(t0, () => { job.id = as(tech, () => ctx.apiStart(line.id, { baterai: bat, stopLine })).open.id; });
+    if (BOGOR && chance(0.01)) {   // 2.6.9: teknisi lain scan QR line yang sedang dikerjakan → harus ditolak (tanpa pekerjaan kedua)
+      ev(t0 + Math.floor(span / 2), () => {
+        const other = onDuty(t0 + span / 2).filter(e => e !== tech)[0];
+        if (!other || !job.id) return;
+        try { as(other, () => ctx.apiStart(line.id, { baterai: bat, stopLine })); stats.konflikLolos = (stats.konflikLolos || 0) + 1; } catch (e) { stats.konflik = (stats.konflik || 0) + 1; }
+      });
+    }
     stats.jobs++; bump(stats.flow, flow); bump(stats.fac, line.fac); stats.hour[W(t0).getUTCHours()]++;
     const selesai = (email, tEnd) => {
       const x = isian(kasus, TECH[email].zh, tEnd);
@@ -378,7 +402,8 @@ function planJob(t0, force) {
           x.parts = [];
           while (x.parts.length < np) {
             if (chance(0.1)) { x.parts.push({ manual: true, jenis: 'Mekanikal', nama: 'Part rakitan khusus ' + (x.parts.length + 1), model: '', qty: 1 }); continue; }
-            const c = pick(KAT), id = ctx.partId_(c[0], c[1], c[2]);
+            const ci = between(0, KAT.length - 1), c = KAT[ci], id = ctx.partId_(c[0], c[1], c[2]);
+            if (!avail(ci, tEnd)) { x.parts.push({ manual: true, jenis: c[0], nama: c[1], model: c[2], qty: 1 }); continue; }
             if (!x.parts.some(p => p.id === id)) x.parts.push({ nama: c[1], id, label: c[1] + (c[2] ? ' ' + c[2] : ''), qty: between(1, 4) });
           }
           x.values.Penanganan = 'Ganti part';
@@ -480,10 +505,16 @@ for (let d = 0; d < DAYS; d++) {
   const day0 = START + d * DAY, key = ymd(day0);
   const f = FAKTOR_BULAN[key.slice(5, 7)] * (LIBUR.indexOf(key) !== -1 ? 0.2 : 1);
   const libur = LIBUR.indexOf(key) !== -1;
-  const n = BOGOR ? Math.max(libur ? 2 : 10, Math.min(40, Math.round(24 * f + gauss() * 4.5))) : Math.max(libur ? 1 : 6, Math.min(26, Math.round(15 * f + gauss() * 3.2)));
+  let n = BOGOR ? Math.max(libur ? 2 : 10, Math.min(40, Math.round(24 * f + gauss() * 4.5))) : Math.max(libur ? 1 : 6, Math.min(26, Math.round(15 * f + gauss() * 3.2)));
+  if (BOGOR && !libur && chance(2 / 30)) { n = Math.min(70, Math.round(n * 2.5)); stats.sibuk = (stats.sibuk || 0) + 1; }   // 2.6.9: hari sibuk
   const times = [];
   for (let i = 0; i < n; i++) times.push(day0 + weighted(hourW) * H + between(0, 59) * MIN);
   times.sort((a, b) => a - b).forEach(t => planJob(t));
+  if (BOGOR && !libur && d > 42 && chance(1 / 30)) {   // 2.6.9: listrik turun → 4–6 line berhenti, teknisi menekan Mulai di menit yang sama
+    const t = day0 + between(8, 20) * H + between(0, 59) * MIN, k = between(4, 6);
+    for (let i = 0; i < k; i++) planJob(t);
+    stats.listrik = (stats.listrik || 0) + 1;
+  }
   if (BOGOR) {
     // trigger malam tiap hari: tutup bulan otomatis mulai tanggal KPI_TUTUP_OTOMATIS = 2 (menunggu review bila masih ada); 2 Januari = bangun ulang penuh
     const dd = Number(key.slice(8));
@@ -519,6 +550,30 @@ if (BOGOR) {   // 2 tahun perubahan manajemen / sistem: semua lewat sheet, tanpa
   });
   ev(LINE_MATI.mati, () => { sheetSet('Lines', 'Line ID', LINE_MATI.id, 'Aktif', 'Tidak'); ctx.invalidateMaster_(); });
   ev(at0(2025, 1, 10) + 10 * H, () => as(ADMIN, () => ctx.arsipkanTahun_(2024)));   // admin mengarsip 2024 tepat waktu; 2025 sengaja belum
+  // 2.6.9 siklus hidup sejak spreadsheet kosong: teknisi didaftarkan, line diisi bertahap, katalog di-paste (berantakan), ditambah, dinonaktifkan
+  Object.keys(TECH).filter(e => TECH[e].awal).forEach(e => ev(TECH[e].masuk - MIN, () => { ss.getSheetByName('Users').appendRow(rowOf('Users', userRow(e))); ctx.invalidateMaster_(); }));
+  const LROWS = mbRows('Lines');
+  for (let w = 0; w < 6; w++) {
+    const at = START + w * 7 * DAY;
+    ev(at - MIN, () => { const L = ss.getSheetByName('Lines'); LROWS.forEach((o, i) => { if (LN[i].ada === at) L.appendRow(rowOf('Lines', o)); }); ctx.invalidateMaster_(); });
+  }
+  ev(T_PASTE, () => {
+    const S = ss.getSheetByName('Sparepart'), rows = KAT.slice(0, KAT_AWAL).map((c, i) => rowOf('Sparepart', partRow(c, i)));
+    rows.splice(800, 0, S.data[0].slice());                                  // baris judul ikut ter-paste
+    rows.splice(400, 0, S.data[0].map(() => ''));                            // baris kosong di tengah
+    [10, 20, 30].forEach(i => rows.push(rowOf('Sparepart', partRow(KAT[i], i))));   // dobel
+    [40, 50, 60].forEach(i => rows.push(rowOf('Sparepart', Object.assign(partRow(KAT[i], i), { 'Nama Sparepart': ' ' + KAT[i][1] + '  ' }))));   // spasi
+    rows.push(rowOf('Sparepart', { 'Jenis Sparepart': '', 'Nama Sparepart': 'Part tanpa jenis', Model: 'X-1', Satuan: 'pcs', Aktif: 'Ya' }));
+    rows.push(rowOf('Sparepart', { 'Jenis Sparepart': 'Mekanikal', 'Nama Sparepart': 'Bearing', Model: '6206 · P001', Satuan: 'pcs', Aktif: 'Contoh' }));   // contoh disalin, Aktif lupa diganti
+    rows.forEach(r => S.appendRow(r));
+    ctx.invalidateMaster_();
+  });
+  ev(T_TAMBAH, () => { const S = ss.getSheetByName('Sparepart'); KAT.slice(KAT_AWAL).forEach((c, i) => S.appendRow(rowOf('Sparepart', partRow(c, KAT_AWAL + i)))); ctx.invalidateMaster_(); });
+  ev(T_NONAKTIF, () => {
+    const S = ss.getSheetByName('Sparepart'), h = S.data[0], mati = new Set(KAT.slice(KAT_MATI[0], KAT_MATI[1]).map(c => c[1] + '|' + c[2]));
+    S.data.forEach((r, i) => { if (i && mati.has(String(r[h.indexOf('Nama Sparepart')]) + '|' + String(r[h.indexOf('Model')]))) r[h.indexOf('Aktif')] = 'Tidak'; });
+    ctx.invalidateMaster_();
+  });
 }
 
 // ---------- jalankan ----------
@@ -557,6 +612,8 @@ if (require.main === module) {
   console.log('durasi median ' + q(0.5) + ' (p25 ' + q(0.25) + ', p75 ' + q(0.75) + ', p90 ' + q(0.9) + ', p95 ' + q(0.95) + ') · part ' + stats.parts +
     ' (manual ' + stats.manualParts + ') · PIC tambahan ' + stats.pics + ' · detail 中文 ' + stats.zh + ' · input manual ' + stats.manualInput);
   console.log('jam', stats.hour.join(' '));
+  if (BOGOR) console.log('hari sibuk ' + stats.sibuk + ' · listrik turun ' + stats.listrik + ' · Mulai di line terpakai ditolak ' + (stats.konflik || 0) + ' / lolos ' + (stats.konflikLolos || 0) +
+    ' · part aktif ' + ctx.masterData_().spareparts.length + ' · peringatan master ' + ctx.masterData_().warnings.length);
   if (BOGOR) console.log('PIC tambahan ≥3: ' + stats.bigPics + ' (maks ' + stats.maxPics + ') · part ≥6: ' + stats.bigParts + ' (maks ' + stats.maxParts + ') · katalog ' + KAT.length +
     ' · tab ' + ss.getSheets().map(x => x.getName() + ' ' + (x.data.length - 1)).filter(x => /Arsip|Maintenance$|Log$|Laporan|KPI \d/.test(x)).join(', '));
   console.log('error', JSON.stringify(errors));
