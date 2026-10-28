@@ -3,6 +3,25 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.6 — tab backup mingguan & bulanan, katalog sparepart besar
+Buat file Script **`Backup`**; ganti `Api`, `Code`, `Config`, `Tampilan` (Script) dan `Panduan` (HTML), lalu New version. **Run `setup`** (trigger harian 03:00 + kunci Config `BACKUP_TAB`). Tidak ada izin Google baru.
+
+- **Tab backup otomatis** (permintaan: data dibackup tiap minggu & tiap bulan):
+  - Tiap Senin dibuat tab **`Backup minggu <tanggal Senin>`** = pekerjaan yang dimulai Senin–Minggu lalu.
+  - Tiap tanggal 3 dibuat tab **`Backup bulan <yyyy-mm>`** = bulan lalu (sesudah tutup bulan otomatis tanggal 2).
+  - Isi = format tab Laporan / Download Riwayat (kolom `Format Laporan`, tanpa Cancelled), nilai beku saat dibuat. Ukuran tab dipangkas pas isi: ±4 ribu sel per minggu, ±17 ribu per bulan pada ±24 laporan/hari.
+  - Admin: **File → Download** (atau klik kanan tab → Copy to → spreadsheet lain), simpan di tempat lain, lalu **hapus tabnya**. Tab yang sudah dihapus tidak dibuat lagi.
+  - **Dashboard** admin mengingatkan tab backup yang lebih dari 35 hari belum dihapus (tidak ada yang dihapus otomatis). Bila dibiarkan: ±0,4 juta sel per tahun → file penuh lebih cepat.
+  - Menu → **Buat tab backup sekarang**. `Config` → `BACKUP_TAB` = `Mingguan, Bulanan` / `Mingguan` / `Bulanan` / `Tidak`.
+  - Sengaja **tanpa** backup ke file lain otomatis: itu butuh izin Google Drive/Sheets baru, sehingga setiap teknisi harus menyetujui izin yang lebih luas saat membuka aplikasi.
+- **Katalog sparepart > 1.500 part:** diukur di HP lambat (CPU 4×, 3G ±400 kbps):
+  - halaman terkompres 76 → 98 KB (+±0,5 dtk saat aplikasi dibuka di sinyal lemah, tidak terasa di 4G);
+  - buka form Selesai ±0,15 dtk, cari part ±0,07 dtk; server tidak terpengaruh;
+  - 3.000 part: +±1 dtk. Tanpa perubahan kode; di atas ±3.000 part katalog sebaiknya dimuat terpisah (rencana).
+  - Kode part dari gudang: tulis di kolom `Model` (bisa dicari).
+
+**Uji:** 1 test baru (107 test): periode Senin / tanggal 3 / lewat tahun, isi tab = Download Riwayat sel per sel, sekali per periode, tab yang dihapus admin tidak dibuat lagi, `BACKUP_TAB = Tidak`, periode kosong tanpa tab, peringatan Dashboard hanya admin, tab backup tidak disembunyikan.
+
 ## 2.6.5 — muat ±7 tahun dalam satu file (batas 10 juta sel)
 Ganti `Code`, `Config`, `Db`, `Rekap` (Script), lalu New version. **Run `setup` sekali** (memangkas kolom kosong). Tidak ada sheet, kolom, trigger, atau izin baru.
 

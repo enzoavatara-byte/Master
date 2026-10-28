@@ -80,6 +80,7 @@ function onOpen() {
     .addItem('Masukkan Input Manual…', 'menuInputManual')
     .addItem('Arsipkan data tahun lalu…', 'menuArsipkanTahun')
     .addItem('Hapus data testing…', 'menuHapusDataTesting')
+    .addItem('Buat tab backup sekarang (minggu & bulan lalu)', 'menuBackupSekarang')
     .addSeparator()
     .addItem('Isi terjemahan otomatis (中文 / English)…', 'menuIsiTerjemahan')
     .addSeparator()
@@ -302,6 +303,9 @@ function setup() {
   // supaya jadwal versi sebelumnya (2.2.1 = tiap jam) tidak tertinggal.
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'refreshRekap') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('refreshRekap').timeBased().everyDays(1).atHour(APP.REKAP_HOUR).create();
+  // 2.6.6: tab backup mingguan / bulanan, tiap hari 03:00 (diganti tiap setup supaya tidak dobel)
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'backupTerjadwal') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('backupTerjadwal').timeBased().everyDays(1).atHour(BACKUP_JAM_).create();
   var hasChange = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'onMasterChange'; });
   if (!hasChange) ScriptApp.newTrigger('onMasterChange').forSpreadsheet(ss).onChange().create(); // hapus/sisip baris → cache dihapus
   // Lock: setup boleh dijalankan saat teknisi sedang bekerja tanpa bentrok dengan sinkron laporan per aksi.

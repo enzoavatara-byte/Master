@@ -777,6 +777,17 @@ function ujtProfil() {
 function ujtKapasitas() {
   var ss = SpreadsheetApp.getActive(), BATAS = 10000000, sesudah = !!ss.getSheetByName(archiveName_(UJT_.meta.year - 1));
   var R = ujtRunner_(sesudah ? 7.9 : 6.5);   // 6b sebelum arsip tahun lalu, 7c sesudah (dua hasil tersimpan berdampingan)
+  if (!sesudah) R.safe('Tab backup (2.6.6)', function () {   // seperti trigger 03:00: minggu & bulan lalu, lalu dihapus lagi (tidak ikut terhitung)
+    var props = PropertiesService.getDocumentProperties(), simpan = props.getProperty(BACKUP_PROP_);
+    var ada = {};
+    ss.getSheets().forEach(function (sh) { ada[sh.getName()] = true; });
+    var t = R.timed('Buat tab backup minggu & bulan lalu (trigger harian 03:00)', 120000, function () { return backupJalan_(new Date(), true); });
+    var baru = ss.getSheets().filter(function (sh) { return BACKUP_RE_.test(sh.getName()) && !ada[sh.getName()]; });
+    R.ok('Tab backup dibuat (format Laporan, pas isi)', baru.length >= 1, t.v.join(' · ') + ' · ' +
+      baru.map(function (sh) { return sh.getName() + ' ' + sh.getMaxRows() + ' × ' + sh.getMaxColumns() + ' = ' + sh.getMaxRows() * sh.getMaxColumns() + ' sel'; }).join(' · '));
+    baru.forEach(function (sh) { ss.deleteSheet(sh); });
+    if (simpan === null) props.deleteProperty(BACKUP_PROP_); else props.setProperty(BACKUP_PROP_, simpan);
+  });
   R.safe('Kapasitas', function () {
     var tabs = ss.getSheets().map(function (sh) {
       var r = sh.getMaxRows(), c = sh.getMaxColumns(), lr = sh.getLastRow(), lc = sh.getLastColumn();

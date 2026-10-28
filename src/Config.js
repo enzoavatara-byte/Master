@@ -5,7 +5,7 @@
  */
 var APP = {
   NAME: 'MTTR',          // nama default; per lokasi diubah lewat Config → NAMA_APLIKASI
-  VERSION: '2.6.5',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
+  VERSION: '2.6.6',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
   TZ: 'Asia/Jakarta',
   DATE_FMT: 'yyyy-MM-dd HH:mm:ss',
 
@@ -283,6 +283,7 @@ var APP = {
     TANGGAL_LIBUR: { value: '', description: 'KPI MTBF: tanggal tidak beroperasi (dd/mm/yyyy, pisahkan dengan koma), mis. 25/12/2026, 01/01/2027' },
     KPI_TUTUP_OTOMATIS: { value: 5, description: 'KPI: tanggal bulan berikutnya untuk tutup bulan otomatis (trigger malam), bila tidak ada Abandoned yang menunggu review. 0 = mati (tutup manual)' },
     KPI_MULAI: { value: '', description: 'KPI: dihitung sejak tanggal ini (dd/mm/yyyy), mis. tanggal aplikasi mulai dipakai. Kosong = awal bulan data pertama' },
+    BACKUP_TAB: { value: 'Mingguan, Bulanan', description: 'Tab backup otomatis berformat Laporan: tiap Senin (minggu lalu) & tanggal 3 (bulan lalu). Isi: Mingguan, Bulanan, keduanya, atau Tidak. Download / pindahkan isinya, lalu hapus tabnya' },
     IKON_APLIKASI: { value: '', description: 'Ikon shortcut di layar utama HP: alamat gambar PNG yang bisa dibuka publik (https://…png). Kosong = ikon bawaan Google' }
   },
 

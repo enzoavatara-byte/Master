@@ -88,6 +88,10 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 
 ## 2. Upgrade
 
+### Ke 2.6.6 (dari 2.6.5)
+Buat file Script **`Backup`** (isi dari `src/Backup.js`); ganti `Api`, `Code`, `Config`, `Tampilan` (Script) dan `Panduan` (HTML), lalu Deploy → Manage deployments → ✏️ → **New version**,
+lalu **Run `setup`** (trigger harian `backupTerjadwal` 03:00 + kunci Config `BACKUP_TAB`). Dari 2.6.4 atau lebih lama: paste semua file `src/`, lalu Run `setup`.
+
 ### Ke 2.6.5 (dari 2.6.4)
 Ganti `Code`, `Config`, `Db`, `Rekap` (Script), lalu Deploy → Manage deployments → ✏️ → **New version**, lalu **Run `setup` sekali** (kolom kosong di tab data dipangkas).
 Dari 2.6.3 atau lebih lama: paste semua file `src/`.
@@ -230,7 +234,7 @@ Nama header kolom jangan diganti. Urutan kolom boleh diubah.
 | `Projects` | Baterai per factory + status project + target KPI | `F1` · `VF7` · Fase `Trial` · Target MTTR `45` · Catatan · Target MTBF (jam) `150` |
 | `Lines` | Satu baris = satu unit = satu QR (= Station di laporan, Machine di TPM) | `L03-A` · Formation 1A · **Proses** `Formation` · `F1` · Baterai (kosong = semua project factory) · Area · Aktif · Nama (中文) · Nama (English). Mesin yang perlu QR sendiri = baris sendiri |
 | `Mesin` | Tidak dipakai lagi (2.6) | Disembunyikan; dibaca hanya untuk label 中文 data lama. Boleh dihapus setelah semua mesin penting dijadikan baris `Lines` |
-| `Sparepart` | Katalog | Jenis Sparepart `Mekanikal` · Nama `Bearing` · Model `6205-2RS` (boleh kosong) · Satuan · Urutan · Aktif |
+| `Sparepart` | Katalog | Jenis Sparepart `Mekanikal` · Nama `Bearing` · Model `6205-2RS` (boleh kosong) · Satuan · Urutan · Aktif. Daftar gudang ribuan baris boleh di-paste sekaligus (diuji 1.500 & 3.000 part); kode part → tulis di Model (mis. `E3Z-D61 · 100234`) supaya bisa dicari; baris Jenis + Nama + Model yang sama dianggap satu part |
 | `Pemakaian Sparepart` | Ditulis aplikasi (jangan diedit) | 1 baris per part dipakai. Bisa dibuat pivot/filter |
 | `Pilihan` | Isi semua pilihan | Jenis · Nilai · Urutan. Jenis: `Jenis Kerusakan`, `Tipe Maintenance`, `Masalah`, `Penyebab`, `Penanganan`, `Alasan Pause`, `Yang Tertunda`, `Alasan Cancel`, atau jenis baru |
 | `Form` | Field form | Form · Field · Label · Tipe · Sumber · Wajib · Lainnya isi sendiri · Urutan · Aktif |
@@ -338,6 +342,9 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
 - **Arsip** (awal tahun, menu → Arsipkan data tahun lalu): pekerjaan final + Log + **pemakaian sparepart** pindah ke `Arsip <tahun>`, `Arsip Log <tahun>`, `Arsip Sparepart <tahun>`.
   Laporan tahun itu tetap utuh karena ikut membaca tab arsip.
   **Wajib tiap Januari.** Uji 2 tahun (±24/hari): tanpa arsip, `Maintenance` berisi 2 tahun (±15.700 baris) dan layar admin yang membaca penuh (Dashboard, Riwayat, Statistik, Download) makin lambat; Dashboard memperingatkan bila ada tahun lalu yang belum diarsip.
+- **Tab backup** (2.6.6): tiap Senin `Backup minggu <tanggal Senin>` (pekerjaan yang dimulai minggu lalu) dan tiap tanggal 3 `Backup bulan <yyyy-mm>` (bulan lalu), format sama dengan tab Laporan, tanpa Cancelled.
+  Admin: **File → Download** (atau klik kanan tab → Copy to → spreadsheet lain) → simpan di tempat lain → **hapus tabnya** (tidak dibuat lagi). Dashboard mengingatkan tab backup > 35 hari. Menu → **Buat tab backup sekarang**. `Config` → `BACKUP_TAB`.
+  Data asli tetap di `Maintenance` / arsip; tab backup hanya salinan untuk disimpan di luar file. Selain itu: File → Version history (kembali ke kondisi jam tertentu).
 - **Kapasitas file** (2.6.5): Google Sheets maks **10 juta sel per file**, sel kosong ikut dihitung. Dengan ±24 laporan/hari dan arsip tiap Januari: ±27% sesudah 2 tahun, ±1,2 juta sel per tahun → perkiraan penuh ±7 tahun.
   Sekitar tahun ke-5 (±65%): klik kanan tab `Arsip <tahun lama>`, `Arsip Log …`, `Arsip Sparepart …`, `Laporan <tahun lama>`, `Rekap …`, `KPI …` → **Copy to → New spreadsheet** (file arsip), cek isinya, lalu hapus tab itu di file utama. KPI bulan tertutup tetap aman di `KPI data`.
 

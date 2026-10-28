@@ -164,6 +164,8 @@ function tabPlan_(ss) {
     if (real && !seen[real]) { seen[real] = true; plan.push([real, grp, !!hide]); }
   };
   add(RINGKASAN_, 'baca'); add(BACA_, 'baca');
+  // 2.6.6: tab backup terlihat di depan (admin perlu men-download lalu menghapusnya)
+  ss.getSheets().map(function (sh) { return sh.getName(); }).filter(function (n) { return BACKUP_RE_.test(n); }).sort().forEach(function (n) { add(n, 'arsip'); });
   add(laporanName_(y), 'laporan'); add(kpiName_(y), 'laporan');
   var md = masterData_();   // Maintenance <baterai> = Laporan per project (2.6.1): setelah Laporan & KPI
   (md.allBatteries.length ? md.allBatteries : APP.PROJECT_DEFAULTS.map(function (p) { return p[1]; }))

@@ -328,14 +328,30 @@ function apiExport(f) {
   var user = requireUser_();
   f = f || {};
   var all = f.scope === 'all' && isAdmin_(user);
-  var c = ctx_(), rg = statsRange_(f), seen = {}, rows = [];
+  var c = ctx_(), rg = statsRange_(f);
+  var rows = periodRows_(rg, function (r) {
+    if (!all && !isInvolved_(r, user.email)) return false;
+    if (f.status ? r['Status'] !== f.status : r['Status'] === APP.STATUS.CANCELLED) return false;
+    if (f.tipe && String(r['Tipe'] || '') !== f.tipe) return false;
+    return matchFilter_(c.md, r, f, c.names);
+  });
+  var total = rows.length;
+  rows = rows.slice(0, APP.EXPORT_LIMIT);
+  var cell = function (v) { return v instanceof Date ? { d: v.toISOString() } : (v == null ? '' : v); };
+  return {
+    serverNowIso: c.now.toISOString(), from: rg.fromKey, to: rg.toKey, total: total, truncated: total > rows.length, limit: APP.EXPORT_LIMIT,
+    title: String(getConfig_('LAPORAN_JUDUL') || ''), appName: appName_(),
+    columns: c.md.report.map(function (k) { return { name: k.kolom, source: k.sumber }; }),
+    rows: laporanCells_(rows, rg, c).map(function (row) { return row.map(cell); })
+  };
+}
+
+/** Pekerjaan yang DIMULAI di rentang rg (tab Maintenance + arsip tahun-tahun itu), tanpa dobel, urut waktu mulai. keep(r) = saringan. */
+function periodRows_(rg, keep) {
+  var seen = {}, rows = [];
   var add = function (r) {
     var id = String(r['Maintenance ID']);
-    if (seen[id] || !(r['Mulai'] instanceof Date) || r['Mulai'] < rg.from || r['Mulai'] >= rg.to) return;
-    if (!all && !isInvolved_(r, user.email)) return;
-    if (f.status ? r['Status'] !== f.status : r['Status'] === APP.STATUS.CANCELLED) return;
-    if (f.tipe && String(r['Tipe'] || '') !== f.tipe) return;
-    if (!matchFilter_(c.md, r, f, c.names)) return;
+    if (seen[id] || !(r['Mulai'] instanceof Date) || r['Mulai'] < rg.from || r['Mulai'] >= rg.to || !keep(r)) return;
     seen[id] = true;
     rows.push(r);
   };
@@ -344,19 +360,16 @@ function apiExport(f) {
     if (findSheet_(archiveName_(y))) readTable_(archiveName_(y)).forEach(add);
   }
   rows.sort(function (a, b) { return (a['Mulai'] - b['Mulai']) || String(a['Maintenance ID']).localeCompare(String(b['Maintenance ID'])); });
-  var total = rows.length;
-  rows = rows.slice(0, APP.EXPORT_LIMIT);
+  return rows;
+}
+
+/** Nilai sel format Laporan (kolom Format Laporan) untuk `rows`; Date tetap Date. Dipakai Download Riwayat & tab backup. */
+function laporanCells_(rows, rg, c) {
   var usage = statsUsage_(rows, rg), cols = c.md.report;
-  var cell = function (v) { return v instanceof Date ? { d: v.toISOString() } : (v == null ? '' : v); };
-  return {
-    serverNowIso: c.now.toISOString(), from: rg.fromKey, to: rg.toKey, total: total, truncated: total > rows.length, limit: APP.EXPORT_LIMIT,
-    title: String(getConfig_('LAPORAN_JUDUL') || ''), appName: appName_(),
-    columns: cols.map(function (k) { return { name: k.kolom, source: k.sumber }; }),
-    rows: rows.map(function (r, i) {
-      var used = usage[String(r['Maintenance ID'])] || [];
-      return cols.map(function (k) { return cell(laporanValue_(k.sumber, r, i, used, c.md, c.names)); });
-    })
-  };
+  return rows.map(function (r, i) {
+    var used = usage[String(r['Maintenance ID'])] || [];
+    return cols.map(function (k) { return laporanValue_(k.sumber, r, i, used, c.md, c.names); });
+  });
 }
 
 // ---------- Review ----------
@@ -572,6 +585,11 @@ function apiDashboard(f) {
   });
 
   var warnings = isAdmin_(user) ? md.warnings.slice(0, 30) : [];
+  if (isAdmin_(user)) {   // 2.6.6: tab backup menumpuk = file makin penuh (batas 10 juta sel)
+    var lama = backupLama_(c.now);
+    if (lama.length) warnings.unshift(lama.length + ' tab backup lebih dari ' + BACKUP_UMUR_HARI_ + ' hari belum dihapus (' + lama.slice(0, 3).join(', ') +
+      (lama.length > 3 ? ', …' : '') + '). Download / pindahkan isinya, lalu hapus tab itu supaya file tidak penuh.');
+  }
   if (isAdmin_(user) && monthOf_(c.now) >= 2) {
     var un = unarchivedByYear_(allRows, c.now);
     Object.keys(un).sort().forEach(function (y) {

@@ -39,9 +39,9 @@ test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempot
   assert.ok(!ss.getSheetByName('BOM'), 'BOM tidak dibuat lagi');
   assert.ok(!ss.getSheetByName('Mesin'), '2.6: sheet Mesin tidak dibuat (line = unit)');
   jeq(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Tipe Maintenance').map(r => r.Nilai), ['Corrective'], '2.6: Preventive dihapus');
-  jeq(triggers.map(t => t.getHandlerFunction()).sort(), ['checkTimeouts', 'onMasterChange', 'refreshRekap'], 'trigger tidak dobel');
+  jeq(triggers.map(t => t.getHandlerFunction()).sort(), ['backupTerjadwal', 'checkTimeouts', 'onMasterChange', 'refreshRekap'], 'trigger tidak dobel');
   assert.strictEqual(triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every, 'hari:1@1', 'bangun ulang penuh tiap malam');
-  assert.strictEqual(ctx.readTable_('Config').length, 22);   // 2.6.4: + IKON_APLIKASI
+  assert.strictEqual(ctx.readTable_('Config').length, 23);   // 2.6.4: + IKON_APLIKASI, 2.6.6: + BACKUP_TAB
   assert.strictEqual(ctx.readTable_('Users')[0].Peran, 'Admin');
   jeq(ctx.readTable_('Projects').map(p => p['Factory ID'] + ':' + p.Baterai), ['F1:VF7', 'F1:Limo7', 'F2:E22H', 'F2:E245']);
   assert.strictEqual(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Masalah').length, 5, 'pilihan tidak terduplikasi');
@@ -664,7 +664,7 @@ test('2.1 migrasi: setup() ulang menambah kolom & mengembalikan field sistem yan
   assert.ok(ctx.readTable_('Form').some(r => r.Form === 'Pending' && r.Field === 'Tenggat'));
   assert.strictEqual(ctx.readTable_('Maintenance').length, before);
   assert.ok(ss.getSheetByName('Maintenance').data[0].includes('Kondisi akhir'));
-  assert.strictEqual(triggers.length, 3);
+  assert.strictEqual(triggers.length, 4);   // 2.6.6: + backupTerjadwal
 });
 
 // ---------- 2.2: stop line, laporan (format Excel), proses & alias, panduan, nama aplikasi ----------
@@ -862,7 +862,7 @@ test('2.2.2 upgrade: setup mengganti trigger tiap jam (2.2.1) dengan bangun ulan
   const r = triggers.filter(t => t.getHandlerFunction() === 'refreshRekap');
   assert.strictEqual(r.length, 1);
   assert.strictEqual(r[0].every, 'hari:1@1');
-  assert.strictEqual(triggers.length, 3);
+  assert.strictEqual(triggers.length, 4);   // 2.6.6: + backupTerjadwal
 });
 
 U.appendRow(rowOf('Users', { Email: 'eko@gmail.com', Nama: 'Eko', Peran: 'Teknisi', Aktif: 'Ya' }));
@@ -2792,6 +2792,58 @@ test('2.6.5 kapasitas: tab data tanpa kolom kosong sesudah setup; trimSheet_ men
   const id = as('budi@gmail.com', () => ctx.apiStart('L01', { baterai: 'E22H' })).open.id;
   as('budi@gmail.com', () => ctx.apiCancel(id, { values: { 'Alasan cancel': 'Lainnya' }, other: { 'Alasan cancel': 'uji trim' } }));
   assert.strictEqual(rec(id).Status, 'Cancelled');
+});
+
+test('2.6.6 tab backup: Senin = minggu lalu, tanggal 3 = bulan lalu, isi = Download Riwayat, sekali per periode, dihapus admin tidak dibuat lagi, Dashboard mengingatkan', () => {
+  const W = (y, m, d, h) => new FakeDate(Date.UTC(y, m - 1, d, h - 7));   // jam WIB
+  const per = (t) => ctx.backupPeriods_(t).map(p => p.name + ' ' + p.from + '..' + p.to);
+  jeq(per(W(2026, 11, 2, 3)), ['Backup minggu 2026-10-26 2026-10-26..2026-11-01'], 'Senin 2 Nov: minggu 26 Okt–1 Nov, bulan belum (tgl < 3)');
+  jeq(per(W(2026, 11, 3, 3)), ['Backup minggu 2026-10-26 2026-10-26..2026-11-01', 'Backup bulan 2026-10 2026-10-01..2026-10-31']);
+  jeq(per(W(2027, 1, 4, 3)), ['Backup minggu 2026-12-28 2026-12-28..2027-01-03', 'Backup bulan 2026-12 2026-12-01..2026-12-31'], 'lewat tahun');
+  jeq(per(W(2026, 11, 8, 23)), ['Backup minggu 2026-10-26 2026-10-26..2026-11-01', 'Backup bulan 2026-10 2026-10-01..2026-10-31'], 'Minggu malam: masih minggu lalu');
+  assert.ok(triggers.some(t => t.getHandlerFunction() === 'backupTerjadwal' && t.every === 'hari:1@3'), 'trigger harian 03:00');
+  // data di minggu lalu (jam mock sekarang) → tab berisi baris yang sama dengan Download Riwayat admin untuk periode itu
+  const p = ctx.backupPeriods_(new FakeDate())[0], props = require('./mock').docProps;
+  delete props.store.MTTR_BACKUP_DONE;
+  ['Backup minggu ' + p.from].forEach(n => { const t = ss.getSheetByName(n); if (t) ss.deleteSheet(t); });
+  const exp = as('owner@gmail.com', () => ctx.apiExport({ from: p.from, to: p.to, scope: 'all' }));
+  const made = ctx.backupJalan_(new FakeDate(), false);
+  const B = ss.getSheetByName(p.name);
+  assert.ok(exp.total > 0, 'data uji punya pekerjaan minggu lalu (' + p.name + ')');
+  {
+    assert.ok(B && made.some(x => x.indexOf(p.name) === 0), 'tab dibuat: ' + JSON.stringify(made));
+    assert.match(String(B.data[0][0]), /pekerjaan \(tanpa Cancelled\).*HAPUS tab ini/);
+    jeq(B.data[1], exp.columns.map(c => c.name), 'kolom = Format Laporan');
+    assert.strictEqual(B.data.length - 2, exp.total, 'jumlah baris = Download Riwayat');
+    const norm = (v) => (v && v.d ? new Date(v.d).getTime() : (v instanceof Date ? v.getTime() : String(v).replace(/^'/, '')));
+    jeq(B.data.slice(2).map(r => r.map(norm)), exp.rows.map(r => r.map(norm)), 'isi sel = Download Riwayat');
+    assert.strictEqual(B.getMaxRows(), B.data.length, 'tab dipangkas pas isi');
+    assert.strictEqual(B.getMaxColumns(), exp.columns.length);
+    assert.strictEqual(B.frozenRows, 2);
+  }
+  // sekali per periode: trigger berikutnya tidak membuat ulang; admin menghapus tab → tetap tidak dibuat lagi
+  jeq(ctx.backupJalan_(new FakeDate(), false), [], 'tidak dobel');
+  if (B) ss.deleteSheet(B);
+  jeq(ctx.backupJalan_(new FakeDate(), false), [], 'sudah dihapus admin: tidak dibuat lagi');
+  assert.ok(!ss.getSheetByName(p.name));
+  // menu admin: paksa buat ulang; Config Tidak → tidak ada
+  assert.ok(ctx.backupJalan_(new FakeDate(), true).length >= 1 && ss.getSheetByName(p.name), 'menu: dibuat ulang');
+  setRow('Config', (x, h) => x[h.indexOf('Key')] === 'BACKUP_TAB', 'Value', 'Tidak');
+  ctx.invalidateMaster_();
+  delete props.store.MTTR_BACKUP_DONE;
+  if (ss.getSheetByName(p.name)) ss.deleteSheet(ss.getSheetByName(p.name));
+  jeq(ctx.backupJalan_(new FakeDate(), false), [], 'BACKUP_TAB = Tidak');
+  setRow('Config', (x, h) => x[h.indexOf('Key')] === 'BACKUP_TAB', 'Value', 'Mingguan, Bulanan');
+  ctx.invalidateMaster_();
+  assert.strictEqual(ctx.buatTabBackup_({ name: 'Backup minggu 2020-01-06', from: '2020-01-06', to: '2020-01-12', label: 'x' }, new FakeDate()), 0, 'periode kosong');
+  assert.ok(!ss.getSheetByName('Backup minggu 2020-01-06'), 'periode kosong: tidak ada tab');
+  // Dashboard: tab backup > 35 hari belum dihapus
+  const T = ss.insertSheet('Backup minggu 2026-01-05');
+  const w = as('owner@gmail.com', () => ctx.apiDashboard({ periode: 30 })).warnings;
+  assert.ok(w.some(x => /tab backup lebih dari 35 hari belum dihapus \(Backup minggu 2026-01-05\)/.test(x)), w.join(' | '));
+  assert.ok(!as('budi@gmail.com', () => ctx.apiDashboard({ periode: 30 })).warnings.some(x => /tab backup/.test(x)), 'hanya admin');
+  assert.ok(ctx.tabPlan_(ss).some(x => x[0] === 'Backup minggu 2026-01-05' && !x[2]), 'tab backup terlihat (tidak disembunyikan)');
+  ss.deleteSheet(T);
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));
