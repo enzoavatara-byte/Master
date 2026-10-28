@@ -171,8 +171,26 @@ function cekFile() {
 // 2.6.2: setup dengan data setahun sempat 283 dtk (batas Apps Script 360). Bangun ulang laporan hanya dimulai bila
 // waktu sejak setup mulai masih di bawah batas ini; yang dilewati dibangun trigger malam / Dashboard → Perbarui.
 // 2.6.3: batas mulai + lama terlama yang terukur ≤ ±300 dtk (TPM dengan terjemahan sampai 113 dtk, rapikan tampilan ±40).
-var SETUP_BATAS_MS_ = { laporan: 200000, tpm: 180000, kpi: 260000, tampilan: 250000 };
+// 2.6.6: rapikan tampilan di dalam setup sampai ±60 dtk (uji 2 tahun: setup 309 dtk) → mulai paling lambat 230 dtk.
+var SETUP_BATAS_MS_ = { laporan: 200000, tpm: 180000, kpi: 260000, tampilan: 230000 };
 var SETUP_TR_MAX_ = 100;   // terjemahan TPM baru per bahasa di dalam setup (trigger malam: TPM_TR_MAX_)
+
+/**
+ * 2.6.6: sel Value Config berisi tanggal (KPI_MULAI, TPM_MULAI, TANGGAL_LIBUR) diformat teks. Spreadsheet ber-locale en_US
+ * membaca ketikan "01/12/2026" sebagai 12 Januari tanpa peringatan; sebagai teks, aplikasi membacanya dd/mm/yyyy.
+ * Sel yang sudah berisi tanggal asli tidak diubah (aplikasi membacanya sebagai tanggal itu).
+ */
+function configDateText_() {
+  var sh = findSheet_(APP.SHEETS.CONFIG);
+  if (!sh || sh.getLastRow() < 2) return;
+  var h = headers_(sh, APP.SHEETS.CONFIG), k = h.indexOf('Key'), v = h.indexOf('Value');
+  if (k < 0 || v < 0) return;
+  sh.getRange(2, 1, sh.getLastRow() - 1, h.length).getValues().forEach(function (r, i) {
+    if (['KPI_MULAI', 'TPM_MULAI', 'TANGGAL_LIBUR'].indexOf(String(r[k]).trim()) !== -1 && !(r[v] instanceof Date)) {
+      sh.getRange(i + 2, v + 1).setNumberFormat('@');
+    }
+  });
+}
 
 function setup() {
   var t0 = Date.now(), lewat = [];
@@ -226,6 +244,7 @@ function setup() {
       appendObj_(APP.SHEETS.CONFIG, { 'Key': key, 'Value': APP.CONFIG_DEFAULTS[key].value, 'Keterangan': APP.CONFIG_DEFAULTS[key].description });
     }
   });
+  configDateText_();
 
   var opts = readTable_(APP.SHEETS.OPTIONS);
   Object.keys(APP.OPTION_DEFAULTS).forEach(function (jenis) {

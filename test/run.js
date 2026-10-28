@@ -2641,7 +2641,8 @@ test('2.6.3 baris baru Maintenance / Log di dalam kunci lewat setValues (tanpa a
 test('2.6.3 setup: batas mulai bangun ulang + lama terlama yang terukur ≤ 300 dtk (batas Apps Script 360)', () => {
   const B = ctx.SETUP_BATAS_MS_;
   // terukur di Apps Script asli dengan data setahun: Laporan+Rekap 30 dtk, TPM s/d 113 (dengan terjemahan), KPI 13, rapikan 38
-  const terlama = { laporan: 30000, tpm: 113000, kpi: 13000, tampilan: 40000 };
+  // 2.6.6: uji 2 tahun (±24/hari): setup 309 dtk → rapikan tampilan di dalam setup ±60 dtk
+  const terlama = { laporan: 30000, tpm: 113000, kpi: 13000, tampilan: 60000 };
   Object.keys(terlama).forEach(k => assert.ok(B[k] + terlama[k] <= 300000, k + ': ' + B[k] + ' + ' + terlama[k]));
 });
 
@@ -2844,6 +2845,21 @@ test('2.6.6 tab backup: Senin = minggu lalu, tanggal 3 = bulan lalu, isi = Downl
   assert.ok(!as('budi@gmail.com', () => ctx.apiDashboard({ periode: 30 })).warnings.some(x => /tab backup/.test(x)), 'hanya admin');
   assert.ok(ctx.tabPlan_(ss).some(x => x[0] === 'Backup minggu 2026-01-05' && !x[2]), 'tab backup terlihat (tidak disembunyikan)');
   ss.deleteSheet(T);
+});
+
+test('2.6.6 Config tanggal (KPI_MULAI, TPM_MULAI, TANGGAL_LIBUR) berformat teks: locale en_US tidak membalik dd/mm', () => {
+  const C = ss.getSheetByName('Config'), h = C.data[0], k = h.indexOf('Key'), v = h.indexOf('Value');
+  const fmt0 = C.fmt.length;
+  ctx.configDateText_();
+  const rows = C.data.map((r, i) => [String(r[k]), i + 1]).filter(([key]) => ['KPI_MULAI', 'TPM_MULAI', 'TANGGAL_LIBUR'].includes(key));
+  assert.strictEqual(rows.length, 3);
+  rows.forEach(([key, row]) => assert.ok(C.fmt.slice(fmt0).some(f => f[0] === 'setNumberFormat' && f[1] === row + ',' + (v + 1) + ':1x1' && f[2][0] === '@'), key + ' teks'));
+  const before = C.fmt.length;
+  const r = C.data.findIndex(x => x[k] === 'TPM_MULAI'), old = C.data[r][v];
+  C.data[r][v] = new FakeDate(Date.UTC(2026, 0, 1));   // tanggal asli yang sudah ada: tidak diubah
+  ctx.configDateText_();
+  assert.ok(!C.fmt.slice(before).some(f => f[1] === (r + 1) + ',' + (v + 1) + ':1x1'), 'sel tanggal asli dibiarkan');
+  C.data[r][v] = old;
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

@@ -206,7 +206,8 @@ function ujtIsi() {
       if (habis || st.pos[name] === 'ok') return;
       var w = UJT_.meta.width[name], n = UJT_.meta.rows[name], extra = name === 'Users' && owner && owner !== me ? 1 : 0;
       var sh = findSheet_(name, ss) || ss.insertSheet(name), from = st.pos[name] || 0, CH = 2500;
-      var asText = TEXT_SHEETS_.indexOf(name) !== -1;   // seperti aplikasi (2.6.2): "16:53" tetap teks
+      // seperti aplikasi: "16:53" tetap teks (2.6.2; arsip ditulis dengan teks juga); Config: "01/11/2024" tidak dibaca en_US sebagai 11 Jan
+      var asText = TEXT_SHEETS_.indexOf(name) !== -1 || /^Arsip /.test(name) || name === 'Config';
       if (!from) {
         sh.clearContents();
         if (sh.getMaxColumns() < w) sh.insertColumnsAfter(sh.getMaxColumns(), w - sh.getMaxColumns());

@@ -88,6 +88,9 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 
 ## 2. Upgrade
 
+### Ke 2.6.7 (dari 2.6.6)
+Ganti `Code`, `Config` (Script), lalu Deploy → Manage deployments → ✏️ → **New version**, lalu **Run `setup`** (sel tanggal Config jadi teks).
+
 ### Ke 2.6.6 (dari 2.6.5)
 Buat file Script **`Backup`** (isi dari `src/Backup.js`); ganti `Api`, `Code`, `Config`, `Tampilan` (Script) dan `Panduan` (HTML), lalu Deploy → Manage deployments → ✏️ → **New version**,
 lalu **Run `setup`** (trigger harian `backupTerjadwal` 03:00 + kunci Config `BACKUP_TAB`). Dari 2.6.4 atau lebih lama: paste semua file `src/`, lalu Run `setup`.

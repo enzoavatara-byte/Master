@@ -3,6 +3,27 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.7 — hasil uji 2 tahun di Apps Script asli
+Ganti `Code`, `Config` (Script), lalu New version, lalu **Run `setup`**. Tidak ada sheet, kolom, trigger, atau izin baru.
+
+**Hasil uji 2 tahun** di Apps Script asli (master Bogor, ±24/hari, 17.041 pekerjaan, 39.345 Log):
+- **Data:** semua jumlah, Laporan 2025 & 2026 sel per sel, KPI, TPM, tab per project, dan Dashboard sama persis dengan hitungan simulasi.
+- **Trigger malam:** 147 dtk; di bulan Januari 190 dtk (batas 360).
+- **Arsip 2025:** 172 dtk (8.588 pekerjaan).
+- **Kapasitas:** 28% sesudah 2 tahun.
+- **Tab backup:** 23 dtk.
+
+Yang diperbaiki:
+- **`setup` 309 dtk** dengan 2 tahun data belum diarsip (batas keras 360). Rapikan tampilan di dalam setup butuh ±60 dtk, jadi kini hanya dimulai bila waktu < 230 dtk; bila terlewat, trigger malam yang mengerjakannya.
+- **Tanggal di Config dibaca terbalik pada locale en_US.** Spreadsheet Bogor & uji ber-locale en_US: ketikan `01/11/2024` di sel Config menjadi **11 Januari** (uji: KPI 2024 terhitung sejak Januari). `setup` kini memformat sel Value `KPI_MULAI`, `TPM_MULAI`, `TANGGAL_LIBUR` sebagai teks, jadi ketikan dd/mm/yyyy dibaca benar. Kolom tanggal Input Manual sudah teks sejak 2.6.1. Isi Config Bogor sekarang sudah teks, aman.
+
+Yang diterima (bukan diperbaiki sebelum go-live):
+- **Tombol teknisi** umumnya 3,7–4,5 dtk. Mulai / Cancel / Selesai dengan banyak part rata-rata 4,8–5,5 dtk; sesekali 7–9 dtk, sekali menunggu kunci 3,9 dtk karena proses lain sedang menulis. Tidak bergantung jumlah data (sebelum & sesudah arsip sama). Perbaikannya (K8, satu kali tulis per tombol) mengubah jalur tulis semua tombol → dijadwalkan sesudah go-live.
+- **Layar admin** Dashboard / Statistik setahun 4–8 dtk (membaca Maintenance + Arsip tahun lalu).
+- **Input Manual** 1 kali jalan ±65 dtk dengan 2 tahun data belum diarsip.
+
+**Uji:** 1 test baru (108 test). Pemuat data uji kini menulis tab Arsip & Config sebagai teks seperti aplikasi: 2 GAGAL palsu (Laporan 2024 `16:53:00`, KPI 2024 sejak Januari) berasal dari pemuat, bukan dari aplikasi.
+
 ## 2.6.6 — tab backup mingguan & bulanan, katalog sparepart besar
 Buat file Script **`Backup`**; ganti `Api`, `Code`, `Config`, `Tampilan` (Script) dan `Panduan` (HTML), lalu New version. **Run `setup`** (trigger harian 03:00 + kunci Config `BACKUP_TAB`). Tidak ada izin Google baru.
 
