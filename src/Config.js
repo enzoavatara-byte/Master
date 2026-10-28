@@ -5,7 +5,7 @@
  */
 var APP = {
   NAME: 'MTTR',          // nama default; per lokasi diubah lewat Config → NAMA_APLIKASI
-  VERSION: '2.6.3',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
+  VERSION: '2.6.4',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
   TZ: 'Asia/Jakarta',
   DATE_FMT: 'yyyy-MM-dd HH:mm:ss',
 
@@ -282,7 +282,8 @@ var APP = {
     HARI_OPERASI: { value: 'Sen-Min', description: 'KPI MTBF: hari operasi, mis. "Sen-Min" (setiap hari), "Sen-Sab", atau "Sen,Sel,Rab,Kam,Jum"' },
     TANGGAL_LIBUR: { value: '', description: 'KPI MTBF: tanggal tidak beroperasi (dd/mm/yyyy, pisahkan dengan koma), mis. 25/12/2026, 01/01/2027' },
     KPI_TUTUP_OTOMATIS: { value: 5, description: 'KPI: tanggal bulan berikutnya untuk tutup bulan otomatis (trigger malam), bila tidak ada Abandoned yang menunggu review. 0 = mati (tutup manual)' },
-    KPI_MULAI: { value: '', description: 'KPI: dihitung sejak tanggal ini (dd/mm/yyyy), mis. tanggal aplikasi mulai dipakai. Kosong = awal bulan data pertama' }
+    KPI_MULAI: { value: '', description: 'KPI: dihitung sejak tanggal ini (dd/mm/yyyy), mis. tanggal aplikasi mulai dipakai. Kosong = awal bulan data pertama' },
+    IKON_APLIKASI: { value: '', description: 'Ikon shortcut di layar utama HP: alamat gambar PNG yang bisa dibuka publik (https://…png). Kosong = ikon bawaan Google' }
   },
 
   LOCK_TIMEOUT_MS: 10000,
@@ -290,6 +291,9 @@ var APP = {
   /** Jam (WIB) pembangunan ulang penuh Laporan & Rekap tiap malam. Sehari-hari keduanya diperbarui langsung tiap aksi. */
   REKAP_HOUR: 1,
   HISTORY_LIMIT: 500,
+  /** 2.6.4: PIC tambahan & jenis sparepart per pekerjaan (overhaul / line stop panjang). */
+  PIC_MAX: 15,
+  PART_MAX: 20,
   /** Download Riwayat (.xlsx / CSV): batas baris per file. */
   EXPORT_LIMIT: 12000   // 2.6.2: rentang maksimal 2 tahun (±11.000 pekerjaan pada 15/hari); 5000 memotong Download setahun
 };

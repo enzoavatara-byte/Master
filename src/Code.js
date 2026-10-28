@@ -23,10 +23,15 @@ function doGet(e) {
   var boot = null;
   try { boot = bootstrap_(user, t.lineId, t.mesinId, null); } catch (err) { console.warn('bootstrap di doGet gagal: ' + err); }
   t.boot = safeJson_(boot);
-  return t.evaluate()
+  var out = t.evaluate()
     .setTitle(appName_())
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+  // 2.6.4: ikon shortcut layar utama HP (Config IKON_APLIKASI); alamat yang ditolak Google tidak menggagalkan halaman
+  var ikon = '';
+  try { ikon = String(getConfig_('IKON_APLIKASI') || '').trim(); } catch (err) { ikon = ''; }
+  if (/^https:\/\/\S+$/.test(ikon)) { try { out.setFaviconUrl(ikon); } catch (err) { console.warn('IKON_APLIKASI ditolak: ' + err); } }
+  return out;
 }
 
 /** JSON yang aman ditanam di dalam <script> (tidak bisa menutup tag script). */

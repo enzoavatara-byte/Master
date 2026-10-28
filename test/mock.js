@@ -209,6 +209,7 @@ const mails = [];
 const cache = { enabled: false, store: {}, puts: 0 };
 const scriptCache = {
   get: (k) => (cache.enabled && k in cache.store ? cache.store[k] : null),
+  put: (k, v) => { if (cache.enabled) cache.store[k] = String(v); },
   getAll: (ks) => { const o = {}; ks.forEach(k => { if (cache.enabled && k in cache.store) o[k] = cache.store[k]; }); return o; },
   putAll: (o) => { if (!cache.enabled) return; cache.puts++; Object.assign(cache.store, o); },
   remove: (k) => { delete cache.store[k]; },
@@ -240,6 +241,7 @@ const Utilities = {
   },
   // Byte[] (Apps Script) → Buffer di sini; cukup untuk data uji gzip + base64 (test/gas-tahun.js)
   base64Decode: (s) => Buffer.from(String(s), 'base64'),
+  sleep: () => {},
   newBlob: (data, type) => { const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
     return { _buf: buf, getContentType: () => type || '', getDataAsString: () => buf.toString('utf8'), getBytes: () => buf }; },
   ungzip: (blob) => Utilities.newBlob(require('zlib').gunzipSync(blob._buf), 'application/octet-stream')

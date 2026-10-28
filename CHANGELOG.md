@@ -3,6 +3,20 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.4 — tahan di lapangan: sinyal jelek, ketuk ulang, banyak PIC & sparepart
+Ganti `Api`, `Code`, `Config`, `Maintenance` (Script) dan `App`, `I18n`, `Panduan` (HTML), lalu New version.
+Tidak ada sheet, kolom, trigger, atau izin baru. Run `setup` hanya untuk memunculkan kunci Config baru `IKON_APLIKASI` (opsional).
+
+- **Ketuk ulang tidak membuat data dobel.** Sinyal putus *sesudah* server menyimpan dulu terlihat sebagai gagal di HP; teknisi mengetuk lagi → Selesai / Pause tercatat dua kali, atau muncul "berstatus Completed". Sekarang setiap ketukan membawa nomor permintaan (disimpan di HP 10 menit) dan server mengingatnya 6 jam: nomor yang sama tidak dijalankan lagi — HP menampilkan "Sudah tersimpan sebelumnya (sinyal sempat putus). Tidak dicatat dua kali." Ketukan yang masih diproses ditunggu (≤ 15 dtk), bukan dijalankan kedua kali. Berlaku untuk Mulai, Pause, Lanjut, Pending, Lanjutkan pending, Selesai, Cancel, "Masih lanjut".
+- **Isian tidak hilang.** Form Selesai (pilihan, detail, Lainnya, sparepart + jumlah, PIC tambahan), Pending, dan Cancel disimpan di HP setiap ada perubahan. HP me-reload, aplikasi tertutup, atau sinyal putus → buka form lagi = "Isian sebelumnya dipulihkan." (≤ 24 jam; dihapus saat berhasil).
+- **Pesan sinyal jelas.** Gagal karena jaringan → "Sinyal terputus. Isian masih di layar — ketuk lagi saat ada sinyal; tidak akan tercatat dua kali." (form tetap terbuka). Tombol yang lebih dari 8 dtk berubah menjadi "Masih memproses… jangan tutup aplikasi".
+- **Banyak orang & banyak part.** PIC tambahan maks **15** orang (dulu 10), sparepart maks **20** jenis per pekerjaan (part sama dipilih dua kali dihitung satu jenis); HP menolak lebih dulu dengan pesan. Detail Log 1.000 → 3.000 karakter supaya 15 nama + 20 part tidak terpotong; tinggi baris Download Excel s/d 25 baris teks. Laporan ①–⑳, TPM, Download diuji dengan 15 PIC + 20 part.
+- **Shortcut di layar utama HP.** Panduan aplikasi (tombol **?**) menjelaskan Android Chrome / iPhone Safari; nama shortcut = `NAMA_APLIKASI`. Ikon khusus: `Config` → `IKON_APLIKASI` = alamat gambar PNG publik (opsional; sebagian HP tetap memakai ikon huruf). Ini tetap halaman web (butuh internet), bukan aplikasi Play Store.
+
+**Batas yang jujur:** tanpa internet aplikasi tidak bisa menyimpan (Apps Script tidak bisa offline). Yang dijamin: isian tidak hilang dan tidak dobel; pekerjaan yang tidak sempat tercatat dimasukkan admin lewat tab `Input Manual`.
+
+**Uji:** 2 test baru (105 test): nomor permintaan sama → satu Log & satu baris sparepart, ketukan berjalan ditunggu, gagal → boleh diulang, Pause kedua tidak tertahan; batas 15 / 20 sesudah digabung; Log 3.000; 15 PIC + 20 part utuh di Log, Laporan, TPM, Download. E2E browser (20/20): sinyal putus sebelum & sesudah server menyimpan, draf Selesai & Cancel sesudah reload, label "masih memproses". Pengaman: bila CacheService Google sedang gangguan, aksi tetap tersimpan (tanpa perlindungan dobel) — tidak pernah "gagal" palsu sesudah menyimpan. Uji 1 tahun: tombol kini diukur lewat jalur HP (`apiAct`, biaya cache ikut), tahap 4 mengecek ketuk ulang di CacheService asli; "Dashboard = mock" tidak lagi membandingkan jumlah pending lewat tenggat (berubah sendiri tiap hari).
+
 ## 2.6.3 — tombol tidak melambat seiring data setahun
 Diukur dengan profil per fungsi di Apps Script asli (uji 1 tahun, menu 9; 4.484–5.489 pekerjaan, ±14.000 baris Log).
 Ganti `Api`, `Code`, `Config`, `Db`, `Maintenance`, `Rekap`, `Tampilan` (Script), lalu New version.

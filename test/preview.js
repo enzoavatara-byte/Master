@@ -11,9 +11,12 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { ctx } = require('./mock');
+const { ctx, cache } = require('./mock');
 
 const { as } = require('./seed');
+// Cache seperti Apps Script asli (ketuk ulang tanpa dobel memakai CacheService); dinyalakan sesudah data contoh ditulis.
+cache.enabled = true;
+ctx.invalidateMaster_();
 
 // ---------- server ----------
 const src = path.join(__dirname, '..', 'src');
@@ -38,7 +41,9 @@ const STUB = `<script>
         var args = Array.prototype.slice.call(arguments);
         fetch('/rpc', { method: 'POST', body: JSON.stringify({ fn: fn, args: args, as: who }) })
           .then(function (r) { return r.json(); })
-          .then(function (j) { setTimeout(function () { j.error ? fail && fail(new Error(j.error)) : ok && ok(j.result); }, 150); });
+          .then(function (j) { setTimeout(function () { j.error ? fail && fail(new Error(j.error)) : ok && ok(j.result); }, 150); },
+            // sinyal putus: pesan sama dengan google.script.run
+            function () { setTimeout(function () { fail && fail(new Error('NetworkError: Connection failure due to HTTP 0')); }, 150); });
       };
     } });
   }

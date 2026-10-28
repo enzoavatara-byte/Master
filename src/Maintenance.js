@@ -37,7 +37,7 @@ function transition_(r, to, now) {
 function log_(now, id, event, user, detail) {
   appendObj_(APP.SHEETS.LOG, {
     'Timestamp': now, 'Maintenance ID': id, 'Kejadian': event,
-    'User': user, 'Detail': cleanText_(detail, 1000)
+    'User': user, 'Detail': cleanText_(detail, 3000)   // 2.6.4: 15 PIC + 20 sparepart tidak terpotong
   });
 }
 
@@ -407,6 +407,7 @@ function validateParts_(md, parts) {
     if (idx.hasOwnProperty(k)) merged[idx[k]].qty += p.qty;
     else { idx[k] = merged.length; merged.push(p); }
   });
+  if (merged.length > APP.PART_MAX) throw new Error('Sparepart maksimal ' + APP.PART_MAX + ' jenis per pekerjaan.');
   return merged;
 }
 
@@ -441,7 +442,7 @@ function usageRows_(h, r, parts, now) {
 }
 
 /**
- * PIC tambahan saat Selesai (2.6): email dari sheet Users yang aktif, tanpa diri sendiri, tanpa dobel, maks 10.
+ * PIC tambahan saat Selesai (2.6): email dari sheet Users yang aktif, tanpa diri sendiri, tanpa dobel, maks APP.PIC_MAX (2.6.4: 15).
  * @return {string[]} email (huruf kecil)
  */
 function validatePics_(md, pics, user) {
@@ -454,7 +455,7 @@ function validatePics_(md, pics, user) {
     if (!active[e]) throw new Error('PIC "' + e + '" tidak terdaftar / nonaktif di sheet Users.');
     out.push(e);
   });
-  if (out.length > 10) throw new Error('PIC tambahan maksimal 10 orang.');
+  if (out.length > APP.PIC_MAX) throw new Error('PIC tambahan maksimal ' + APP.PIC_MAX + ' orang.');
   return out;
 }
 
@@ -543,6 +544,44 @@ function mutate_(id, user, allowed, fn) {
   });
   // Tampilan dihitung dari data yang sudah ada di memori (r ikut berubah di dalam rows) → tanpa baca ulang.
   return lineView_(res.line, res.rows, ctx_(), user);
+}
+
+// ---------- Ketuk ulang tanpa dobel (2.6.4) ----------
+
+var RID_TTL_ = 21600;      // detik: rid yang sukses diingat 6 jam (batas CacheService)
+var RID_RUN_ = '…';        // nilai rid selama aksinya berjalan (kedaluwarsa sendiri bila eksekusi mati)
+var RID_WAIT_MS_ = 15000;  // ketukan ulang menunggu aksi pertama yang masih berjalan, paling lama sekian
+
+/**
+ * Aksi teknisi dengan ID permintaan (rid) dari HP. Sinyal putus SESUDAH server menyimpan → HP tidak menerima jawaban →
+ * teknisi mengetuk lagi dengan rid yang sama → aksi tidak diulang (tidak ada pekerjaan / Log dobel, tidak ada error
+ * "berstatus Completed"); halaman line terbaru dikembalikan dengan `ulang: true`.
+ * rid di CacheService: RID_RUN_ selama aksi berjalan, Line ID bila sukses; dihapus bila aksi gagal (ketuk ulang = coba lagi).
+ * Tanpa rid (klien lama) = langsung menjalankan aksinya.
+ */
+function apiAct(fn, args, rid) {
+  var impl = { apiStart: apiStart, apiPause: apiPause, apiResume: apiResume, apiPending: apiPending, apiContinue: apiContinue,
+    apiComplete: apiComplete, apiCancel: apiCancel, apiConfirmStillWorking: apiConfirmStillWorking }[fn];
+  if (!impl) throw new Error('Aksi tidak dikenal: ' + fn);
+  args = Array.isArray(args) ? args : [];
+  var id = String(rid || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64), c = id ? scriptCache_() : null, key = c ? 'mttr-rid:' + id : '';
+  // CacheService hanya pelengkap: bila Google sedang gangguan, aksi tetap jalan (tanpa perlindungan dobel), tidak pernah gagal karenanya
+  var get = function () { try { return c.get(key); } catch (e) { return null; } };
+  var put = function (v, ttl) { try { c.put(key, v, ttl); } catch (e) { /* lihat di atas */ } };
+  if (key) {
+    var seen = get();
+    for (var t0 = Date.now(); seen === RID_RUN_ && Date.now() - t0 < RID_WAIT_MS_; seen = get()) Utilities.sleep(500);
+    if (seen === RID_RUN_) throw new Error('Ketukan sebelumnya masih diproses. Tunggu sebentar, lalu buka ulang line ini.');
+    if (seen) { var again = apiGetLine(seen); again.ulang = true; return again; }
+    put(RID_RUN_, 120);
+  }
+  var v;
+  try { v = impl.apply(null, args); } catch (e) {
+    if (key) { try { c.remove(key); } catch (e2) { /* kedaluwarsa sendiri */ } }
+    throw e;
+  }
+  if (key) put(v && v.line ? v.line.id : String(args[0] || ''), RID_TTL_);
+  return v;
 }
 
 // ---------- Trigger: peringatan & Abandoned ----------

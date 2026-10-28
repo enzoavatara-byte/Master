@@ -254,6 +254,9 @@ function ujtMalam() {
  * @param {{layar?: boolean}=} opts layar: false = hanya tombol (tahap 9, putaran kedua)
  * @return {string[]} ID uji
  */
+/** ID permintaan seperti HP (2.6.4), baru per ketukan. */
+function ujtRid_() { return 'ujt' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+
 function ujtAlur_(R, label, opts) {
   opts = opts || {};
   var ss = SpreadsheetApp.getActive(), ids = [], tag = label ? ' (' + label + ')' : '', B = UJT_BATAS_;
@@ -269,23 +272,25 @@ function ujtAlur_(R, label, opts) {
   R.report(dingin, 10000, 'mean');
   // tiap aksi = permintaan web baru: memo per eksekusi (master, judul kolom, sheetId) kosong, cache bersama (CacheService) tetap
   var run = function (lbl, fn) { return R.sample(lbl + tag, function () { resetMaster_(); resetHeaders_(); return fn(); }); };
+  // 2.6.4: jalur yang sama dengan HP (apiAct + ID permintaan baru per ketukan → biaya CacheService ikut terukur)
+  var act = function (fn, args) { return apiAct(fn, args, ujtRid_()); };
   var BTN = ['Mulai', 'Pause', 'Resume', 'Pending', 'Lanjut (QR)', 'Selesai + 2 part + PIC', 'Mulai (untuk cancel)', 'Cancel'];
   R.safe('Alur teknisi' + tag, function () {
     for (var k = 0; k < n; k++) {
-      var id = run('Mulai', function () { return apiStart(UJT_LINE_, { baterai: 'Limo7', stopLine: 'Ya' }); }).v.open.id;
+      var id = run('Mulai', function () { return act('apiStart', [UJT_LINE_, { baterai: 'Limo7', stopLine: 'Ya' }]); }).v.open.id;
       ids.push(id);
-      run('Pause', function () { return apiPause(id, { values: { 'Alasan pause': 'Istirahat' } }); });
-      run('Resume', function () { return apiResume(id); });
-      run('Pending', function () { return apiPending(id, { values: { 'Pekerjaan dilakukan': 'Uji beban', 'Yang tertunda': 'Menunggu part' }, tenggat: 'BESOK' }); });
-      run('Lanjut (QR)', function () { return apiContinue(id, UJT_LINE_); });
+      run('Pause', function () { return act('apiPause', [id, { values: { 'Alasan pause': 'Istirahat' } }]); });
+      run('Resume', function () { return act('apiResume', [id]); });
+      run('Pending', function () { return act('apiPending', [id, { values: { 'Pekerjaan dilakukan': 'Uji beban', 'Yang tertunda': 'Menunggu part' }, tenggat: 'BESOK' }]); });
+      run('Lanjut (QR)', function () { return act('apiContinue', [id, UJT_LINE_]); });
       run('Selesai + 2 part + PIC', function () {
-        return apiComplete(id, { values: { 'Jenis kerusakan': 'Program', Masalah: 'Robot stuck / alarm', Penyebab: 'Posisi robot / servo hilang', Penanganan: 'Ganti part',
+        return act('apiComplete', [id, { values: { 'Jenis kerusakan': 'Program', Masalah: 'Robot stuck / alarm', Penyebab: 'Posisi robot / servo hilang', Penanganan: 'Ganti part',
           'Detail masalah': 'Uji beban: robot stuck', 'Detail penanganan': 'Ganti sensor dan baut' },
-          parts: UJT_.meta.parts, pics: [UJT_.meta.pic] });
+          parts: UJT_.meta.parts, pics: [UJT_.meta.pic] }]);
       });
-      var c = run('Mulai (untuk cancel)', function () { return apiStart(UJT_LINE_, { baterai: 'Limo7', stopLine: 'Ya' }); });
+      var c = run('Mulai (untuk cancel)', function () { return act('apiStart', [UJT_LINE_, { baterai: 'Limo7', stopLine: 'Ya' }]); });
       ids.push(c.v.open.id);
-      run('Cancel', function () { return apiCancel(c.v.open.id, { values: { 'Alasan cancel': 'Input ganda' } }); });
+      run('Cancel', function () { return act('apiCancel', [c.v.open.id, { values: { 'Alasan cancel': 'Input ganda' } }]); });
       if (k) continue;
       var r = findById_(readTable_(APP.SHEETS.MAINT), id);
       R.ok('Alur: Completed dengan 2 part & PIC tambahan' + tag, r && r['Status'] === 'Completed' && /\n/.test(String(r['Part'])) && String(r['Teknisi terlibat']).indexOf(UJT_.meta.pic) !== -1,
@@ -351,7 +356,21 @@ function ujtBersih_(ids, R) {
 function ujtTombol() {
   var R = ujtRunner_(4), ids = [];
   resetMaster_();
-  try { ujtProfPasang_(true); ids = ujtAlur_(R, ''); } finally {
+  try {
+    ujtProfPasang_(true);
+    ids = ujtAlur_(R, '');
+    // 2.6.4 di CacheService asli: sinyal putus sesudah server menyimpan → HP mengirim ID permintaan yang sama lagi
+    R.safe('Ketuk ulang tanpa dobel', function () {
+      var v = apiAct('apiStart', [UJT_LINE_, { baterai: 'Limo7', stopLine: 'Ya' }], ujtRid_()), id = v.open.id, rid = ujtRid_();
+      ids.push(id);
+      var P = [id, { values: { 'Alasan pause': 'Istirahat' } }], a = apiAct('apiPause', P, rid), b = apiAct('apiPause', P, rid);
+      var n = readWhere_(APP.SHEETS.LOG, 'Maintenance ID', id).filter(function (e) { return e['Kejadian'] === APP.EVENTS.PAUSE; }).length;
+      R.ok('Ketuk ulang (ID permintaan sama) → aksi sekali, HP diberi tahu "sudah tersimpan"', !a.ulang && b.ulang === true && n === 1,
+        'ketukan kedua ulang = ' + !!b.ulang + ' · Log pause = ' + n);
+      apiAct('apiResume', [id], ujtRid_());
+      apiAct('apiCancel', [id, { values: { 'Alasan cancel': 'Input ganda' } }], ujtRid_());
+    });
+  } finally {
     ujtCacheInfo_(R, '');
     ujtProfLepas_();
     R.safe('Bersihkan data uji', function () { ujtBersih_(ids, R); });
@@ -507,8 +526,10 @@ function ujtPeriksa() {
     var sh = ss.getSheetByName('Ringkasan'), bad = [];
     if (sh) sh.getDataRange().getDisplayValues().forEach(function (r, i) { r.forEach(function (x, j) { if (/^#(REF|N\/A|VALUE|ERROR|NAME|DIV|NUM)/.test(x) && bad.length < 5) bad.push('R' + (i + 1) + 'C' + (j + 1) + ' ' + x); }); });
     R.ok('Ringkasan tanpa #ERROR', !!sh && !bad.length, bad.join(' · ') || 'ok');
-    var d = apiDashboard({ periode: 'ytd' }).kpi, e = E.dashboard;
-    R.ok('Dashboard tahun ini = mock', JSON.stringify(d) === JSON.stringify(e), JSON.stringify(d).slice(0, 600) + (JSON.stringify(d) === JSON.stringify(e) ? '' : '\nharap ' + JSON.stringify(e).slice(0, 600)));
+    // overdueNow tergantung jam sekarang (pending yang tenggatnya lewat sesudah data dibuat), jadi tidak dibandingkan
+    var tetap = function (k) { var o = JSON.parse(JSON.stringify(k)); delete o.overdueNow; return JSON.stringify(o); };
+    var d = tetap(apiDashboard({ periode: 'ytd' }).kpi), e = tetap(E.dashboard);
+    R.ok('Dashboard tahun ini = mock', d === e, d.slice(0, 600) + (d === e ? '' : '\nharap ' + e.slice(0, 600)));
   });
   return R.selesai('Lanjut menu 7.');
 }

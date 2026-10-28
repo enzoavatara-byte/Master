@@ -21,6 +21,19 @@
     <li><b>Masih lanjut</b>: muncul setelah 3 jam. Tidak dijawab sampai 4 jam → Abandoned.</li>
   </ul></div></details>
 
+  <details class="g"><summary>Pasang di layar utama HP (seperti aplikasi)</summary><div><ol>
+    <li>Buka aplikasi dari <b>link resmi</b> (sama dengan QR line), tunggu sampai Beranda tampil.</li>
+    <li><b>Android (Chrome)</b>: menu <b>⋮</b> kanan atas → <b>Tambahkan ke layar utama</b> → Tambahkan.</li>
+    <li><b>iPhone (Safari)</b>: tombol <b>Bagikan</b> (kotak dengan panah) → <b>Tambah ke Layar Utama</b> → Tambah.</li>
+  </ol><p class="small muted">Ikon terbuka di browser (bukan aplikasi Play Store). Login Google tetap dibutuhkan; pakai akun yang terdaftar.</p></div></details>
+
+  <details class="g"><summary>Sinyal lemah / putus</summary><div><ul>
+    <li>Isian Selesai, Pending & Cancel <b>tersimpan di HP</b> sambil diketik. Sinyal putus atau aplikasi tertutup → buka lagi form yang sama, isian kembali.</li>
+    <li>Muncul "Sinyal terputus" → <b>ketuk lagi</b> saat sinyal ada. Aplikasi tidak mencatat dua kali; bila ternyata sudah tersimpan, muncul "Sudah tersimpan sebelumnya".</li>
+    <li>Tombol bertulisan "Masih memproses…" → tunggu, jangan tutup aplikasi.</li>
+    <li>Pekerjaan yang sama sekali tidak sempat dicatat → kabari admin (Input Manual).</li>
+  </ul></div></details>
+
   <details class="g"><summary>Sparepart (cara cepat)</summary><div><ol>
     <li>Tidak ganti apa-apa → <b>Tidak ada pergantian</b>.</li>
     <li>Ganti part → <b>Ada part</b>, lalu <b>ketik di kolom cari</b> (mis. "6205") <i>atau</i> pilih Jenis → Nama → Model.</li>
@@ -145,6 +158,7 @@
 <template id="guide-baru">
   <h3>Apa yang baru di versi <span data-v></span></h3>
   <ul>
+    <li><b>Sinyal putus tidak membuat repot</b>: isian form tetap tersimpan di HP, ketuk lagi saat ada sinyal — tidak tercatat dua kali. Bisa dipasang di <b>layar utama HP</b> seperti aplikasi (lihat panduan di atas). PIC tambahan s/d 15 orang, sparepart s/d 20 jenis.</li>
     <li><b>Lebih sedikit tap</b>: scan QR line → MULAI. Tidak ada pilih mesin & tipe lagi (satu QR per line / unit).</li>
     <li><b>PIC tambahan</b> saat Selesai: tap nama teman yang ikut mengerjakan.</li>
     <li><b>Dashboard</b>: KPI bulan ini (MTTR, MTBF, kerusakan, downtime per project), 5 line tersering & terlama, mode <b>Statistik</b>.</li>
@@ -176,6 +190,19 @@
     <li><b>取消</b>：录入错误 / 问题自行消失。进入管理员审核。</li>
     <li><b>其他参与人员</b>（完成时）：点选一起维修的其他技术员。他们的名字也会进入报表和 TPM。可多选，也可不选。</li>
     <li><b>仍在进行</b>：3 小时后出现。到 4 小时仍未回复 → 已放弃。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>添加到手机主屏幕（像应用一样）</summary><div><ol>
+    <li>从<b>官方链接</b>（与产线二维码相同）打开应用，等首页显示。</li>
+    <li><b>安卓（Chrome）</b>：右上角 <b>⋮</b> → <b>添加到主屏幕</b> → 添加。</li>
+    <li><b>iPhone（Safari）</b>：<b>分享</b>按钮（带箭头的方框）→ <b>添加到主屏幕</b> → 添加。</li>
+  </ol><p class="small muted">图标会在浏览器中打开（不是应用商店的应用）。仍需登录 Google，请使用已登记的账号。</p></div></details>
+
+  <details class="g"><summary>信号弱 / 中断</summary><div><ul>
+    <li>完成、挂起和取消的填写内容会在输入时<b>保存在手机上</b>。信号中断或应用关闭 → 重新打开同一表单，内容会恢复。</li>
+    <li>出现“信号中断” → 有信号时<b>再点一次</b>。不会重复记录；如果其实已保存，会显示“之前已保存”。</li>
+    <li>按钮显示“仍在处理中…” → 请等待，不要关闭应用。</li>
+    <li>完全没来得及记录的工作 → 告诉管理员（手工录入）。</li>
   </ul></div></details>
 
   <details class="g"><summary>备件（快速方法）</summary><div><ol>
@@ -282,6 +309,7 @@
 <template id="guide-baru-zh">
   <h3>版本 <span data-v></span> 新功能</h3>
   <ul>
+    <li><b>信号中断也不怕</b>：表单内容保存在手机里，有信号时再点一次即可，不会重复记录。可以像应用一样<b>添加到手机主屏幕</b>（见上方说明）。其他参与人员最多 15 人，备件最多 20 种。</li>
     <li><b>点击更少</b>：扫描产线二维码 → 开始。不再选择设备和类型（每条产线 / 单元一个二维码）。</li>
     <li>完成时的<b>其他参与人员</b>：点选一起维修的同事。</li>
     <li><b>看板</b>：本月 KPI（各项目的 MTTR、MTBF、故障次数、停机时间）、故障最多 / 维修最久的 5 条产线、<b>统计</b>模式。</li>

@@ -41,7 +41,7 @@ test('setup: sheet, tab FILTER, pilihan, config, admin pertama, trigger (idempot
   jeq(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Tipe Maintenance').map(r => r.Nilai), ['Corrective'], '2.6: Preventive dihapus');
   jeq(triggers.map(t => t.getHandlerFunction()).sort(), ['checkTimeouts', 'onMasterChange', 'refreshRekap'], 'trigger tidak dobel');
   assert.strictEqual(triggers.find(t => t.getHandlerFunction() === 'refreshRekap').every, 'hari:1@1', 'bangun ulang penuh tiap malam');
-  assert.strictEqual(ctx.readTable_('Config').length, 21);
+  assert.strictEqual(ctx.readTable_('Config').length, 22);   // 2.6.4: + IKON_APLIKASI
   assert.strictEqual(ctx.readTable_('Users')[0].Peran, 'Admin');
   jeq(ctx.readTable_('Projects').map(p => p['Factory ID'] + ':' + p.Baterai), ['F1:VF7', 'F1:Limo7', 'F2:E22H', 'F2:E245']);
   assert.strictEqual(ctx.readTable_('Pilihan').filter(r => r.Jenis === 'Masalah').length, 5, 'pilihan tidak terduplikasi');
@@ -2640,6 +2640,135 @@ test('2.6.3 setup: batas mulai bangun ulang + lama terlama yang terukur ≤ 300 
   // terukur di Apps Script asli dengan data setahun: Laporan+Rekap 30 dtk, TPM s/d 113 (dengan terjemahan), KPI 13, rapikan 38
   const terlama = { laporan: 30000, tpm: 113000, kpi: 13000, tampilan: 40000 };
   Object.keys(terlama).forEach(k => assert.ok(B[k] + terlama[k] <= 300000, k + ': ' + B[k] + ' + ' + terlama[k]));
+});
+
+test('2.6.4 ketuk ulang tanpa dobel: rid sama → aksi sekali (ulang), rid berjalan ditunggu, gagal → boleh diulang, aksi lain tidak tertahan', () => {
+  cache.enabled = true;
+  const realSleep = ctx.Utilities.sleep;
+  try {
+    const m0 = ctx.readTable_('Maintenance').length, P = { values: { 'Alasan pause': 'Istirahat' } };
+    const a = as('budi@gmail.com', () => ctx.apiAct('apiStart', ['L01', { baterai: 'E22H' }], 'r-start-1'));
+    const id = a.open.id;
+    assert.ok(!a.ulang);
+    // sinyal putus sesudah server menyimpan → HP mengirim ulang rid yang sama
+    const b = as('budi@gmail.com', () => ctx.apiAct('apiStart', ['L01', { baterai: 'E22H' }], 'r-start-1'));
+    assert.strictEqual(b.ulang, true);
+    assert.strictEqual(b.open && b.open.id, id, 'halaman line terbaru, pekerjaan yang sama');
+    assert.strictEqual(ctx.readTable_('Maintenance').length, m0 + 1, 'tidak dobel');
+    as('budi@gmail.com', () => ctx.apiAct('apiPause', [id, P], 'r-p1'));
+    assert.strictEqual(as('budi@gmail.com', () => ctx.apiAct('apiPause', [id, P], 'r-p1')).ulang, true);
+    as('budi@gmail.com', () => ctx.apiAct('apiResume', [id], 'r-r1'));
+    as('budi@gmail.com', () => ctx.apiAct('apiPause', [id, P], 'r-p2'));   // Pause kedua: rid baru, tidak tertahan rid Pause pertama
+    as('budi@gmail.com', () => ctx.apiAct('apiResume', [id], 'r-r2'));
+    jeq(logOf(id), ['start', 'pause', 'resume', 'pause', 'resume']);
+    // gagal (isian kurang) → rid dilepas, ketuk ulang sesudah diperbaiki benar-benar dijalankan
+    throwsMsg(() => as('budi@gmail.com', () => ctx.apiAct('apiComplete', [id, sel('Sensor error')], 'r-c1')), /Pilih sparepart/);
+    assert.ok(!('mttr-rid:r-c1' in cache.store), 'gagal → rid dihapus');
+    const c = as('budi@gmail.com', () => ctx.apiAct('apiComplete', [id, done], 'r-c1'));
+    assert.ok(!c.ulang && rec(id).Status === 'Completed');
+    const c2 = as('budi@gmail.com', () => ctx.apiAct('apiComplete', [id, done], 'r-c1'));
+    assert.ok(c2.ulang && c2.line.id === 'L01' && !c2.open, 'Selesai diulang → halaman line, bukan error "berstatus Completed"');
+    jeq(logOf(id), ['start', 'pause', 'resume', 'pause', 'resume', 'complete']);
+    assert.strictEqual(ctx.readTable_('Pemakaian Sparepart').filter(r => r['Maintenance ID'] === id).length, 1, 'sparepart tidak dobel');
+    // rid masih berjalan (ketukan pertama belum selesai di server) → ditunggu, lalu hasilnya
+    let slept = 0;
+    ctx.Utilities.sleep = (ms) => { slept += ms; advance(ms / 60000); if (slept >= 1500) cache.store['mttr-rid:r-x'] = 'L01'; };
+    cache.store['mttr-rid:r-x'] = ctx.RID_RUN_;
+    const w = as('budi@gmail.com', () => ctx.apiAct('apiStart', ['L01', { baterai: 'E22H' }], 'r-x'));
+    assert.ok(w.ulang && !w.open && slept === 1500, 'menunggu ketukan pertama, tidak memulai lagi');
+    slept = -1e9;
+    cache.store['mttr-rid:r-y'] = ctx.RID_RUN_;
+    throwsMsg(() => as('budi@gmail.com', () => ctx.apiAct('apiStart', ['L01', { baterai: 'E22H' }], 'r-y')), /masih diproses/);
+    assert.strictEqual(ctx.readTable_('Maintenance').length, m0 + 1, 'tidak ada pekerjaan baru');
+    ctx.Utilities.sleep = realSleep;
+    // aksi lain di pekerjaan yang sama memakai rid lain; aksi di luar daftar ditolak
+    const j = as('andi@gmail.com', () => ctx.apiAct('apiStart', ['L02', { baterai: 'E22H' }], 'r-a1')).open.id;
+    as('andi@gmail.com', () => ctx.apiAct('apiCancel', [j, { values: { 'Alasan cancel': 'Lainnya' }, other: { 'Alasan cancel': 'uji rid' } }], 'r-a2'));
+    assert.strictEqual(rec(j).Status, 'Cancelled');
+    throwsMsg(() => as('owner@gmail.com', () => ctx.apiAct('setup', [], 'r-z')), /Aksi tidak dikenal/);
+    throwsMsg(() => as('owner@gmail.com', () => ctx.apiAct('apiReview', [], 'r-z')), /Aksi tidak dikenal/);
+    // tanpa rid (klien lama) = langsung, tanpa cache
+    const k = Object.keys(cache.store).length;
+    const n = as('andi@gmail.com', () => ctx.apiAct('apiStart', ['L02', { baterai: 'E22H' }])).open.id;
+    as('andi@gmail.com', () => ctx.apiAct('apiComplete', [n, done]));
+    assert.strictEqual(Object.keys(cache.store).length, k);
+    // rid aneh dari klien dibersihkan jadi kunci aman
+    const q = as('andi@gmail.com', () => ctx.apiAct('apiStart', ['L02', { baterai: 'E22H' }], 'a b/c:<d>')).open.id;
+    assert.strictEqual(cache.store['mttr-rid:abcd'], 'L02');
+    as('andi@gmail.com', () => ctx.apiComplete(q, done));
+    // CacheService gangguan: aksi tetap tersimpan & sukses (bukan "gagal" palsu sesudah menyimpan)
+    const sc = ctx.CacheService.getScriptCache(), realGet = sc.get, realPut = sc.put;
+    sc.get = () => { throw new Error('Service error: CacheService'); };
+    sc.put = () => { throw new Error('Service error: CacheService'); };
+    try {
+      const g = as('andi@gmail.com', () => ctx.apiAct('apiStart', ['L02', { baterai: 'E22H' }], 'r-gangguan'));
+      assert.ok(g.open && rec(g.open.id).Status === 'Aktif');
+      as('andi@gmail.com', () => ctx.apiAct('apiComplete', [g.open.id, done], 'r-gangguan2'));
+      assert.strictEqual(rec(g.open.id).Status, 'Completed');
+    } finally { sc.get = realGet; sc.put = realPut; }
+  } finally { ctx.Utilities.sleep = realSleep; cache.enabled = false; cache.store = {}; }
+});
+
+test('2.6.4 batas: PIC tambahan 15, sparepart 20 jenis (sesudah digabung), Log 3000; 15 PIC + 20 part utuh di Log, Laporan, TPM, Download', () => {
+  const names = Array.from({ length: 16 }, (_, i) => 'Teknisi ' + String(i + 1).padStart(2, '0'));
+  const mails = names.map((n, i) => 'pic' + String(i + 1).padStart(2, '0') + '@example.com');
+  names.forEach((n, i) => U.appendRow(rowOf('Users', { Email: mails[i], Nama: n, Peran: 'Teknisi', Aktif: 'Ya' })));
+  ctx.invalidateMaster_();
+  const b = as('budi@gmail.com', () => ctx.apiBootstrap(''));
+  assert.strictEqual(b.limits.picMax, 15);
+  assert.strictEqual(b.limits.partMax, 20);
+  const part = (i) => ({ manual: true, jenis: 'Mekanikal', nama: 'Part uji ' + (i + 1), model: 'M-' + (i + 1), qty: 1 });
+  const parts20 = Array.from({ length: 20 }, (_, i) => part(i));
+  const y = ctx.yearOf_(new FakeDate());
+  let id;
+  as('budi@gmail.com', () => {
+    id = ctx.apiStart('L03', { baterai: 'E22H' }).open.id;
+    advance(40);
+    throwsMsg(() => ctx.apiComplete(id, sel('Sensor error', { parts: parts20, pics: mails })), /PIC tambahan maksimal 15 orang/);
+    throwsMsg(() => ctx.apiComplete(id, sel('Sensor error', { parts: parts20.concat([part(20)]), pics: mails.slice(0, 15) })), /Sparepart maksimal 20 jenis/);
+    assert.strictEqual(rec(id).Status, 'Aktif', 'ditolak sebelum menulis apa pun');
+    // part yang sama dua kali → digabung dulu (21 baris = 20 jenis)
+    ctx.apiComplete(id, sel('Sensor error', { parts: parts20.concat([part(19)]), pics: mails.slice(0, 15).concat(['budi@gmail.com']) }));
+  });
+  const r = rec(id);
+  assert.strictEqual(r['Teknisi terlibat'].split(', ').length, 16, 'PIC utama + 15');
+  const use = ctx.readTable_('Pemakaian Sparepart').filter(u => u['Maintenance ID'] === id);
+  assert.strictEqual(use.length, 20);
+  assert.strictEqual(use[19].Jumlah, 2, 'part ke-20 dipilih dua kali → jumlah 2');
+  const det = ctx.readTable_('Log').find(e => e['Maintenance ID'] === id && e.Kejadian === 'complete').Detail;
+  assert.ok(det.length < 3000 && det.includes('Part uji 20 M-20 ×2 (manual)') && det.includes('Teknisi 15'), 'Log utuh: ' + det.length + ' karakter');
+  ctx.log_(new FakeDate(), 'UJI-264', 'uji', 'SYSTEM', 'x'.repeat(5000));
+  const L = ss.getSheetByName('Log');
+  assert.strictEqual(String(L.data[L.getLastRow() - 1][L.data[0].indexOf('Detail')]).length, 3000, 'Detail dipotong 3000');
+  L.data.splice(L.getLastRow() - 1, 1);
+  // Laporan (langsung) & bangun ulang: ①..⑳ di tiap kolom sparepart, nama PIC lengkap
+  const check = (a, where) => {
+    const nm = a['Nama Sparepart'].split('\n');
+    assert.strictEqual(nm.length, 20, where);
+    assert.strictEqual(nm[0], '① Part uji 1', where);
+    assert.strictEqual(nm[19], '⑳ Part uji 20', where);
+    assert.strictEqual(a['Jumlah Sparepart'].split('\n')[19], '⑳ 2', where);
+  };
+  check(lapRow(y, x => x._id === id)[0], 'Laporan langsung');
+  ctx.buildLaporan_(y);
+  const a = lapRow(y, x => x._id === id)[0];
+  check(a, 'Laporan dibangun ulang');
+  const picCol = ctx.masterData_().report.find(c => c.sumber === 'PIC');
+  assert.ok(picCol, 'kolom PIC ada');
+  assert.strictEqual(a[picCol.kolom.split('\n').pop()].split(', ').length, 16, 'Laporan: nama PIC lengkap');
+  ctx.buildTpm_();
+  const t = tpmData('E22H').find(x => /Part uji 20 M-20 ×2/.test(x[4]));
+  assert.ok(t && /\n① Part uji 1 M-1 ×1\n/.test(t[4]) && /⑳ Part uji 20 M-20 ×2 \(manual\)$|⑳ Part uji 20 M-20 ×2$/.test(t[4]), 'TPM: ' + String(t && t[4]).slice(-60));
+  const now = new FakeDate(), ex = as('owner@gmail.com', () => ctx.apiExport({ from: ctx.ymdOf_(now), to: ctx.ymdOf_(now), scope: 'all' }));
+  const nmCol = ex.columns.findIndex(c => c.source === 'Nama sparepart'), picCol2 = ex.columns.findIndex(c => c.source === 'PIC');
+  const row = ex.rows.find(x => /⑳ Part uji 20/.test(x[nmCol]));
+  assert.ok(row && String(row[nmCol]).split('\n').length === 20, 'Download: 20 baris sparepart dalam satu sel');
+  assert.strictEqual(String(row[picCol2]).split(', ').length, 16, 'Download: nama PIC lengkap');
+  // klien: batas dari server, bukan angka tetap
+  const html = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'App.html'), 'utf8');
+  assert.match(html, /limits\.picMax/);
+  assert.match(html, /limits\.partMax/);
+  assert.match(html, /height = 15 \* Math\.min\(lines, 25\)/);
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

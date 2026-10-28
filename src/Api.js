@@ -122,7 +122,7 @@ function bootstrap_(user, lineId, mesinId, filter) {
   return {
     user: user,
     serverNowIso: c.now.toISOString(),
-    limits: getLimits_(),
+    limits: (function (l) { l.picMax = APP.PIC_MAX; l.partMax = APP.PART_MAX; return l; })(getLimits_()),
     master: clientMaster_(c.md),
     notes: c.md.notes.filter(function (n) { return user.role === APP.ROLES.ADMIN || n.untuk !== APP.ROLES.ADMIN; }),
     stopLineDefault: splitList_(getConfig_('STOP_LINE_DEFAULT')),

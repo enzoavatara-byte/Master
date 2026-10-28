@@ -179,7 +179,12 @@
   function M() { return state.boot.master; }
   function busy(btn, on, label) {
     if (!btn) return;
-    if (on) { btn.dataset.label = btn.innerHTML; btn.innerHTML = label || t('Memproses…'); btn.disabled = true; }
+    clearTimeout(btn._slow);
+    if (on) {
+      btn.dataset.label = btn.innerHTML; btn.innerHTML = label || t('Memproses…'); btn.disabled = true;
+      // 2.6.4: sinyal lambat → teknisi tahu masih diproses (bukan macet) dan tidak menutup aplikasi
+      btn._slow = setTimeout(function () { if (btn.disabled) btn.innerHTML = t('Masih memproses… jangan tutup aplikasi'); }, 8000);
+    }
     else if (btn.dataset.label) { btn.innerHTML = btn.dataset.label; btn.disabled = false; }
   }
   var toastTimer;
@@ -453,6 +458,7 @@
 
   // ---------- boot & refresh ----------
   function boot() {
+    draftSweep();
     var hasFilter = !!(state.filter.factory || state.filter.proses || state.filter.baterai || state.filter.line);
     // Data awal sudah ditanam di halaman oleh server (doGet) → langsung tampil tanpa menunggu server lagi.
     i18nObserve(document.body);   // teks tetap yang masuk ke layar diterjemahkan otomatis (bila bahasa 中文)
@@ -672,20 +678,84 @@
     }
   }
 
-  /** Semua aksi kerja mengembalikan lineView terbaru. */
-  function act(btn, fn, args, okMsg) {
+  // ---------- 2.6.4: ketuk ulang tanpa dobel & isian tidak hilang ----------
+  var RID_KEY = 'mttr-rid', RID_MS = 10 * 60000, DRAFT_PREFIX = 'mttr-draft:', DRAFT_MS = 24 * 3600000;
+  function ridMap() { try { return JSON.parse(localStorage.getItem(RID_KEY) || '{}') || {}; } catch (e) { return {}; } }
+  function ridSave(m) { try { localStorage.setItem(RID_KEY, JSON.stringify(m)); } catch (e) { /* mode privat: tanpa perlindungan dobel */ } }
+  /** ID permintaan per (aksi | pekerjaan / line): tetap sama sampai sukses (≤ 10 menit) → server tidak mengulang aksi yang sudah tersimpan. */
+  function ridFor(key) {
+    var m = ridMap(), now = Date.now();
+    Object.keys(m).forEach(function (k) { if (!m[k] || now - m[k].at > RID_MS) delete m[k]; });
+    if (!m[key]) m[key] = { rid: now.toString(36) + Math.random().toString(36).slice(2, 12), at: now };
+    ridSave(m);
+    return m[key].rid;
+  }
+  /** Aksi sukses: semua ID permintaan untuk pekerjaan / line itu dibuang (aksi berikutnya = permintaan baru). */
+  function ridDone(target) {
+    var m = ridMap();
+    Object.keys(m).forEach(function (k) { if (k.slice(k.indexOf('|') + 1) === String(target)) delete m[k]; });
+    ridSave(m);
+  }
+  function isNetErr(e) { return /NetworkError|HTTP 0|failed to fetch|network|connection|timed? ?out|offline/i.test(cleanErr(e)); }
+  function draftLoad(k) {
+    try { var d = JSON.parse(localStorage.getItem(DRAFT_PREFIX + k) || 'null'); return d && Date.now() - d.at < DRAFT_MS ? d : null; } catch (e) { return null; }
+  }
+  function draftSave(k, d) { try { d.at = Date.now(); localStorage.setItem(DRAFT_PREFIX + k, JSON.stringify(d)); } catch (e) { /* penuh / mode privat */ } }
+  function draftDrop(k) { try { localStorage.removeItem(DRAFT_PREFIX + k); } catch (e) { /* abaikan */ } }
+  function draftSweep() {   // draf > 24 jam (pekerjaan sudah selesai di HP lain, dll.) dibuang
+    try {
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf(DRAFT_PREFIX) === 0 && !draftLoad(k.slice(DRAFT_PREFIX.length))) localStorage.removeItem(k);
+      }
+    } catch (e) { /* abaikan */ }
+  }
+  /** Simpan isian sheet setiap ada perubahan (ketik / tap); get() mengumpulkan isian, k = jenis form + ID pekerjaan. */
+  function draftWatch(s, k, get) {
+    var tm;
+    var save = function () { clearTimeout(tm); tm = setTimeout(function () { if (document.body.contains(s)) draftSave(k, get()); }, 300); };
+    s.addEventListener('input', save); s.addEventListener('change', save); s.addEventListener('click', save);
+  }
+  /** Isi form dari draf: pilihan (chip / daftar), teks, "Lainnya", detail opsional yang dibuka. */
+  function restoreForm(root, d) {
+    var wraps = root.querySelectorAll('[data-field]'), n = 0;
+    for (var i = 0; i < wraps.length; i++) {
+      var w = wraps[i], f = w.getAttribute('data-field'), v = (d.values || {})[f];
+      if (v == null || v === '') continue;
+      var inp = w.querySelector('[data-input]'), oth = w.querySelector('[data-other]'), opener = w.querySelector('[data-open-detail]');
+      if (w.querySelector('[data-chips="f"]')) setChip(w, 'f', v);
+      else if (inp) inp.value = v;
+      if (opener && inp) { opener.classList.add('opened'); opener.disabled = true; inp.classList.remove('hidden'); }
+      if (oth) { oth.classList.toggle('hidden', v !== OTHER); if (d.other && d.other[f] != null) oth.value = d.other[f]; }
+      n++;
+    }
+    return n;
+  }
+
+  /**
+   * Semua aksi kerja mengembalikan lineView terbaru. 2.6.4: lewat apiAct dengan ID permintaan → sinyal putus lalu ketuk lagi
+   * tidak membuat dobel; draftKey = draf form yang dibuang setelah tersimpan.
+   */
+  function act(btn, fn, args, okMsg, draftKey) {
     busy(btn, true);
-    return call.apply(null, [fn].concat(args)).then(function (v) {
+    return call('apiAct', fn, args, ridFor(fn + '|' + args[0])).then(function (v) {
+      ridDone(args[0]);
+      if (v.open) ridDone(v.open.id);
+      if (draftKey) draftDrop(draftKey);
       closeSheet();
       syncClock(v.serverNowIso);
       var mine = state.boot.myOpen;
       if (v.openIsMine) state.boot.myOpen = v.open;
       else if (mine && v.line && mine.line === v.line.id) state.boot.myOpen = null;
       if (state.lineView) { state.lineView = v; renderLine(); } else renderHome();
-      toast(okMsg, 'ok');
+      toast(v.ulang ? t('Sudah tersimpan sebelumnya (sinyal sempat putus). Tidak dicatat dua kali.') : okMsg, 'ok');
       refresh();
       return v;
-    }).catch(function (e) { busy(btn, false); toast(cleanErr(e), 'err'); throw e; });
+    }).catch(function (e) {
+      busy(btn, false);
+      toast(isNetErr(e) ? t('Sinyal terputus. Isian masih di layar — ketuk lagi saat ada sinyal; tidak akan tercatat dua kali.') : cleanErr(e), 'err');
+      throw e;
+    });
   }
 
   // ---------- bottom sheet ----------
@@ -831,11 +901,20 @@
       '<div class="stack">' + formHtml('Pending', { 'Tenggat': tenggatHtml }) + '<button class="btn navy" id="p-save">Simpan pending</button></div>');
     bindChips(s.querySelector('[data-sys="tenggat"]'), function (name, val) { $('p-date').classList.toggle('hidden', val !== 'TANGGAL'); });
     bindForm(s);
-    $('p-save').onclick = function () {
+    var dk = 'pending:' + r.id, get = function () {
       var input = collectForm(s);
       input.tenggat = chipVal(s, 'tenggat');
       input.tanggal = $('p-date').value;
-      act(this, 'apiPending', [r.id, input], 'Tersimpan sebagai Pending.').then(function () {
+      return input;
+    };
+    var old = draftLoad(dk);
+    if (old && restoreForm(s, old) + (old.tenggat ? 1 : 0)) {
+      if (old.tenggat) { setChip(s, 'tenggat', old.tenggat); $('p-date').classList.toggle('hidden', old.tenggat !== 'TANGGAL'); $('p-date').value = old.tanggal || ''; }
+      toast(t('Isian sebelumnya dipulihkan.'), 'ok');
+    }
+    draftWatch(s, dk, get);
+    $('p-save').onclick = function () {
+      act(this, 'apiPending', [r.id, get()], 'Tersimpan sebagai Pending.', dk).then(function () {
         if (!state.lineView) showTab('pending');
       }).catch(function () {});
     };
@@ -879,14 +958,28 @@
           }).join('') + '</div></div>';
       } }) +
       '<button class="btn ok" id="c-save">Simpan & selesai</button></div>');
-    if ($('pic-list')) $('pic-list').onclick = function (ev) { var c = ev.target.closest('[data-pic]'); if (c) c.classList.toggle('on'); };
+    var picMax = state.boot.limits.picMax || 15, partMax = state.boot.limits.partMax || 20;
+    if ($('pic-list')) $('pic-list').onclick = function (ev) {
+      var c = ev.target.closest('[data-pic]');
+      if (!c) return;
+      if (!c.classList.contains('on') && $('pic-list').querySelectorAll('[data-pic].on').length >= picMax) {
+        toast(t('PIC tambahan maksimal {n} orang.', { n: picMax }), 'err'); return;
+      }
+      c.classList.toggle('on');
+    };
     if ($('pic-q')) $('pic-q').oninput = function () {
       var q = this.value.trim().toLowerCase(), cs = $('pic-list').querySelectorAll('[data-pic]');
       for (var i = 0; i < cs.length; i++) cs[i].classList.toggle('hidden', !!q && cs[i].textContent.toLowerCase().indexOf(q) === -1 && !cs[i].classList.contains('on'));
     };
 
+    function partFull() {
+      if (pk.parts.length < partMax) return false;
+      toast(t('Sparepart maksimal {n} jenis per pekerjaan.', { n: partMax }), 'err');
+      return true;
+    }
     function addPart(item) {
       var ex = pk.parts.filter(function (p) { return !p.manual && p.id === item.id; })[0];
+      if (!ex && partFull()) return;
       if (ex) ex.qty = Math.min(999, ex.qty + 1);
       else pk.parts.push({ id: item.id, jenis: item.jenis, nama: item.nama, model: item.model, satuan: item.satuan, qty: 1 });
       toast(t('Ditambahkan: {p}', { p: partLabel(item) + (ex ? ' (×' + ex.qty + ')' : '') }), 'ok');
@@ -990,22 +1083,42 @@
       if (!jenis) { toast('Pilih jenis sparepart.', 'err'); return; }
       if (!nama) { toast('Isi nama sparepart.', 'err'); $('pk-m-nama').focus(); return; }
       if (!(qty >= 1 && qty <= 999)) { toast('Jumlah harus 1–999.', 'err'); return; }
+      if (partFull()) return;
       pk.parts.push({ manual: true, jenis: jenis, nama: nama, model: model, qty: qty });
       $('pk-m-nama').value = ''; $('pk-m-model').value = ''; $('pk-m-qty').value = 1;
       toast(t('Ditambahkan (manual): {p}', { p: nama }), 'ok');
       drawUsed();
     };
+    // 2.6.4: isian Selesai (pilihan, teks, part, PIC) disimpan di HP setiap berubah → HP me-reload / sinyal putus tidak menghapusnya
+    var dk = 'selesai:' + r.id;
+    var picsOn = function () { return [].map.call(s.querySelectorAll('#pic-list [data-pic].on'), function (c) { return c.getAttribute('data-pic'); }); };
+    var old = draftLoad(dk);
+    if (old) {
+      var n = restoreForm(s, old);
+      if (old.mode) {
+        setChip(s.querySelector('[data-sys="part"]'), 'part', old.mode);
+        $('pk').classList.toggle('hidden', old.mode !== 'SOME');
+        var known = {};
+        cat.forEach(function (p) { known[p.id] = p; });
+        pk.parts = (old.parts || []).filter(function (p) { return p.manual || known[p.id]; }).slice(0, partMax);   // katalog bisa berubah
+        if (old.mode === 'SOME') { drawUsed(); drawBrowse(); }
+        n++;
+      }
+      (old.pics || []).forEach(function (e) { var c = s.querySelector('#pic-list [data-pic="' + e.replace(/"/g, '') + '"]'); if (c) { c.classList.add('on'); n++; } });
+      if (n) toast(t('Isian sebelumnya dipulihkan.'), 'ok');
+    }
+    draftWatch(s, dk, function () { var d = collectForm(s); d.mode = chipVal(s, 'part'); d.parts = pk.parts; d.pics = picsOn(); return d; });
     $('c-save').onclick = function () {
       var mode = chipVal(s, 'part');
       if (!mode) { toast(t('Sparepart: pilih "{a}" atau "{b}".', { a: t(NO_PART), b: t('Ada part') }), 'err'); return; }
       if (mode === 'SOME' && !pk.parts.length) { toast(t('Tambahkan minimal satu part, atau pilih "{a}".', { a: t(NO_PART) }), 'err'); return; }
       var input = collectForm(s);
       input.tanpaPart = mode === 'NONE';
-      input.pics = [].map.call(s.querySelectorAll('#pic-list [data-pic].on'), function (c) { return c.getAttribute('data-pic'); });
+      input.pics = picsOn();
       input.parts = mode === 'NONE' ? [] : pk.parts.map(function (p) {
         return p.manual ? { manual: true, jenis: p.jenis, nama: p.nama, model: p.model, qty: p.qty } : { id: p.id, qty: p.qty };
       });
-      act(this, 'apiComplete', [r.id, input], 'Maintenance selesai. Terima kasih!').catch(function () {});
+      act(this, 'apiComplete', [r.id, input], 'Maintenance selesai. Terima kasih!', dk).catch(function () {});
     };
   }
 
@@ -1013,8 +1126,11 @@
     var s = openSheet('<h2>Cancel maintenance</h2><p class="small muted">Tidak dihitung ke MTTR. Alasan tercatat di Riwayat.</p><div class="stack">' +
       formHtml('Cancel') + '<button class="btn danger-ghost" id="x-save">Konfirmasi cancel</button></div>');
     bindForm(s);
+    var dk = 'cancel:' + r.id, old = draftLoad(dk);
+    if (old && restoreForm(s, old)) toast(t('Isian sebelumnya dipulihkan.'), 'ok');
+    draftWatch(s, dk, function () { return collectForm(s); });
     $('x-save').onclick = function () {
-      act(this, 'apiCancel', [r.id, collectForm(s)], 'Maintenance dibatalkan.').catch(function () {});
+      act(this, 'apiCancel', [r.id, collectForm(s)], 'Maintenance dibatalkan.', dk).catch(function () {});
     };
   }
 
@@ -1242,7 +1358,8 @@
   function continuePending(p, btn) {
     function go(lineId, b) {
       busy(b, true, t('Melanjutkan…'));
-      return call('apiContinue', p.id, lineId).then(function (v) {
+      return call('apiAct', 'apiContinue', [p.id, lineId], ridFor('apiContinue|' + p.id)).then(function (v) {
+        ridDone(p.id);
         closeSheet();
         syncClock(v.serverNowIso);
         state.qr = { line: String(lineId).toUpperCase(), at: Date.now() };
@@ -1252,9 +1369,12 @@
         markTab('home');
         setView('line');
         renderLine();
-        toast('Pending dilanjutkan. Timer aktif berjalan.', 'ok');
+        toast(v.ulang ? t('Sudah tersimpan sebelumnya (sinyal sempat putus). Tidak dicatat dua kali.') : 'Pending dilanjutkan. Timer aktif berjalan.', 'ok');
         refresh();
-      }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+      }).catch(function (e) {
+        busy(b, false);
+        toast(isNetErr(e) ? t('Sinyal terputus. Isian masih di layar — ketuk lagi saat ada sinyal; tidak akan tercatat dua kali.') : cleanErr(e), 'err');
+      });
     }
     if (freshQr(p.line)) return go(state.qr.line, btn);   // masuk lewat scan QR: konfirmasi dilewati
     openScanner({ expectLine: p.line, onResult: function (line) { go(line, null); } });
@@ -1529,7 +1649,7 @@
         var k = String(v).split('\n').reduce(function (a, s) { return a + Math.max(1, Math.ceil(s.replace(/[^\x00-\xff]/g, 'xx').length / Math.max(1, width[i] - 1))); }, 0);
         if (k > lines) lines = k;
       });
-      if (lines > 1) x[0].height = 15 * Math.min(lines, 15);
+      if (lines > 1) x[0].height = 15 * Math.min(lines, 25);   // 2.6.4: s/d 20 sparepart per pekerjaan
     });
     ws.views = [{ state: 'frozen', ySplit: 2 }];
     ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: n } };

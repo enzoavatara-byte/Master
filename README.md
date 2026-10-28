@@ -88,6 +88,11 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 
 ## 2. Upgrade
 
+### Ke 2.6.4 (dari 2.6.3)
+Ganti `Api`, `Code`, `Config`, `Maintenance` (Script) dan `App`, `I18n`, `Panduan` (HTML), lalu Deploy → Manage deployments → ✏️ → **New version**.
+Script dan HTML **harus diganti bersama** (HTML baru memanggil fungsi server `apiAct`). Tidak ada sheet / kolom / trigger / izin baru; Run `setup` hanya
+untuk memunculkan kunci Config `IKON_APLIKASI` (opsional). Dari versi lebih lama: paste semua file `src/`.
+
 ### Ke 2.6.3 (dari 2.6.2)
 Ganti `Api`, `Code`, `Config`, `Db`, `Maintenance`, `Rekap`, `Tampilan` (Script), lalu Deploy → Manage deployments → ✏️ → **New version**.
 Tidak ada sheet / kolom / trigger / izin baru; Run `setup` tidak wajib. Dari 2.6.1: ganti juga file 2.6.2 (`Kpi`, `Manual`, `Master`, `Tpm`, `App`) — paling mudah
@@ -277,6 +282,8 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
 - Lupa caranya: tombol **?** di Beranda.
 - **Bahasa**: tombol **中 / ID** di Beranda. Teks yang ditulis orang lain tetap bahasa aslinya → **🌐 Terjemahkan / 翻译**. Boleh menulis dalam 中文; laporan menyimpan teks asli.
 - **Saran**: Beranda → **💡 Saran**.
+- **Sinyal putus**: isian tetap di layar dan tersimpan di HP → ketuk lagi saat ada sinyal; tidak tercatat dua kali (2.6.4). Tidak ada sinyal sama sekali → catat di kertas, admin memasukkan lewat tab `Input Manual`.
+- **Shortcut di layar utama** (seperti aplikasi): buka link aplikasi (URL `/exec`, sama dengan QR) → Android Chrome: menu ⋮ → **Tambahkan ke layar utama**; iPhone Safari: tombol Bagikan → **Tambah ke Layar Utama**. Buat dari akun Google kerja yang dipakai di aplikasi. Ikon khusus opsional: `Config` → `IKON_APLIKASI` (alamat PNG publik).
 
 ---
 
