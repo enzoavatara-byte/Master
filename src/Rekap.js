@@ -178,27 +178,39 @@ function lapKeyHeader_(cols) {
  * @param {Object[]=} rows    semua baris Maintenance di memori (sudah berisi r terbaru); tanpa ini Rekap tidak disentuh
  * @param {Object[]=} parts   sparepart dari apiComplete (supaya tidak membaca sheet Pemakaian lagi)
  */
-function syncReports_(r, rows, parts) {
+function syncReports_(r, rows, parts, loc) {
   if (!isYes_(getConfig_('LAPORAN_LANGSUNG'))) return;
   try {
-    syncLaporan_(r, parts);   // 2.6.1: Rekap (tersembunyi) tidak lagi per tombol; dibangun malam / Perbarui / setup
+    syncLaporan_(r, parts, loc);   // 2.6.1: Rekap (tersembunyi) tidak lagi per tombol; dibangun malam / Perbarui / setup
   } catch (e) {
     console.warn('Sinkron Laporan gagal (diperbaiki saat pembaruan penuh berikutnya): ' + e);
   }
 }
 
-function syncLaporan_(r, parts) {
-  if (!(r['Mulai'] instanceof Date)) return;
-  var year = yearOf_(r['Mulai']);
-  var sh = SpreadsheetApp.getActive().getSheetByName(laporanName_(year));
-  var md = masterData_(), cols = md.report, w = Math.max(1, cols.length);
-  if (!sh) { buildLaporan_(year); return; }
+/**
+ * Letak baris pekerjaan r di tab Laporan tahun mulainya — hanya BACA (2.6.8: dipanggil sebelum tulisan pertama tombol).
+ * @param {boolean=} baru r belum pernah ditulis ke Laporan (Mulai) → tanpa pencarian
+ * @return {?{year, build?:boolean, sh?, n?, at?, max?}} null = tidak disinkron; build = bangun ulang tab
+ */
+function lapLocate_(r, baru) {
+  if (!(r['Mulai'] instanceof Date)) return null;
+  var year = yearOf_(r['Mulai']), sh = SpreadsheetApp.getActive().getSheetByName(laporanName_(year));
+  var cols = masterData_().report, w = Math.max(1, cols.length);
+  if (!sh) return { year: year, build: true };
   var last = sh.getLastRow();
-  if (last < 2 || sh.getRange(2, w + 1).getValue() !== lapKeyHeader_(cols)) { buildLaporan_(year); return; }   // tab lama / format diubah
+  if (last < 2 || sh.getRange(2, w + 1).getValue() !== lapKeyHeader_(cols)) return { year: year, build: true };   // tab lama / format diubah
   // 2.6.3: baris pekerjaan dicari di server (TextFinder ±0,13 dtk), bukan membaca seluruh kolom kunci (±0,4–1,4 dtk setahun)
-  var id = String(r['Maintenance ID']), n = last - 2, at = -1;
-  var hit = n > 0 ? sh.getRange(3, w + 1, n, 1).createTextFinder(id).matchEntireCell(true).findNext() : null;
-  if (hit) at = hit.getRow() - 3;
+  var n = last - 2, hit = !baru && n > 0 ? sh.getRange(3, w + 1, n, 1).createTextFinder(String(r['Maintenance ID'])).matchEntireCell(true).findNext() : null;
+  return { year: year, sh: sh, n: n, at: hit ? hit.getRow() - 3 : -1, max: sh.getMaxRows() };
+}
+
+/** @param {Object=} loc hasil lapLocate_ yang sudah dibaca sebelumnya (K8); tanpa itu dibaca di sini. */
+function syncLaporan_(r, parts, loc) {
+  if (loc === undefined) loc = lapLocate_(r);
+  if (!loc) return;
+  if (loc.build) { buildLaporan_(loc.year); return; }
+  var year = loc.year, sh = loc.sh, n = loc.n, at = loc.at;
+  var md = masterData_(), cols = md.report, w = Math.max(1, cols.length), id = String(r['Maintenance ID']);
 
   if (r['Status'] === APP.STATUS.CANCELLED) {       // Cancelled tidak masuk laporan → barisnya dihapus, NO diurutkan ulang
     if (at < 0) return;
@@ -212,7 +224,7 @@ function syncLaporan_(r, parts) {
     return;
   }
   var idx = at >= 0 ? at : n;                        // pekerjaan baru → baris paling bawah (mulai paling akhir)
-  if (3 + idx > sh.getMaxRows()) { buildLaporan_(year); return; }   // baris cadangan habis → bangun ulang (baris + format)
+  if (3 + idx > loc.max) { buildLaporan_(year); return; }   // baris cadangan habis → bangun ulang (baris + format)
   var used = parts ? parts.map(function (p) {
     return { 'Jenis Sparepart': p.jenis, 'Nama Sparepart': p.nama, 'Model': p.model, 'Jumlah': p.qty };
   }) : (r['Status'] === APP.STATUS.COMPLETED ? usageOf_(id, year) : []);

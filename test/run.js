@@ -2862,4 +2862,52 @@ test('2.6.6 Config tanggal (KPI_MULAI, TPM_MULAI, TANGGAL_LIBUR) berformat teks:
   C.data[r][v] = old;
 });
 
+// "Kirim terpaksa" (K8): Apps Script menahan tulisan dalam antrean; baca berikutnya memaksa antrean dikirim dulu (±0,3–0,8 dtk).
+// Dihitung di mock: baca saat masih ada tulisan tertunda. Panggilan bersarang di dalam mock tidak dihitung.
+function kirimTerpaksa(fn) {
+  const R = Object.getPrototypeOf(ss.getSheetByName('Log').getRange(1, 1)), S = Object.getPrototypeOf(ss.getSheetByName('Log'));
+  const READ = [[R, 'getValues'], [R, 'getValue'], [R, 'createTextFinder'], [S, 'getLastRow'], [S, 'getMaxRows'], [S, 'getLastColumn'], [S, 'getDataRange']];
+  const WRITE = [[R, 'setValues'], [R, 'setValue'], [R, 'setNumberFormat'], [S, 'insertRowsAfter'], [S, 'deleteRow'], [S, 'deleteRows']];
+  const NETRAL = [[S, 'getRange']];   // getRange di Google tidak membaca server (mock memanggil getMaxRows di dalamnya)
+  let depth = 0, pending = 0, forced = 0, at = [];
+  const orig = [];
+  const wrap = (o, n, kind) => {
+    const f = o[n]; orig.push([o, n, f]);
+    o[n] = function () {
+      if (!depth) {
+        if (kind === 'w') pending++;
+        else if (pending) { forced++; pending = 0; at.push(n + ' ' + (this.getName ? this.getName() : (this.sh && this.sh.getName()))); }
+      }
+      depth++;
+      try { return f.apply(this, arguments); } finally { depth--; }
+    };
+  };
+  NETRAL.forEach(([o, n]) => { const f = o[n]; orig.push([o, n, f]); o[n] = function () { depth++; try { return f.apply(this, arguments); } finally { depth--; } }; });
+  READ.forEach(([o, n]) => wrap(o, n, 'r'));
+  WRITE.forEach(([o, n]) => wrap(o, n, 'w'));
+  const SA = ctx.SpreadsheetApp, fl = SA.flush;
+  SA.flush = function () { pending = 0; return fl.apply(this, arguments); };
+  try { const v = fn(); return { forced, at, v }; } finally { orig.forEach(([o, n, f]) => { o[n] = f; }); SA.flush = fl; }
+}
+
+test('2.6.8 K8 satu kali kirim per tombol: semua baca sebelum tulis (Mulai, Pause, Resume, Pending, Lanjut, Selesai + part + PIC, Cancel, Masih lanjut)', () => {
+  const free = ctx.readTable_('Lines').map(l => l['Line ID']).filter(id => /^L\d+$/.test(id) && !ctx.readTable_('Maintenance').some(r => r.Line === id && ['Aktif', 'Pause', 'Pending'].includes(r.Status)));
+  const who = ['budi@gmail.com', 'andi@gmail.com', 'sari@gmail.com', 'dewi@gmail.com'].filter(e => !ctx.readTable_('Maintenance').some(r => String(r['Teknisi terakhir']).toLowerCase() === e && ['Aktif', 'Pause'].includes(r.Status)));
+  assert.ok(free.length >= 2 && who.length >= 1, 'line & teknisi bebas: ' + free + ' / ' + who);
+  const line = free[0], line2 = free[1], tech = who[0], hasil = {};
+  const ukur = (nama, fn) => { const k = kirimTerpaksa(() => as(tech, fn)); hasil[nama] = k.forced + (k.at.length ? ' (' + k.at.join(', ') + ')' : ''); return k.v; };
+  const id = ukur('Mulai', () => ctx.apiStart(line, { baterai: 'E22H' })).open.id;
+  ukur('Pause', () => ctx.apiPause(id, { values: { 'Alasan pause': 'Istirahat' } }));
+  ukur('Resume', () => ctx.apiResume(id));
+  ukur('Masih lanjut', () => ctx.apiConfirmStillWorking(id));
+  ukur('Pending', () => ctx.apiPending(id, pend('Cek awal', 'Menunggu part', 'BESOK')));
+  ukur('Lanjut (QR)', () => ctx.apiContinue(id, line));
+  ukur('Selesai + part + PIC', () => ctx.apiComplete(id, { ...done, parts: [{ id: FUSE, qty: 2 }, { manual: true, jenis: 'Mekanikal', nama: 'Bearing uji K8', model: '6205', qty: 1 }], pics: ['sari@gmail.com'].filter(e => e !== tech) }));
+  const j = ukur('Mulai (untuk cancel)', () => ctx.apiStart(line2, { baterai: 'E22H' })).open.id;
+  ukur('Cancel', () => ctx.apiCancel(j, { values: { 'Alasan cancel': 'Lainnya' }, other: { 'Alasan cancel': 'uji K8' } }));
+  jeq(Object.values(hasil).map(String), Object.keys(hasil).map(() => '0'), 'kirim terpaksa per tombol: ' + JSON.stringify(hasil));
+  assert.strictEqual(rec(id).Status, 'Completed');
+  jeq(logOf(id), ['start', 'pause', 'resume', 'masih lanjut', 'pending', 'lanjut', 'complete']);
+});
+
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

@@ -88,6 +88,10 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 
 ## 2. Upgrade
 
+### Ke 2.6.8 (dari 2.6.7)
+Ganti `Db`, `Maintenance`, `Rekap`, `Config` (Script), lalu Deploy → Manage deployments → ✏️ → **New version**. Run `setup` tidak wajib.
+Dari 2.6.6 atau lebih lama: paste semua file `src/`, lalu Run `setup`.
+
 ### Ke 2.6.7 (dari 2.6.6)
 Ganti `Code`, `Config` (Script), lalu Deploy → Manage deployments → ✏️ → **New version**, lalu **Run `setup`** (sel tanggal Config jadi teks).
 

@@ -3,6 +3,20 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.8 — tombol lebih cepat: baca dulu, tulis sekali (K8)
+Ganti `Db`, `Maintenance`, `Rekap`, `Config` (Script), lalu New version. Tidak ada sheet, kolom, trigger, atau izin baru (Run `setup` tidak wajib).
+
+- **Satu kali kirim per tombol.** Apps Script menahan tulisan dalam antrean dan baru mengirimnya ke Google Sheets saat ada *baca* berikutnya atau di akhir.
+  - Dulu tiap tombol: tulis Maintenance → baca judul / baris terakhir Log (**kirim terpaksa**) → tulis Log → baca tab Laporan (**kirim terpaksa**) → tulis Laporan → kirim. Total 3× kirim; di profil Apps Script asli masing-masing ±0,3–0,8 dtk.
+  - Sekarang semua baca dikerjakan **sebelum** tulisan pertama: judul & baris terakhir Log, baris terakhir Maintenance (Mulai), dan letak baris Laporan. Hasilnya 1× kirim per tombol.
+  - Berlaku untuk Mulai, Pause, Resume, Pending, Lanjut (QR), Selesai, Cancel, "Masih lanjut".
+  - Perkiraan −0,6 s/d −1,5 dtk per tombol; diukur ulang di uji 2 tahun.
+- **Isi data tidak berubah**, hanya urutan baca. Generator uji (13.969 kejadian tombol, Laporan langsung menyala, jam dibekukan) dijalankan di 2.6.7 dan 2.6.8: Maintenance, Log, Pemakaian, Input Manual, KPI data, Laporan (hasil sinkron per tombol dan bangun ulang) **identik, 0 dari 588.343 sel berbeda**.
+- Nomor baris yang sudah dibaca hanya berlaku selama satu tombol. Arsip, Input Manual, trigger 15 menit, review admin, dan sejenisnya tetap membaca sendiri seperti dulu.
+- **Cadangan:** bila uji di Apps Script asli gagal, 2.6.7 (tanpa K8) tetap versi yang terbukti.
+
+**Uji:** 1 test baru (109 test). Mock menghitung "kirim terpaksa" (baca saat ada tulisan tertunda) per tombol: 2.6.7 = 2 per tombol, 2.6.8 = 0. E2E browser 42 + 20 OK.
+
 ## 2.6.7 — hasil uji 2 tahun di Apps Script asli
 Ganti `Code`, `Config` (Script), lalu New version, lalu **Run `setup`**. Tidak ada sheet, kolom, trigger, atau izin baru.
 

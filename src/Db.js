@@ -231,9 +231,42 @@ function appendObj_(name, obj) {
   if (!LOCK_DEPTH_ || [APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN].indexOf(name) === -1) { sh.appendRow(row); return; }
   // 2.6.3: tab ini hanya ditulis di dalam withLock_ → tidak ada penulis lain; setValues masuk antrean & terkirim saat flush,
   // appendRow dijalankan langsung (profil Apps Script asli: 0,6–1,6 dtk per baris Log)
-  var at = sh.getLastRow() + 1;
-  ensureRows_(sh, at, 500);
+  var at = rowsAt_(sh, name, 1);
   sh.getRange(at, 1, 1, row.length).setValues([row]);
+}
+
+/*
+ * 2.6.8 K8 "baca dulu, tulis sekali". Apps Script menahan tulisan dalam antrean dan mengirimnya saat ada BACA berikutnya
+ * atau saat flush. Tombol dulu: tulis Maintenance → baca judul / baris terakhir Log (kirim terpaksa) → tulis Log → baca tab
+ * Laporan (kirim terpaksa) → tulis Laporan → flush = 3× kirim (profil: masing-masing ±0,3–0,8 dtk).
+ * planWrites_ membaca semua itu SEBELUM tulisan pertama; appendObj_ / appendUsage_ / syncLaporan_ memakai hasilnya tanpa baca.
+ * Urutan & isi tulisan tidak berubah. Rencana hanya berlaku selama satu tombol (dibuang di endWrites_), jadi arsip, Input
+ * Manual, trigger, dsb. tetap membaca sendiri.
+ */
+var WRITE_PLAN_ = null;   // { rows: {nama tab: {at, max}}, lap: hasil lapLocate_ } selama satu tombol
+
+/** @param {Object} r pekerjaan (Laporan dicari untuknya) · @param {string[]} tabs tab yang akan ditambah baris · @param {boolean=} baru r belum ada di Laporan */
+function planWrites_(r, tabs, baru) {
+  var plan = { rows: {}, lap: undefined };
+  tabs.forEach(function (name) {
+    var sh = sheet_(name);
+    headers_(sh, name);
+    plan.rows[name] = { at: sh.getLastRow() + 1, max: sh.getMaxRows() };
+  });
+  if (isYes_(getConfig_('LAPORAN_LANGSUNG'))) plan.lap = lapLocate_(r, baru);   // Tidak: syncReports_ tidak menyentuh Laporan
+  WRITE_PLAN_ = plan;
+  return plan;
+}
+function endWrites_() { WRITE_PLAN_ = null; }
+
+/** Nomor baris kosong untuk n baris baru (dari rencana bila ada, lain kali membaca tab); baris ditambah bila kurang. */
+function rowsAt_(sh, name, n) {
+  var p = WRITE_PLAN_ && WRITE_PLAN_.rows[name];
+  if (!p) { var at0 = sh.getLastRow() + 1; ensureRows_(sh, at0 + n - 1, 500); return at0; }
+  var at = p.at, last = at + n - 1;
+  if (last > p.max) { sh.insertRowsAfter(p.max, last - p.max + 500); p.max = last + 500; }   // = ensureRows_ tanpa baca
+  p.at += n;
+  return at;
 }
 
 /** Menulis ulang satu baris penuh (satu panggilan API, bukan per sel). */

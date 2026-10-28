@@ -269,11 +269,14 @@ function apiStart(lineId, p) {
     ensureMaintColumns_(Object.keys(custom.values));
     applyFormValues_(r, custom.values, now, user);
     setNames_(r);
-    appendObj_(APP.SHEETS.MAINT, r);
-    log_(now, r['Maintenance ID'], APP.EVENTS.START, user.email,
-      [tipe, 'Line ' + r['Line'], 'baterai ' + bat, stop ? 'stop line ' + stop : ''].concat(custom.summary).filter(String).join(', '));
-    rows.push(r);
-    syncReports_(r, rows);
+    var plan = planWrites_(r, [APP.SHEETS.MAINT, APP.SHEETS.LOG], true);   // 2.6.8 K8: baca dulu, tulis sekali
+    try {
+      appendObj_(APP.SHEETS.MAINT, r);
+      log_(now, r['Maintenance ID'], APP.EVENTS.START, user.email,
+        [tipe, 'Line ' + r['Line'], 'baterai ' + bat, stop ? 'stop line ' + stop : ''].concat(custom.summary).filter(String).join(', '));
+      rows.push(r);
+      syncReports_(r, rows, null, plan.lap);
+    } finally { endWrites_(); }
     return rows;
   });
   return lineView_(line.id, rows, ctx_(), user);
@@ -359,9 +362,12 @@ function apiContinue(id, scannedLineId) {
     r['Konfirmasi terakhir'] = now;
     r['Peringatan pada'] = '';
     r['Status review'] = '';
-    writeObj_(APP.SHEETS.MAINT, r);
-    log_(now, r['Maintenance ID'], APP.EVENTS.CONTINUE, user.email, 'Konfirmasi QR ' + r['Line']);
-    syncReports_(r, rows);
+    var plan = planWrites_(r, [APP.SHEETS.LOG]);   // 2.6.8 K8: baca dulu, tulis sekali
+    try {
+      writeObj_(APP.SHEETS.MAINT, r);
+      log_(now, r['Maintenance ID'], APP.EVENTS.CONTINUE, user.email, 'Konfirmasi QR ' + r['Line']);
+      syncReports_(r, rows, null, plan.lap);
+    } finally { endWrites_(); }
     return { line: r['Line'], rows: rows };
   });
   return lineView_(res.line, res.rows, ctx_(), user);
@@ -423,9 +429,8 @@ function partText_(parts) {
 function appendUsage_(r, parts, now) {
   if (!parts.length) return;
   var sh = sheet_(APP.SHEETS.PEMAKAIAN);
-  var rows = usageRows_(headers_(sh), r, parts, now);
-  var at = sh.getLastRow() + 1;
-  ensureRows_(sh, at + rows.length - 1, 500);
+  var rows = usageRows_(headers_(sh, APP.SHEETS.PEMAKAIAN), r, parts, now);
+  var at = rowsAt_(sh, APP.SHEETS.PEMAKAIAN, rows.length);
   sh.getRange(at, 1, rows.length, rows[0].length).setValues(rows);
 }
 
@@ -520,9 +525,12 @@ function apiCancel(id, input, catatan) {
     r['Masuk MTTR'] = APP.MTTR.NO;
     r['Status review'] = '';   // 2.6.1: Cancel tanpa review (satu-satunya keputusan dulu "Setujui"); alasan tercatat di Log
     r['Peringatan pada'] = '';
-    writeObj_(APP.SHEETS.MAINT, r);
-    log_(now, r['Maintenance ID'], APP.EVENTS.CANCEL, user.email, f.summary.join(' · ') + (owner ? '' : ' (oleh Admin)'));
-    syncReports_(r, rows);
+    var plan = planWrites_(r, [APP.SHEETS.LOG]);   // 2.6.8 K8: baca dulu, tulis sekali
+    try {
+      writeObj_(APP.SHEETS.MAINT, r);
+      log_(now, r['Maintenance ID'], APP.EVENTS.CANCEL, user.email, f.summary.join(' · ') + (owner ? '' : ' (oleh Admin)'));
+      syncReports_(r, rows, null, plan.lap);
+    } finally { endWrites_(); }
     return { line: r['Line'], rows: rows };
   });
   return lineView_(res.line, res.rows, ctx_(), user);
@@ -535,11 +543,15 @@ function mutate_(id, user, allowed, fn) {
     var r = findHot_(rows, id);
     assertOwner_(r, user, allowed);
     var now = new Date();
-    var ev = fn(r, now);    // [kejadian, detail log, sparepart (khusus Selesai)]
-    setNames_(r);
-    writeObj_(APP.SHEETS.MAINT, r);
-    log_(now, r['Maintenance ID'], ev[0], user.email, ev[1]);
-    syncReports_(r, rows, ev[2]);
+    // 2.6.8 K8: semua baca sebelum tulisan pertama → satu kali kirim. Pemakaian dibaca di fn (Selesai), juga sebelum tulisan.
+    var plan = planWrites_(r, [APP.SHEETS.LOG]);
+    try {
+      var ev = fn(r, now);    // [kejadian, detail log, sparepart (khusus Selesai)]
+      setNames_(r);
+      writeObj_(APP.SHEETS.MAINT, r);
+      log_(now, r['Maintenance ID'], ev[0], user.email, ev[1]);
+      syncReports_(r, rows, ev[2], plan.lap);
+    } finally { endWrites_(); }
     return { line: r['Line'], rows: rows };
   });
   // Tampilan dihitung dari data yang sudah ada di memori (r ikut berubah di dalam rows) → tanpa baca ulang.
