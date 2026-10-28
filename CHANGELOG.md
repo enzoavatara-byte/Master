@@ -47,7 +47,16 @@ Paste **semua** file `src/` (banyak file berubah), lalu Deploy → Manage deploy
   - **6e/6f** Serbuan (6 HP menekan Mulai + Selesai di detik yang sama; 2 HP menekan saat pembaruan malam memegang lock);
   - **▶ Jalankan SEMUA otomatis** (satu klik, ±1–2 jam, lewat trigger; tahap yang terbunuh di batas 6 menit dicatat GAGAL lalu rantai lanjut).
 
-**Uji:** 4 test baru di `test/run.js` (118 total) + `test/kosong.js` (spreadsheet kosong, 4 test). `npm test` menjalankan keduanya.
+**Uji:**
+- 4 test baru di `test/run.js` + `test/kosong.js` (spreadsheet kosong, 4 test) = 118. `npm test` menjalankan keduanya.
+- E2E browser HP 390 px: kartu Availability & layar kosong (id + 中文), sinyal putus 20/20, server sibuk → coba ulang otomatis tanpa dobel 4/4.
+- Bundel uji 2 tahun:
+  - 17.145 pekerjaan, 42.959 Log, 0 error generator;
+  - 44 hari sibuk, 18× listrik turun;
+  - 169 percobaan Mulai di line terpakai → semua ditolak, 0 lolos;
+  - 1.460 part aktif.
+- Dry-run seluruh menu di mock: 171 LULUS, 10 GAGAL. Kesepuluhnya cek rumus FILTER tab per project, yang memang tidak dihitung mock (sama seperti sebelumnya).
+- Di-push ke proyek uji Cikarang; pull balik 69/69 file identik.
 
 ## 2.6.8 — tombol lebih cepat: baca dulu, tulis sekali (K8)
 Ganti `Db`, `Maintenance`, `Rekap`, `Config` (Script), lalu New version. Tidak ada sheet, kolom, trigger, atau izin baru (Run `setup` tidak wajib).
