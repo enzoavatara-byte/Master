@@ -136,7 +136,7 @@ function manualRow_(md, o, d, all, user, now) {
   var parts = validateParts_(md, manualParts_(md, d['Sparepart'], stripOther_(fs.values['Jenis kerusakan'])));
 
   var r = {
-    'Maintenance ID': newMaintenanceId_(all, line.id, mulai), 'Line': line.id, 'Factory': line.factory, 'Proses': line.proses,
+    'Maintenance ID': newMaintenanceId_(all, line.id, mulai, true), 'Line': line.id, 'Factory': line.factory, 'Proses': line.proses,
     'Stop line': stop, 'Baterai': bat, 'Tipe': tipe, 'Status': APP.STATUS.COMPLETED,
     'Teknisi awal': pic.email, 'Teknisi terakhir': pic.email, 'Teknisi terlibat': [pic.email].concat(pics).join(', '),
     'Mulai': mulai, 'Selesai': selesai, 'Total aktif (menit)': round2_((selesai - mulai) / 60000),

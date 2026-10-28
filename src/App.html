@@ -541,6 +541,27 @@
     for (var i = 0; i < hs.length; i++) hs[i].onclick = openGuide;
   }
 
+  /**
+   * 2.6.9: spreadsheet baru diserahkan kosong (tanpa line / sparepart). Teknisi: tahu kenapa belum bisa scan.
+   * Admin: urutan mengisi dari kosong (baris CONTOH di tiap tab = cara mengisi, diabaikan aplikasi).
+   */
+  function emptyCard() {
+    var m = M(), noLine = !(m.lines || []).length, noPart = !(m.spareparts || []).length;
+    if (!noLine && !noPart) return '';
+    if (!isAdmin()) {
+      return noLine ? '<div class="alert warn">' + esc(t('Belum ada line di aplikasi. Minta admin mengisi tab Lines dan mencetak QR.')) + '</div>' : '';
+    }
+    var steps = ['Factory: ID & nama factory.', 'Projects: baterai per factory (+ target MTTR / MTBF bila ada).',
+      'Lines: satu baris = satu line / mesin ber-QR; isi Proses (Modul Line / Pack Line / Pre-Assy).',
+      'Sparepart: paste daftar part (kode part di kolom Model).', 'Users: email, nama, Peran (Teknisi / Admin).',
+      'Config: jam & hari operasi, target, tanggal libur.', 'Menu MTTR → Cetak QR, tempel di line.',
+      'Uji 1 pekerjaan dari HP, lalu menu MTTR → Hapus data testing.'];
+    return '<div class="card"><div class="caps">' + esc(t('Mulai dari spreadsheet kosong')) + '</div>' +
+      '<p class="small" style="margin:6px 0">' + esc(noLine && noPart ? t('Belum ada line dan sparepart.') : (noLine ? t('Belum ada line.') : t('Belum ada sparepart.'))) + ' ' +
+      esc(t('Isi tab di Google Sheet berurutan. Baris abu-abu "CONTOH" menunjukkan cara mengisi dan diabaikan aplikasi — timpa (Aktif = Ya) atau hapus.')) + '</p>' +
+      '<ol class="small" style="margin:0;padding-left:20px">' + steps.map(function (x) { return '<li>' + esc(t(x)) + '</li>'; }).join('') + '</ol></div>';
+  }
+
   function renderHome() {
     var b = state.boot, u = b.user, warn = b.myOpen && b.myOpen.warnedIso;
     var html = '<div class="hello"><div><div class="appname">' + esc(M().appName) + '</div><div class="hi">' + t('Halo, {n},', { n: esc(u.name.split(' ')[0]) }) + '</div><h1>' +
@@ -558,6 +579,7 @@
         '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="vertical-align:-5px;margin-right:8px"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>SCAN QR</button>' +
         '<button class="btn ghost" id="btn-find-line" style="margin-top:10px">Cari line (jika QR rusak)</button></div>';
     }
+    html += emptyCard();
     html += '<button class="saranbar" id="btn-saran"><span class="grow">' + (isAdmin() ? t('💡 Saran dari teknisi') : t('💡 Punya saran untuk aplikasi? Kirim ke admin')) + '</span>' +
       (isAdmin() && b.counts.saran ? '<span class="badge">' + b.counts.saran + '</span>' : '') + ' ›</button>';
     html += filterBar(null) + weekCard(b.stats) + feedCard(b.recent);
@@ -738,7 +760,15 @@
    */
   function act(btn, fn, args, okMsg, draftKey) {
     busy(btn, true);
-    return call('apiAct', fn, args, ridFor(fn + '|' + args[0])).then(function (v) {
+    // 2.6.9: "Server sedang sibuk" (banyak tombol bersamaan / pembaruan malam) → dicoba lagi otomatis sekali, rid sama (tidak dobel)
+    var go = function (retried) {
+      return call('apiAct', fn, args, ridFor(fn + '|' + args[0])).catch(function (e) {
+        if (retried || !/sedang sibuk/i.test(cleanErr(e))) throw e;
+        toast(t('Server sedang sibuk (banyak teknisi menekan bersamaan). Dicoba lagi otomatis…'));
+        return new Promise(function (res) { setTimeout(res, 5000); }).then(function () { return go(true); });
+      });
+    };
+    return go(false).then(function (v) {
       ridDone(args[0]);
       if (v.open) ridDone(v.open.id);
       if (draftKey) draftDrop(draftKey);
@@ -1885,10 +1915,21 @@
       }).join('') + '</div></div>';
   }
 
-  /** KPI bulan berjalan (2.6): Plant = 4 angka, project = baris dengan target & ✓ / ✗ (teks + warna). Admin: tutup bulan lalu. */
+  /** Persen 1 desimal (koma untuk Bahasa Indonesia). */
+  function pct(v) {
+    if (v == null) return '–';
+    var s = (Math.round(v * 10) / 10).toFixed(1);
+    return (LANG === 'zh' ? s : s.replace('.', ',')) + ' %';
+  }
+
+  /**
+   * KPI bulan berjalan (2.6): Plant = 4 angka, project = baris dengan target & ✓ / ✗ (teks + warna). Admin: tutup bulan lalu.
+   * 2.6.9: Availability per factory × proses (running hour sekali per proses) + rata-rata semua proses.
+   */
   function kpiCard(k) {
     if (!k || !k.rows || !k.rows.length) return '';
-    var plant = k.rows[0], proj = k.rows.slice(1), mLabel = monthLabel(k.bulan, k.label);
+    var lv = function (l) { return k.rows.filter(function (x) { return x.level === l; }); };
+    var plant = lv('Plant')[0] || k.rows[0], proj = lv('Project'), proc = lv('Proses'), mLabel = monthLabel(k.bulan, k.label);
     var verdict = function (x) {
       if (!x.tercapai) return '';
       return x.tercapai === '✓' ? '<span class="status ok">' + esc(t('✓ Tercapai')) + '</span>'
@@ -1909,6 +1950,20 @@
           ' · MTBF <b>' + jam(x.mtbf) + '</b> ' + esc(t('jam')) + tgt(x.targetMtbf, true, 'jam') + '</div>' +
           '<div class="tiny muted">' + esc(t('{n}× rusak · downtime {d} jam · jam operasi {h}', { n: x.kerusakan, d: jam(x.downtime), h: jam(x.jamOperasi) })) + '</div></div>';
       }).join('') + '</div>';
+    }
+    if (proc.length) {
+      var avg = proc.filter(function (x) { return x.kunci === 'RATA'; })[0], grp = proc.filter(function (x) { return x.kunci !== 'RATA'; });
+      var label = function (x) { var p = String(x.kunci).split('|'); return p[0] + ' · ' + (p[1] ? L(p[1]) : t('(tanpa proses)')); };
+      html += '<div style="margin-top:14px"><div class="row between"><span class="caps">' + esc(t('Availability per proses')) + '</span>' +
+        (avg ? '<b>' + esc(t('Rata-rata {v}', { v: pct(avg.availability) })) + '</b>' : '') + '</div>' +
+        '<p class="tiny muted" style="margin:4px 0 0">' + esc(t('(Running hour − downtime) ÷ running hour × 100. Running hour = hari operasi × jam per hari, dihitung sekali per proses.')) + '</p>' +
+        '<div class="rank">' + grp.map(function (x) {
+          var v = x.availability == null ? 0 : x.availability;
+          return '<div class="rank-row"><div class="row between small"><span class="grow clamp1">' + esc(label(x)) + '</span><b>' + esc(pct(x.availability)) + '</b></div>' +
+            '<div class="htrack"><div class="hfill" style="width:' + Math.max(2, Math.round(v)) + '%"></div></div>' +
+            '<div class="tiny muted">' + esc(t('{n}× rusak · downtime {d} jam · running hour {h} jam', { n: x.kerusakan, d: jam(x.downtime), h: jam(x.jamOperasi) })) +
+            (x.lebih ? ' · <span style="color:var(--warn)">' + esc(t('downtime lebih besar dari running hour (cek pending lama)')) + '</span>' : '') + '</div></div>';
+        }).join('') + '</div></div>';
     }
     (k.warn || []).forEach(function (w) { html += '<p class="tiny" style="color:var(--warn);margin:8px 0 0">' + esc(w) + '</p>'; });
     var au = k.audit;

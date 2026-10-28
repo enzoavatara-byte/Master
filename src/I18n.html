@@ -282,6 +282,26 @@ I18N.zh = {
   'Semua line. MTBF = (jam operasi − downtime) ÷ jumlah kerusakan. Angka bisa berubah sampai bulan ditutup admin.': '所有产线。MTBF =（运行时间 − 停机时间）÷ 故障次数。管理员关账前数字可能变化。',
   'tanpa kerusakan': '无故障', 'Kerusakan': '故障次数', 'Downtime': '停机时间', 'jam operasi {h}': '运行时间 {h}',
   '{n}× rusak · downtime {d} jam · jam operasi {h}': '故障 {n} 次 · 停机 {d} 小时 · 运行 {h} 小时',
+  // Availability per proses (2.6.9)
+  'Availability per proses': '各工序可用率', 'Rata-rata {v}': '平均 {v}', '(tanpa proses)': '（无工序）',
+  '(Running hour − downtime) ÷ running hour × 100. Running hour = hari operasi × jam per hari, dihitung sekali per proses.':
+    '（运行时间 − 停机时间）÷ 运行时间 × 100。运行时间 = 运行天数 × 每日小时数，每个工序只计一次。',
+  '{n}× rusak · downtime {d} jam · running hour {h} jam': '故障 {n} 次 · 停机 {d} 小时 · 运行 {h} 小时',
+  'downtime lebih besar dari running hour (cek pending lama)': '停机时间大于运行时间（请检查长期挂起的工作）',
+  // Spreadsheet baru / kosong (2.6.9)
+  'Belum ada line di aplikasi. Minta admin mengisi tab Lines dan mencetak QR.': '应用中还没有产线。请管理员填写 Lines 标签页并打印二维码。',
+  'Mulai dari spreadsheet kosong': '从空白表格开始', 'Belum ada line dan sparepart.': '还没有产线和备件。', 'Belum ada line.': '还没有产线。',
+  'Belum ada sparepart.': '还没有备件。',
+  'Isi tab di Google Sheet berurutan. Baris abu-abu "CONTOH" menunjukkan cara mengisi dan diabaikan aplikasi — timpa (Aktif = Ya) atau hapus.':
+    '请按顺序填写 Google 表格中的标签页。灰色的 "CONTOH"（示例）行说明填写方法，应用会忽略它们——可直接覆盖（Aktif = Ya）或删除。',
+  'Factory: ID & nama factory.': 'Factory：工厂编号和名称。', 'Projects: baterai per factory (+ target MTTR / MTBF bila ada).': 'Projects：各工厂的电池项目（如有，填写 MTTR / MTBF 目标）。',
+  'Lines: satu baris = satu line / mesin ber-QR; isi Proses (Modul Line / Pack Line / Pre-Assy).': 'Lines：一行 = 一条带二维码的产线 / 设备；填写工序（Modul Line / Pack Line / Pre-Assy）。',
+  'Sparepart: paste daftar part (kode part di kolom Model).': 'Sparepart：粘贴备件清单（备件编码写在 Model 列）。',
+  'Users: email, nama, Peran (Teknisi / Admin).': 'Users：邮箱、姓名、角色（Teknisi / Admin）。',
+  'Config: jam & hari operasi, target, tanggal libur.': 'Config：运行时间和天数、目标、节假日。',
+  'Menu MTTR → Cetak QR, tempel di line.': '菜单 MTTR → 打印二维码，贴在产线上。',
+  'Uji 1 pekerjaan dari HP, lalu menu MTTR → Hapus data testing.': '用手机测试 1 项工作，然后菜单 MTTR → 删除测试数据。',
+  'Server sedang sibuk (banyak teknisi menekan bersamaan). Dicoba lagi otomatis…': '服务器繁忙（多名技术员同时操作）。正在自动重试…',
   '{m} sudah ditutup {d} oleh {n}.': '{m} 已于 {d} 由 {n} 关账。', 'otomatis': '系统自动',
   'Ditutup otomatis tanggal {d} bila tidak ada review.': '若无待审核项，将于 {d} 日自动关账。',
   '{n} cancel setelah >30 menit kerja (cek alasannya di Riwayat)': '{n} 项在工作 30 分钟以上后取消（请在历史中查看原因）',

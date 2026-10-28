@@ -14,7 +14,10 @@ var BACKUP_UMUR_HARI_ = 35;
 var BACKUP_RE_ = /^Backup (minggu|bulan) (\d{4})-(\d{2})(?:-(\d{2}))?$/;
 
 /** Trigger harian. @return {string[]} tab yang dibuat */
-function backupTerjadwal() { return backupJalan_(new Date(), false); }
+function backupTerjadwal() {
+  try { var made = backupJalan_(new Date(), false); sehatCatat_('backup', { at: new Date().toISOString(), gagal: '' }); return made; }
+  catch (e) { sehatCatat_('backup', { at: new Date().toISOString(), gagal: String(e && e.message || e) }); throw e; }
+}
 
 /** Menu admin: buat ulang tab minggu lalu & bulan lalu sekarang (walau sudah pernah dibuat / sudah dihapus). */
 function menuBackupSekarang() {

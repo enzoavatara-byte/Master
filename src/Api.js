@@ -585,6 +585,9 @@ function apiDashboard(f) {
   });
 
   var warnings = isAdmin_(user) ? md.warnings.slice(0, 30) : [];
+  if (isAdmin_(user)) {   // 2.6.9: trigger malam / cek timeout / backup yang gagal atau tidak jalan
+    try { warnings = sehatPeringatan_(PropertiesService.getDocumentProperties().getProperties(), c.now).concat(warnings); } catch (e) { /* abaikan */ }
+  }
   if (isAdmin_(user)) {   // 2.6.6: tab backup menumpuk = file makin penuh (batas 10 juta sel)
     var lama = backupLama_(c.now);
     if (lama.length) warnings.unshift(lama.length + ' tab backup lebih dari ' + BACKUP_UMUR_HARI_ + ' hari belum dihapus (' + lama.slice(0, 3).join(', ') +

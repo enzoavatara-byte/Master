@@ -8,16 +8,25 @@
  *   × JAM_OPERASI_PER_HARI × jumlah line (line aktif + line yang rusak di bulan itu). Line yang melayani beberapa project
  *   dihitung penuh di setiap project itu.
  * - MTBF (jam) = (jam operasi − downtime) ÷ kerusakan. Tanpa kerusakan → kosong (target MTBF dianggap tercapai).
+ * - 2.6.9 Availability (%) = (running hour − downtime) ÷ running hour × 100, per factory × proses (rumus manajer).
+ *   Running hour dihitung SEKALI per proses (hari operasi × jam per hari), bukan × jumlah line; downtime = jumlah downtime
+ *   semua line proses itu. Baris "Rata-rata semua proses" = rata-rata biasa semua kelompok. Per line juga dihitung
+ *   (running hour satu line), supaya terlihat line mana yang menurunkan prosesnya. Downtime > running hour → 0 % (lebih).
  * - Tutup bulan (admin): angka bulan itu disalin ke sheet tersembunyi "KPI data"; sejak itu bulan tersebut selalu diambil
  *   dari salinan, jadi edit data lama tidak mengubah KPI yang sudah dilaporkan. Tutup ulang = salinan diganti + dicatat di Log.
  */
 
 var KPI_PREFIX_ = 'KPI ';
-var KPI_LEVEL_ = { PLANT: 'Plant', PROJECT: 'Project', LINE: 'Line' };
-/** Kolom tab KPI <tahun> (judul dua bahasa). Urutan dipakai rumus Ringkasan: A = Bulan, B = Level, G = Downtime, I = MTBF. */
+var KPI_LEVEL_ = { PLANT: 'Plant', PROJECT: 'Project', PROSES: 'Proses', LINE: 'Line' };
+var KPI_RATA_ = 'Rata-rata semua proses · 所有工序平均';   // baris rata-rata Availability (level Proses, kunci RATA)
+/**
+ * Kolom tab KPI <tahun> (judul dua bahasa). Urutan dipakai rumus Ringkasan: A = Bulan, B = Level, C = Nama, G = Downtime,
+ * H = Jam operasi, I = MTBF, M = Availability (2.6.9, kolom terakhir).
+ */
 var KPI_HEADERS_ = [['Bulan', '月份'], ['Level', '层级'], ['Nama', '名称'], ['Kerusakan', '故障次数'], ['MTTR (menit)', '平均修复时间（分钟）'],
   ['Target MTTR (menit)', '目标（分钟）'], ['Downtime (jam)', '停机时间（小时）'], ['Jam operasi', '运行时间（小时）'],
-  ['MTBF (jam)', '平均故障间隔（小时）'], ['Target MTBF (jam)', '目标（小时）'], ['Tercapai', '达标'], ['Status', '状态']];
+  ['MTBF (jam)', '平均故障间隔（小时）'], ['Target MTBF (jam)', '目标（小时）'], ['Tercapai', '达标'], ['Status', '状态'],
+  ['Availability (%)', '可用率（%）']];
 var HARI_ = { min: 0, sen: 1, sel: 2, rab: 3, kam: 4, jum: 5, sab: 6, sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 
 function kpiName_(year) { return KPI_PREFIX_ + year; }
@@ -89,6 +98,11 @@ function kpiDays_(year, month, s, now) {
 
 // ---------- hitung ----------
 
+/** Nama baris Availability satu kelompok (dipakai juga rumus Ringkasan, harus sama persis). */
+function kpiProsesNama_(factory, proses) { return (factory || '–') + ' · ' + (proses || '(tanpa proses)'); }
+
+function kpiAvail_(jam, down) { return jam > 0 ? Math.max(0, Math.round((jam - down) / jam * 1000) / 10) : null; }
+
 function kpiTercapai_(x) {
   if (x.targetMttr == null && x.targetMtbf == null) return '';
   var bad = [];
@@ -100,14 +114,16 @@ function kpiTercapai_(x) {
 /**
  * Angka KPI satu bulan.
  * @param {Object[]} rows pekerjaan (Maintenance [+ Arsip]); yang final di bulan itu saja yang dipakai
- * @param {{levels?:string[]}=} opts levels bawaan: Plant, Project, Line
- * @return {Object[]} {bulan, level, kunci, nama, kerusakan, mttr, targetMttr, downtime, jamOperasi, mtbf, targetMtbf, tercapai}
+ * @param {{levels?:string[]}=} opts levels bawaan: Plant, Project, Proses, Line
+ * @return {Object[]} {bulan, level, kunci, nama, kerusakan, mttr, targetMttr, downtime, jamOperasi, mtbf, targetMtbf, tercapai,
+ *   availability, lebih}
  */
 function computeKpi_(year, month, rows, md, s, now, opts) {
-  var key = ymKey_(year, month), L = KPI_LEVEL_, levels = (opts && opts.levels) || [L.PLANT, L.PROJECT, L.LINE];
+  var key = ymKey_(year, month), L = KPI_LEVEL_, levels = (opts && opts.levels) || [L.PLANT, L.PROJECT, L.PROSES, L.LINE];
   var perLine = kpiDays_(year, month, s, now) * s.hours;
   var blank = function () { return { n: 0, act: 0, down: 0, lines: {} }; };
-  var plant = blank(), byBat = {}, byLine = {};
+  var plant = blank(), byBat = {}, byLine = {}, byProc = {}, procOf = {};
+  var procKey = function (f, p) { var k = f + '|' + p; procOf[k] = procOf[k] || { factory: f, proses: p }; return k; };
   rows.forEach(function (r) {
     var st = r['Status'];
     if (r['Masuk MTTR'] !== APP.MTTR.YES || (st !== APP.STATUS.COMPLETED && st !== APP.STATUS.ABANDONED)) return;
@@ -117,7 +133,9 @@ function computeKpi_(year, month, rows, md, s, now, opts) {
     var down = r['Stop line'] === APP.YES && r['Selesai'] instanceof Date && r['Mulai'] instanceof Date
       ? Math.max(0, r['Selesai'].getTime() - r['Mulai'].getTime()) / 3600000 : 0;
     var line = String(r['Line'] || '').trim(), bat = String(r['Baterai'] || '').trim();
-    [plant, bat ? (byBat[bat] = byBat[bat] || blank()) : null, line ? (byLine[line] = byLine[line] || blank()) : null].forEach(function (o) {
+    var pk = procKey(factoryOfRecord_(md, r), prosesOfRecord_(md, r));
+    [plant, bat ? (byBat[bat] = byBat[bat] || blank()) : null, line ? (byLine[line] = byLine[line] || blank()) : null,
+      byProc[pk] = byProc[pk] || blank()].forEach(function (o) {
       if (!o) return;
       o.n++; o.act += act; o.down += down;
       if (line) o.lines[line] = true;
@@ -134,9 +152,11 @@ function computeKpi_(year, month, rows, md, s, now, opts) {
     var jam = round2_(perLine * nLines);
     var x = { bulan: key, level: level, kunci: kunci, nama: nama, kerusakan: o.n, mttr: o.n ? round2_(o.act / o.n) : null,
       targetMttr: tm == null ? null : tm, downtime: round2_(o.down), jamOperasi: jam,
-      mtbf: o.n && jam > 0 ? round2_(Math.max(0, jam - o.down) / o.n) : null, targetMtbf: tb == null ? null : tb };
+      mtbf: o.n && jam > 0 ? round2_(Math.max(0, jam - o.down) / o.n) : null, targetMtbf: tb == null ? null : tb, availability: null };
     x.tercapai = kpiTercapai_(x);
+    if (level === L.PROSES || level === L.LINE) { x.availability = kpiAvail_(jam, o.down); x.lebih = jam > 0 && o.down > jam; }
     out.push(x);
+    return x;
   };
   if (levels.indexOf(L.PLANT) !== -1) add(L.PLANT, 'PLANT', appName_(), plant, lineCount(plant, active), null, null);
   if (levels.indexOf(L.PROJECT) !== -1) {
@@ -152,6 +172,20 @@ function computeKpi_(year, month, rows, md, s, now, opts) {
       var pool = active.filter(function (k) { return md.lines[k].batteries.indexOf(b) !== -1; });
       add(L.PROJECT, b, b, o, lineCount(o, pool), tgt[b].mttr, tgt[b].mtbf);
     });
+  }
+  if (levels.indexOf(L.PROSES) !== -1) {   // 2.6.9: running hour sekali per (factory, proses)
+    active.forEach(function (k) { procKey(md.lines[k].factory, md.lines[k].proses); });
+    var all = blank(), avail = [], groups = Object.keys(procOf).sort(function (a, b) { return a.localeCompare(b, undefined, { numeric: true }); });
+    groups.forEach(function (k) {
+      var g = procOf[k], o = byProc[k] || blank(), x = add(L.PROSES, k, kpiProsesNama_(g.factory, g.proses), o, 1, null, null);
+      all.n += o.n; all.act += o.act; all.down += o.down;
+      if (x.availability != null) avail.push(x.availability);
+    });
+    if (groups.length) {
+      out.push({ bulan: key, level: L.PROSES, kunci: 'RATA', nama: KPI_RATA_, kerusakan: all.n, mttr: all.n ? round2_(all.act / all.n) : null,
+        targetMttr: null, downtime: round2_(all.down), jamOperasi: round2_(perLine * groups.length), mtbf: null, targetMtbf: null, tercapai: '',
+        availability: avail.length ? Math.round(avail.reduce(function (a, v) { return a + v; }, 0) / avail.length * 10) / 10 : null, lebih: false });
+    }
   }
   if (levels.indexOf(L.LINE) !== -1) {
     var keys = {};
@@ -185,7 +219,8 @@ function kpiClosed_() {
     var m = out[b] = out[b] || { rows: [], at: r['Ditutup pada'], by: String(r['Ditutup oleh'] || '').toLowerCase() };
     m.rows.push({ bulan: b, level: String(r['Level']), kunci: String(r['Kunci']), nama: String(r['Nama']), kerusakan: num(r['Kerusakan']) || 0,
       mttr: num(r['MTTR (menit)']), targetMttr: num(r['Target MTTR (menit)']), downtime: num(r['Downtime (jam)']) || 0,
-      jamOperasi: num(r['Jam operasi']) || 0, mtbf: num(r['MTBF (jam)']), targetMtbf: num(r['Target MTBF (jam)']), tercapai: String(r['Tercapai'] || '') });
+      jamOperasi: num(r['Jam operasi']) || 0, mtbf: num(r['MTBF (jam)']), targetMtbf: num(r['Target MTBF (jam)']), tercapai: String(r['Tercapai'] || ''),
+      availability: num(r['Availability (%)']) });
   });
   return out;
 }
@@ -215,7 +250,7 @@ function writeKpiSnapshot_(key, list, now, email) {
   var fresh = list.map(function (x) {
     return objToRow_(h, { 'Bulan': x.bulan, 'Level': x.level, 'Kunci': x.kunci, 'Nama': x.nama, 'Kerusakan': x.kerusakan, 'MTTR (menit)': nz(x.mttr),
       'Target MTTR (menit)': nz(x.targetMttr), 'Downtime (jam)': x.downtime, 'Jam operasi': x.jamOperasi, 'MTBF (jam)': nz(x.mtbf),
-      'Target MTBF (jam)': nz(x.targetMtbf), 'Tercapai': x.tercapai, 'Ditutup pada': now, 'Ditutup oleh': email });
+      'Target MTBF (jam)': nz(x.targetMtbf), 'Tercapai': x.tercapai, 'Ditutup pada': now, 'Ditutup oleh': email, 'Availability (%)': nz(x.availability) });
   });
   var all = keep.concat(fresh);
   if (vals.length > 1) sh.getRange(2, 1, vals.length - 1, Math.max(w, vals[0].length)).clearContent();
@@ -287,7 +322,8 @@ function buildKpi_(year) {
     var status = c ? 'Ditutup ' + (c.at instanceof Date ? fmtTz_(c.at, 'dd/MM/yyyy') : String(c.at || '')) + ' oleh ' + closerName_(names, c.by)
       : (key === cur ? 'Berjalan' : 'Belum ditutup');
     (c ? c.rows : computeKpi_(year, m, rows, md, s, now)).forEach(function (x) {
-      data.push([x.bulan, x.level, x.nama, x.kerusakan, nz(x.mttr), nz(x.targetMttr), x.downtime, x.jamOperasi, nz(x.mtbf), nz(x.targetMtbf), x.tercapai, status]);
+      data.push([x.bulan, x.level, x.nama, x.kerusakan, nz(x.mttr), nz(x.targetMttr), x.downtime, x.jamOperasi, nz(x.mtbf), nz(x.targetMtbf), x.tercapai, status,
+        nz(x.availability)]);
     });
   });
   var name = kpiName_(year), ss = SpreadsheetApp.getActive();
@@ -307,18 +343,21 @@ function writeKpiSheet_(sh, data) {
   }
   forgetHeaders_(sh.getName());
   var wide = {};
-  wide[head[0]] = 80; wide[head[1]] = 80; wide[head[2]] = 230; wide[head[11]] = 210;
+  wide[head[0]] = 80; wide[head[1]] = 80; wide[head[2]] = 230; wide[head[11]] = 210; wide[head[12]] = 110;
   styleTable_(sh, { filter: true, wide: wide }, true);
   sh.setFrozenColumns(3);
   var n = Math.max(sh.getMaxRows(), 2) - 1;
-  [[4, '0'], [5, '0'], [6, '0'], [7, '0.0'], [8, '0'], [9, '0.0'], [10, '0.0']].forEach(function (f) { sh.getRange(2, f[0], n, 1).setNumberFormat(f[1]); });
+  [[4, '0'], [5, '0'], [6, '0'], [7, '0.0'], [8, '0'], [9, '0.0'], [10, '0.0'], [13, '0.0']].forEach(function (f) { sh.getRange(2, f[0], n, 1).setNumberFormat(f[1]); });
   var rule = function () { return SpreadsheetApp.newConditionalFormatRule(); };
   var ok = TEMA_.status.Completed, bad = TEMA_.status.Abandoned;
   sh.setConditionalFormatRules(sh.getConditionalFormatRules().concat([
     rule().whenTextStartsWith('✓').setBackground(ok[0]).setFontColor(ok[1]).setBold(true).setRanges([sh.getRange(2, 11, n, 1)]).build(),
     rule().whenTextStartsWith('✗').setBackground(bad[0]).setFontColor(bad[1]).setBold(true).setRanges([sh.getRange(2, 11, n, 1)]).build(),
     rule().whenFormulaSatisfied(fx_('=$B2="' + KPI_LEVEL_.PLANT + '"')).setBackground(TEMA_.section).setBold(true).setRanges([sh.getRange(2, 1, n, w)]).build(),
-    rule().whenFormulaSatisfied(fx_('=$B2="' + KPI_LEVEL_.PROJECT + '"')).setBold(true).setRanges([sh.getRange(2, 1, n, w)]).build()
+    rule().whenFormulaSatisfied(fx_('=$B2="' + KPI_LEVEL_.PROJECT + '"')).setBold(true).setRanges([sh.getRange(2, 1, n, w)]).build(),
+    rule().whenFormulaSatisfied(fx_('=AND($B2="' + KPI_LEVEL_.PROSES + '",$C2="' + KPI_RATA_ + '")')).setBackground(TEMA_.section).setBold(true)
+      .setRanges([sh.getRange(2, 1, n, w)]).build(),
+    rule().whenFormulaSatisfied(fx_('=$B2="' + KPI_LEVEL_.PROSES + '"')).setBold(true).setRanges([sh.getRange(2, 13, n, 1)]).build()
   ]));
 }
 
@@ -384,10 +423,10 @@ function closerName_(names, by) {
   return by === APP.SYSTEM_USER.toLowerCase() ? 'otomatis' : (names[by] || by);
 }
 
-/** Kartu KPI Dashboard: bulan berjalan (Plant + project) dari baris Maintenance yang sudah dibaca. Admin: status bulan lalu. */
+/** Kartu KPI Dashboard: bulan berjalan (Plant + project + Availability per proses) dari baris Maintenance yang sudah dibaca. Admin: status bulan lalu. */
 function kpiDashboard_(user, rows, md, now, names) {
   var s = kpiSettings_(), y = yearOf_(now), m = monthOf_(now), key = ymKey_(y, m);
-  var out = { bulan: key, label: ymLabel_(key), rows: computeKpi_(y, m, rows, md, s, now, { levels: [KPI_LEVEL_.PLANT, KPI_LEVEL_.PROJECT] }),
+  var out = { bulan: key, label: ymLabel_(key), rows: computeKpi_(y, m, rows, md, s, now, { levels: [KPI_LEVEL_.PLANT, KPI_LEVEL_.PROJECT, KPI_LEVEL_.PROSES] }),
     hours: s.hours, warn: s.warn };
   if (isAdmin_(user)) {
     var pk = m === 1 ? ymKey_(y - 1, 12) : ymKey_(y, m - 1);

@@ -168,8 +168,7 @@ function tabPlan_(ss) {
   ss.getSheets().map(function (sh) { return sh.getName(); }).filter(function (n) { return BACKUP_RE_.test(n); }).sort().forEach(function (n) { add(n, 'arsip'); });
   add(laporanName_(y), 'laporan'); add(kpiName_(y), 'laporan');
   var md = masterData_();   // Maintenance <baterai> = Laporan per project (2.6.1): setelah Laporan & KPI
-  (md.allBatteries.length ? md.allBatteries : APP.PROJECT_DEFAULTS.map(function (p) { return p[1]; }))
-    .forEach(function (b) { add(S.MAINT + ' ' + b, 'laporan'); });
+  md.allBatteries.forEach(function (b) { add(S.MAINT + ' ' + b, 'laporan'); });
   ss.getSheets().map(function (sh) { return sh.getName(); }).filter(function (n) { return n.indexOf(TPM_PREFIX_) === 0; }).sort()
     .forEach(function (n) { add(n, 'laporan'); });
   add(S.SARAN, 'laporan');
@@ -229,7 +228,7 @@ function manualSpec_() {
 }
 
 function tableSpecs_() {
-  var S = APP.SHEETS, YT = [APP.YES, APP.NO], spec = {};
+  var S = APP.SHEETS, YT = [APP.YES, APP.NO], spec = {}, md = masterData_();
   var mins = ['Total aktif (menit)', 'Total pause (menit)', 'Total pending (menit)'];
   spec[S.MAINT] = {
     filter: true, clip: true, freezeCols: 2, status: 'Status', late: ['Tenggat', 'Status'], ints: mins,
@@ -250,6 +249,13 @@ function tableSpecs_() {
   [S.LINES, S.MESIN, S.SPAREPART, S.OPTIONS].forEach(function (n) { spec[n] = { filter: true, off: 'Aktif', dropdowns: { 'Aktif': YT } }; });
   spec[S.OPTIONS].dropdowns['Discipline'] = APP.TPM_DISCIPLINES;
   spec[S.LINES].hide = ['Alias', 'Grup'];   // kolom lama (sebelum 2.6), tidak dipakai lagi
+  // 2.6.9: dropdown dari isi master (peringatan saja, ketikan lain tetap boleh) supaya ejaan Factory / Proses / Jenis tidak meleset
+  var fac = md.factories.map(function (f) { return f.id; });
+  spec[S.LINES].dropdowns['Factory ID'] = fac; spec[S.PROJECTS].dropdowns['Factory ID'] = fac;
+  spec[S.LINES].dropdowns['Proses'] = md.options['Proses'] || [];
+  spec[S.SPAREPART].dropdowns['Jenis Sparepart'] = md.options['Jenis Kerusakan'] || [];
+  var contoh = 'Baris dengan Aktif = Contoh (abu-abu miring) hanya contoh cara mengisi dan diabaikan aplikasi. Timpa dengan data asli lalu isi Aktif = Ya, atau hapus barisnya.';
+  [S.FACTORY, S.PROJECTS, S.LINES, S.SPAREPART].forEach(function (n) { spec[n].notes = { 'Aktif': contoh }; spec[n].contoh = true; });
   spec[S.FORM] = { filter: true, off: 'Aktif', wide: { 'Label': 230, 'Label (中文)': 160 },
     dropdowns: { 'Tipe': ['pilihan', 'teks', 'angka', 'sistem'], 'Wajib': YT, 'Lainnya isi sendiri': YT, 'Aktif': YT } };
   spec[S.PANDUAN] = { off: 'Aktif', wrap: ['Isi'], dropdowns: { 'Untuk': ['Teknisi', 'Admin', 'Semua'], 'Aktif': YT } };
@@ -296,7 +302,7 @@ function styleTable_(sh, o, full) {
   (o.plain || []).forEach(function (n) { if (col(n)) body(col(n)).setNumberFormat('@'); });   // teks apa adanya (tanggal/jam ketikan admin)
   Object.keys(o.notes || {}).forEach(function (n) { if (col(n)) sh.getRange(1, col(n)).setNote(o.notes[n]); });
   Object.keys(o.dropdowns || {}).forEach(function (n) {
-    if (!col(n)) return;
+    if (!col(n) || !o.dropdowns[n].length) return;
     body(col(n)).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(o.dropdowns[n], true).setAllowInvalid(true).build());
   });
   (o.hide || []).forEach(function (n) { if (col(n)) sh.hideColumns(col(n)); });
@@ -338,6 +344,8 @@ function tableRules_(sh, h, o, max) {
   var oc = h.indexOf(o.off) + 1;
   if (o.off && oc) {
     rules.push(rule().whenFormulaSatisfied(fx_('=$' + colLetter_(oc) + '2="' + APP.NO + '"')).setFontColor(TEMA_.off)
+      .setRanges([sh.getRange(2, 1, max - 1, h.length)]).build());
+    if (o.contoh) rules.push(rule().whenFormulaSatisfied(fx_('=$' + colLetter_(oc) + '2="' + APP.CONTOH_AKTIF + '"')).setFontColor(TEMA_.off).setItalic(true)
       .setRanges([sh.getRange(2, 1, max - 1, h.length)]).build());
   }
   return rules;
@@ -581,6 +589,28 @@ function buildRingkasan_(ss) {
   });
   if (!projects.length) { put(r, 2, '(belum ada project di sheet Projects)'); r++; }
   fmt.push(['table', pHead, r - 1, 7]);
+  r++;
+
+  // 2.6.9 Availability per factory × proses (dari tab KPI kolom M; running hour sekali per proses) + rata-rata
+  put(r, 2, 'Availability per proses bulan ini  ·  本月各工序可用率   (running hour − downtime) ÷ running hour × 100'); fmt.push(['sub', r]); r++;
+  ['Factory · Proses 工厂·工序', 'Availability (%) 可用率', 'Downtime (jam) 停机时间', 'Running hour (jam) 运行时间'].forEach(function (t, i) { put(r, 2 + i, t); });
+  var aHead = r; r++;
+  var kpiOf = function (col, nama) {
+    return '=IFERROR(INDEX(FILTER(' + KP(col) + ',' + KP('A') + '=' + YM + ',' + KP('B') + '="' + KPI_LEVEL_.PROSES + '",' + KP('C') + '="' +
+      String(nama).replace(/"/g, '""') + '",' + KP(col) + '<>""),1),"–")';
+  };
+  var grp = {};
+  Object.keys(md.lines).forEach(function (k) { var l = md.lines[k]; if (l.active) grp[l.factory + '|' + l.proses] = kpiProsesNama_(l.factory, l.proses); });
+  var names = Object.keys(grp).sort(function (a, b) { return a.localeCompare(b, undefined, { numeric: true }); }).map(function (k) { return grp[k]; });
+  if (names.length) names.push(KPI_RATA_);
+  names.forEach(function (nama) {
+    put(r, 2, nama);
+    put(r, 3, kpiOf('M', nama)); put(r, 4, kpiOf('G', nama)); put(r, 5, kpiOf('H', nama));
+    fmt.push(['num', r, 3, 1, '0.0']); fmt.push(['num', r, 4, 1, '0.0']); fmt.push(['num', r, 5, 1, '0']);
+    r++;
+  });
+  if (!names.length) { put(r, 2, '(belum ada line aktif di sheet Lines)'); r++; }
+  fmt.push(['table', aHead, r - 1, 4]);
   r++;
 
   // jenis kerusakan (selesai bulan ini), urut terbanyak → grafik batang

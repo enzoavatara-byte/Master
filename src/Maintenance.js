@@ -86,7 +86,12 @@ function conflictMsg_(r, names) {
 }
 
 /** Format ID: <LINE>-<yyMMdd>-<NN>, nomor urut per line per hari. Dipanggil di dalam lock. */
-function newMaintenanceId_(rows, lineId, now) {
+/**
+ * ID baru = line + tanggal + urutan. `rows` = ekor tab (readHot_) atau seluruh tab (`full`, Input Manual).
+ * 2.6.9: tab yang diurutkan / disaring admin bisa membuat ID hari ini tidak ada di ekor → ID calon dicek ke server
+ * (TextFinder kolom ID, ±0,1 dtk, masih sebelum tulisan pertama → tidak ada kirim-terpaksa) dan dinaikkan sampai belum dipakai.
+ */
+function newMaintenanceId_(rows, lineId, now, full) {
   var prefix = normLine_(lineId) + '-' + fmtTz_(now, 'yyMMdd') + '-';
   var max = 0;
   rows.forEach(function (r) {
@@ -96,8 +101,29 @@ function newMaintenanceId_(rows, lineId, now) {
       if (n > max) max = n;
     }
   });
+  var make = function (n) { return prefix + (n < 10 ? '0' : '') + n; };
   var next = max + 1;
-  return prefix + (next < 10 ? '0' : '') + next;
+  if (!full) {
+    var used = idTerpakai_(make(next));
+    if (used) {   // ekor tidak lengkap: lompat ke jumlah ID berawalan sama, lalu cari yang kosong
+      next = Math.max(next, idTerpakai_('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\d+$', true) + 1);
+      for (var guard = 0; guard < 200 && idTerpakai_(make(next)); guard++) next++;
+    }
+  }
+  return make(next);
+}
+
+/** Jumlah sel kolom Maintenance ID yang persis `text` (atau cocok regex). Gagal membaca → 0 (perilaku lama). */
+function idTerpakai_(text, regex) {
+  try {
+    var sh = sheet_(APP.SHEETS.MAINT), last = sh.getLastRow();
+    if (last < 2) return 0;
+    var c = headers_(sh, APP.SHEETS.MAINT).indexOf('Maintenance ID');
+    if (c < 0) return 0;
+    var f = sh.getRange(2, c + 1, last - 1, 1).createTextFinder(text).matchEntireCell(true);
+    if (regex) f = f.useRegularExpression(true);
+    return f.findAll().length;
+  } catch (e) { return 0; }
 }
 
 /** Baterai terakhir yang dipakai di line ini (default pilihan saat Mulai). */
@@ -606,6 +632,11 @@ function apiAct(fn, args, rid) {
  *    peringatan -> Abandoned. Syarat kedua mencegah Abandoned tanpa sempat diperingatkan bila trigger telat.
  */
 function checkTimeouts() {
+  try { var res = checkTimeoutsJalan_(); sehatCatat_('timeout', { at: new Date().toISOString(), gagal: '' }); return res; }
+  catch (e) { sehatCatat_('timeout', { at: new Date().toISOString(), gagal: String(e && e.message || e) }); throw e; }
+}
+
+function checkTimeoutsJalan_() {
   resetMaster_();
   var lim = getLimits_();
   var graceMs = (lim.abandonHours - lim.warnHours) * 3600000;

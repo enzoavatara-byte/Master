@@ -98,6 +98,25 @@ class Range {
     this.sh.filter = f;
     return f;
   }
+  // Range.sort([{column, ascending}]) seperti Sheets: sel kosong di kolom urut selalu di bawah; urutan stabil
+  sort(specs) {
+    specs = (Array.isArray(specs) ? specs : [specs]).map(x => (typeof x === 'number' ? { column: x, ascending: true } : x));
+    this.sh.sorts = (this.sh.sorts || 0) + 1;
+    const rows = this.getValues(), key = (v) => (v instanceof Date ? v.getTime() : v);
+    const idx = rows.map((r, i) => i).sort((a, b) => {
+      for (const sp of specs) {
+        const va = key(rows[a][sp.column - this.c]), vb = key(rows[b][sp.column - this.c]);
+        const ea = va === '' || va == null, eb = vb === '' || vb == null;
+        if (ea !== eb) return ea ? 1 : -1;
+        if (ea || va === vb) continue;
+        const d = (typeof va === 'number' && typeof vb === 'number') ? va - vb : String(va).localeCompare(String(vb));
+        if (d) return sp.ascending === false ? -d : d;
+      }
+      return a - b;
+    });
+    this.setValues(idx.map(i => rows[i]));
+    return this;
+  }
   setDataValidation(rule) { this.sh.validations.push({ range: this, rule }); return this; }
   clearDataValidations() { this.sh.validations = []; return this; }
 }
@@ -330,4 +349,25 @@ fs.readdirSync(srcDir).filter(f => f.endsWith('.js')).sort().reverse() // urutan
   .forEach(f => vm.runInContext(fs.readFileSync(path.join(srcDir, f), 'utf8'), ctx, { filename: f }));
 
 
-module.exports = { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache, ui, docProps };
+/**
+ * 2.6.9: setup di spreadsheet kosong menulis baris CONTOH (diabaikan aplikasi), bukan lagi factory / project / sparepart
+ * bawaan. Test & data contoh lama memakai isi bawaan versi sebelumnya: panggil SEBELUM setup() pertama.
+ */
+const BAWAAN_LAMA_ = {
+  Factory: [['F1', 'Factory 1', ''], ['F2', 'Factory 2', '']].map(f => ({ 'Factory ID': f[0], 'Nama': f[1], 'Lokasi': f[2], 'Aktif': 'Ya' })),
+  Projects: [['F1', 'VF7'], ['F1', 'Limo7'], ['F2', 'E22H'], ['F2', 'E245']].map(p => ({ 'Factory ID': p[0], 'Baterai': p[1], 'Fase': '', 'Aktif': 'Ya' })),
+  Sparepart: [['Elektrikal', 'Motor Listrik', 'ABB M2QA 0,75kW', 'pcs'], ['Elektrikal', 'Sensor Proximity', 'Omron E2E-X5ME1', 'pcs'],
+    ['Elektrikal', 'Relay', 'Omron MY2N 24VDC', 'pcs'], ['Elektrikal', 'Fuse', '10A', 'pcs'],
+    ['Mekanikal', 'Bearing', '6205-2RS', 'pcs'], ['Mekanikal', 'Bearing', '6204-ZZ', 'pcs'], ['Mekanikal', 'Timing Belt', 'HTD 5M-450', 'pcs'],
+    ['Pneumatik', 'Silinder', 'SMC CQ2B32-50D', 'pcs'], ['Pneumatik', 'Selang PU', '8 mm', 'meter'], ['Pneumatik', 'Solenoid Valve', 'SMC SY5120', 'pcs'],
+    ['Program', 'Backup Program PLC', '', 'kali']].map((p, i) => ({ 'Jenis Sparepart': p[0], 'Nama Sparepart': p[1], 'Model': p[2], 'Satuan': p[3], 'Urutan': i + 1, 'Aktif': 'Ya' }))
+};
+function bawaanLama() {
+  Object.keys(BAWAAN_LAMA_).forEach((n) => {
+    const h = ctx.APP.HEADERS[n], sh = ss.getSheetByName(n) || ss.insertSheet(n);
+    sh.data = [h.slice()].concat(BAWAAN_LAMA_[n].map(o => h.map(k => (o[k] === undefined ? '' : o[k]))));
+  });
+  docProps.setProperty('MTTR_CONTOH_DONE', JSON.stringify({ Factory: true, Projects: true, Lines: true, Sparepart: true }));   // tanpa baris CONTOH
+}
+
+module.exports = { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache, ui, docProps, bawaanLama };

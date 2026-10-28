@@ -139,23 +139,88 @@ function rekapLayout_(year, data) {
  * mengurutkan ulang); di bulan Januari juga tahun lalu. Memakai lock supaya tidak bentrok dengan sinkron langsung.
  */
 function refreshRekap() {
+  // 2.6.9: tiap langkah dicoba walau langkah lain gagal, dan hasilnya dicatat (Dashboard admin memperingatkan bila gagal /
+  // tidak selesai / tidak jalan). Gagal = error di akhir, supaya Google juga mengirim email kegagalan trigger ke pemilik.
+  var t0 = new Date(), gagal = [];
+  sehatCatat_('malam', { mulai: t0.toISOString(), selesai: '', gagal: [] });
+  var langkah = function (nama, fn) {
+    try { fn(); } catch (e) { gagal.push(nama + ': ' + (e && e.message || e)); console.warn(nama + ' gagal (dicoba lagi besok / lewat Dashboard): ' + e); }
+  };
   resetMaster_();
-  withLock_(function () {
-    var now = new Date();
-    var y = yearOf_(now);
-    buildRekap_(y);
-    buildLaporan_(y);
-    if (monthOf_(now) === 1) { buildRekap_(y - 1); buildLaporan_(y - 1); }
+  langkah('Laporan & Rekap', function () {
+    withLock_(function () {
+      var now = new Date();
+      var y = yearOf_(now);
+      try { urutkanMaintenance_(now); } catch (e) { gagal.push('Urut ulang Maintenance: ' + (e && e.message || e)); }
+      buildRekap_(y);
+      buildLaporan_(y);
+      if (monthOf_(now) === 1) { buildRekap_(y - 1); buildLaporan_(y - 1); }
+    }, MALAM_LOCK_MS_);
   });
   // Di luar lock: tab TPM (menerjemahkan teks baru; hasilnya disimpan dengan lock sendiri), lalu format & Ringkasan.
-  try { buildTpm_(); } catch (e) { console.warn('TPM gagal (dicoba lagi besok / lewat Dashboard): ' + e); }
-  try {
+  langkah('TPM', function () { buildTpm_(); });
+  langkah('KPI', function () {
     var y = yearOf_(new Date());
     buildKpi_(y);
     if (monthOf_(new Date()) === 1) buildKpi_(y - 1);   // Januari: KPI Desember tahun lalu masih bisa ditutup
     kpiTutupOtomatis_();
-  } catch (e) { console.warn('KPI gagal (dicoba lagi besok / lewat Dashboard): ' + e); }
-  rapikanTampilan_({});
+  });
+  langkah('Tampilan', function () { rapikanTampilan_({}); });
+  sehatCatat_('malam', { mulai: t0.toISOString(), selesai: new Date().toISOString(), gagal: gagal, dtk: Math.round((Date.now() - t0.getTime()) / 1000) });
+  if (gagal.length) throw new Error('Pembaruan malam gagal sebagian: ' + gagal.join(' · '));
+}
+
+var MALAM_LOCK_MS_ = 120000;   // trigger malam menunggu teknisi shift malam selesai menekan tombol (bukan gagal)
+
+/**
+ * 2.6.9: tab Maintenance diurutkan admin (mis. per Line) → ekor tab bukan lagi pekerjaan terbaru (readHot_, ID baru, layar
+ * line). Malam hari, di dalam lock: bila kolom Mulai tidak urut naik, seluruh tab diurutkan ulang menurut Mulai lalu ID, dan
+ * dicatat di Log. Baris Input Manual yang ditambah di bawah (tanggal mundur) ikut masuk ke tempatnya.
+ * @return {boolean} diurutkan
+ */
+function urutkanMaintenance_(now) {
+  var sh = sheet_(APP.SHEETS.MAINT), last = sh.getLastRow();
+  if (last < 3) return false;
+  var h = headers_(sh, APP.SHEETS.MAINT), cm = h.indexOf('Mulai'), ci = h.indexOf('Maintenance ID');
+  if (cm < 0 || ci < 0) return false;
+  var prev = -Infinity, turun = 0;
+  sh.getRange(2, cm + 1, last - 1, 1).getValues().forEach(function (r) {
+    if (!(r[0] instanceof Date)) return;
+    var t = r[0].getTime();
+    if (t < prev) turun++;
+    else prev = t;
+  });
+  if (!turun) return false;
+  sh.getRange(2, 1, last - 1, sh.getLastColumn()).sort([{ column: cm + 1, ascending: true }, { column: ci + 1, ascending: true }]);
+  log_(now, 'Tab Maintenance', APP.EVENTS.URUT, APP.SYSTEM_USER, 'Tab Maintenance tidak urut (' + turun + ' baris; mis. diurutkan manual atau Input Manual tanggal mundur) → diurutkan ulang menurut Mulai.');
+  return true;
+}
+
+// ---------- 2.6.9 Kesehatan sistem: tugas terjadwal yang gagal / tidak jalan terlihat di Dashboard admin ----------
+var SEHAT_KEY_ = 'MTTR_SEHAT_';   // + malam / timeout / backup (satu kunci per tugas: tidak saling menimpa)
+
+function sehatCatat_(tugas, o) {
+  try { PropertiesService.getDocumentProperties().setProperty(SEHAT_KEY_ + tugas, JSON.stringify(o)); } catch (e) { /* tidak menggagalkan tugasnya */ }
+}
+
+/** Peringatan untuk Dashboard admin. @param {Object<string,string>} props DocumentProperties (sekali baca) */
+function sehatPeringatan_(props, now) {
+  var get = function (k) { try { return JSON.parse(props[SEHAT_KEY_ + k] || 'null'); } catch (e) { return null; } };
+  var tgl = function (iso) { var d = new Date(iso); return isNaN(d.getTime()) ? '?' : fmtTz_(d, 'dd/MM HH:mm'); };
+  var umur = function (iso) { var d = new Date(iso); return isNaN(d.getTime()) ? Infinity : now.getTime() - d.getTime(); };
+  var H = 3600000, out = [], m = get('malam'), t = get('timeout'), b = get('backup');
+  var obat = ' Coba Dashboard → Perbarui Laporan & Rekap; bila berulang: Extensions → Apps Script → Run setup.';
+  if (m) {
+    if (!m.selesai && umur(m.mulai) > 15 * 60000) out.push('Sistem: pembaruan malam ' + tgl(m.mulai) + ' tidak selesai (kemungkinan lewat batas waktu Apps Script 6 menit).' + obat);
+    else if (m.gagal && m.gagal.length) out.push('Sistem: pembaruan malam ' + tgl(m.mulai) + ' gagal sebagian — ' + m.gagal.join(' · ').slice(0, 300) + '.' + obat);
+    if (umur(m.mulai) > 36 * H) out.push('Sistem: pembaruan malam terakhir ' + tgl(m.mulai) + ' (lebih dari sehari lalu) — trigger malam mungkin hilang. Jalankan setup sekali.');
+  }
+  if (t) {
+    if (umur(t.at) > 2 * H) out.push('Sistem: cek pekerjaan lewat waktu terakhir jalan ' + tgl(t.at) + ' — trigger mungkin hilang (pekerjaan lupa ditutup tidak jadi Abandoned). Jalankan setup sekali.');
+    else if (t.gagal) out.push('Sistem: cek pekerjaan lewat waktu gagal ' + tgl(t.at) + ' — ' + String(t.gagal).slice(0, 200));
+  }
+  if (b && b.gagal) out.push('Sistem: tab backup gagal dibuat ' + tgl(b.at) + ' — ' + String(b.gagal).slice(0, 200) + '. Coba menu MTTR → Buat tab backup sekarang.');
+  return out;
 }
 
 // ---------- Sinkron langsung: setiap aksi memperbarui Laporan & Rekap ----------
@@ -397,7 +462,7 @@ var LAP_BAT_KEY_ = 'MTTR_LAP_BAT';   // DocumentProperties: {baterai: {sig, upto
 function buildLaporanBaterai_(year, cols, counts, force) {
   var md = masterData_(), ss = SpreadsheetApp.getActive();
   var nameOf = function (b) { return APP.SHEETS.MAINT + ' ' + b; };
-  var bats = md.allBatteries.length ? md.allBatteries : APP.PROJECT_DEFAULTS.map(function (p) { return p[1]; });
+  var bats = md.allBatteries;   // 2.6.9: tanpa project (spreadsheet baru) = tanpa tab per project
   var tabs = projectTabs_('TAB_BATERAI_DIMATIKAN', nameOf, bats);
   var props = PropertiesService.getDocumentProperties(), memo = {};
   try { memo = JSON.parse(props.getProperty(LAP_BAT_KEY_) || '{}') || {}; } catch (e) { memo = {}; }
@@ -480,7 +545,8 @@ function appendArchive_(name, srcHeaders, srcRows, keyOf) {
 /** Tulis ulang isi sheet hanya dengan baris yang dipertahankan (satu kali tulis, format kolom tetap). */
 function rewriteKeeping_(sh, values, keep) {
   var head = values[0], text = TEXT_SHEETS_.indexOf(sh.getName()) !== -1;
-  var body = values.slice(1).filter(function (row) { return row[0] !== '' && row[0] !== null && keep(row); });
+  var k = keyIdx_(head.map(function (x) { return String(x).trim(); }), sh.getName());   // 2.6.9: kolom kunci menurut nama (kolom disisip admin di A)
+  var body = values.slice(1).filter(function (row) { return row[k] !== '' && row[k] !== null && keep(row); });
   if (text) body = body.map(function (row) { return row.map(cellText_); });   // ditulis ulang: teks "16:53" tidak berubah jadi jam
   var oldN = values.length - 1;
   if (oldN > 0) sh.getRange(2, 1, oldN, head.length).clearContent();

@@ -10,7 +10,7 @@
  *   UJI=bogor2 SEED_PROGRESS=1 node test/seed-tahun.js
  */
 'use strict';
-const { ctx, ss, clock, user } = require('./mock');
+const { ctx, ss, clock, user, bawaanLama } = require('./mock');
 const POLA = require('./data/pola-troublelog.json');
 const LINES = require('./data/lines-bogor.json').lines;
 const BOGOR = process.env.UJI === 'bogor2';
@@ -56,6 +56,7 @@ const monthKey = (ms) => ymd(ms).slice(0, 7);
 
 // ---------- master ----------
 setTime(START - DAY + 8 * H);
+if (!BOGOR) bawaanLama();   // profil 1 tahun: isi bawaan versi sebelumnya. bogor2 (2.6.9): mulai dari spreadsheet kosong + baris CONTOH
 ctx.setup();
 const rowOf = (sheet, obj) => ctx.objToRow_(ss.getSheetByName(sheet).data[0].map(h => String(h).trim()), obj);
 const tableOf = (sheet, objs) => { const sh = ss.getSheetByName(sheet); sh.data = [sh.data[0]].concat(objs.map(o => rowOf(sheet, o))); };

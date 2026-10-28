@@ -89,11 +89,26 @@ function headers_(sh, key) {
   return h;
 }
 
-function rowsToObjs_(headers, values, firstRow, anyCol) {
-  var out = [];
+/**
+ * 2.6.9: kolom penentu "baris ini kosong" = kolom kunci tab itu menurut NAMA (Maintenance ID, Timestamp, Line ID, Email, …),
+ * bukan kolom A. Admin yang menyisipkan kolom "No." di kiri tab tidak lagi membuat semua baris terbaca kosong.
+ */
+var KEY_COLS_ = null;
+/** @param {string=} name nama logis tab (kolom kunci = kolom pertama skemanya); tanpa nama: kolom kunci pertama yang dikenal */
+function keyIdx_(headers, name) {
+  var n = String(name || ''), skema = APP.HEADERS[n] ? n : (/^Arsip Log /.test(n) ? APP.SHEETS.LOG : (/^Arsip Sparepart /.test(n) ? APP.SHEETS.PEMAKAIAN :
+    (/^Arsip \d{4}$/.test(n) ? APP.SHEETS.MAINT : '')));
+  if (skema) { var k = headers.indexOf(APP.HEADERS[skema][0]); if (k >= 0) return k; }
+  if (!KEY_COLS_) { KEY_COLS_ = {}; Object.keys(APP.HEADERS).forEach(function (x) { KEY_COLS_[APP.HEADERS[x][0]] = true; }); }
+  for (var i = 0; i < headers.length; i++) if (KEY_COLS_[headers[i]]) return i;
+  return 0;
+}
+
+function rowsToObjs_(headers, values, firstRow, anyCol, name) {
+  var out = [], key = anyCol ? 0 : keyIdx_(headers, name);
   for (var i = 0; i < values.length; i++) {
     var row = values[i];
-    if (anyCol ? row.every(isBlank_) : isBlank_(row[0])) continue;
+    if (anyCol ? row.every(isBlank_) : isBlank_(row[key])) continue;
     var obj = { _row: firstRow + i };
     for (var j = 0; j < headers.length; j++) obj[headers[j]] = row[j];
     out.push(obj);
@@ -105,7 +120,7 @@ function isBlank_(v) { return v === '' || v === null || v === undefined; }
 
 /**
  * Semua baris data sebagai object. `_row` = nomor baris di sheet (1-based).
- * Default: baris dengan kolom pertama kosong dilewati (sheet data, kolom pertama = ID).
+ * Default: baris dengan kolom kunci kosong dilewati (sheet data: kolom kunci = ID, dicari menurut nama; keyIdx_).
  * anyCol = true: hanya baris yang seluruhnya kosong yang dilewati (sheet master yang diisi admin).
  */
 function readTable_(name, anyCol) {
@@ -113,7 +128,7 @@ function readTable_(name, anyCol) {
   if (values.length < 2) return [];
   var headers = values[0].map(function (h) { return String(h).trim(); });
   HEAD_MEMO_[name] = headers;
-  return rowsToObjs_(headers, values.slice(1), 2, anyCol);
+  return rowsToObjs_(headers, values.slice(1), 2, anyCol, name);
 }
 
 /** Baris terakhir Maintenance yang selalu dibaca tombol (readHot_): ±27 hari pada 15 pekerjaan/hari. */
@@ -140,9 +155,9 @@ function readHot_(tail) {
   // tiap blok = satu panggilan (±0,1 dtk): banyak pending lama yang tersebar → baca penuh (tidak lebih lambat dari 2.6.2)
   if (blocks.length > HOT_BLOCKS_MAX_) return readTable_(APP.SHEETS.MAINT);
   blocks.forEach(function (b) {
-    out = out.concat(rowsToObjs_(h, sh.getRange(b[0], 1, b[1] - b[0] + 1, h.length).getValues(), b[0]));
+    out = out.concat(rowsToObjs_(h, sh.getRange(b[0], 1, b[1] - b[0] + 1, h.length).getValues(), b[0], false, APP.SHEETS.MAINT));
   });
-  return out.concat(rowsToObjs_(h, sh.getRange(first, 1, last - first + 1, h.length).getValues(), first));
+  return out.concat(rowsToObjs_(h, sh.getRange(first, 1, last - first + 1, h.length).getValues(), first, false, APP.SHEETS.MAINT));
 }
 
 /** Nomor baris 2..lastRow yang selnya di kolom `col` persis salah satu `values` (dicari di server, tanpa membaca kolomnya). */
@@ -185,7 +200,7 @@ function readWhere_(name, col, value) {
   var hits = sh.getRange(2, c + 1, last - 1, 1).createTextFinder(String(value)).matchEntireCell(true).findAll()
     .map(function (rg) { return rg.getRow(); });
   rowBlocks_(hits).forEach(function (b) {
-    out = out.concat(rowsToObjs_(h, sh.getRange(b[0], 1, b[1] - b[0] + 1, h.length).getValues(), b[0]));
+    out = out.concat(rowsToObjs_(h, sh.getRange(b[0], 1, b[1] - b[0] + 1, h.length).getValues(), b[0], false, name));
   });
   return out;
 }
@@ -197,7 +212,7 @@ function readTail_(name, n) {
   if (last < 2) return [];
   var headers = headers_(sh, name);
   var first = Math.max(2, last - n + 1);
-  return rowsToObjs_(headers, sh.getRange(first, 1, last - first + 1, headers.length).getValues(), first);
+  return rowsToObjs_(headers, sh.getRange(first, 1, last - first + 1, headers.length).getValues(), first, false, name);
 }
 
 /**
@@ -287,9 +302,10 @@ function findById_(rows, id) {
 /** > 0 selama kode berjalan di dalam withLock_ (appendObj_ memakai jalur cepat). */
 var LOCK_DEPTH_ = 0;
 
-function withLock_(fn) {
+/** @param {number=} waitMs lama menunggu lock (bawaan APP.LOCK_TIMEOUT_MS; trigger malam menunggu lebih lama) */
+function withLock_(fn, waitMs) {
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(APP.LOCK_TIMEOUT_MS)) {
+  if (!lock.tryLock(waitMs || APP.LOCK_TIMEOUT_MS)) {
     throw new Error('Server sedang sibuk, coba lagi beberapa detik.');
   }
   LOCK_DEPTH_++;

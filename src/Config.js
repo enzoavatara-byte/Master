@@ -5,7 +5,7 @@
  */
 var APP = {
   NAME: 'MTTR',          // nama default; per lokasi diubah lewat Config → NAMA_APLIKASI
-  VERSION: '2.6.8',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
+  VERSION: '2.6.9',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
   TZ: 'Asia/Jakarta',
   DATE_FMT: 'yyyy-MM-dd HH:mm:ss',
 
@@ -85,7 +85,7 @@ var APP = {
     Log: ['Timestamp', 'Maintenance ID', 'Kejadian', 'User', 'Detail'],
     /** KPI bulan yang sudah DITUTUP admin (2.6): salinan angka saat ditutup. Ditulis aplikasi, disembunyikan & diproteksi. */
     'KPI data': ['Bulan', 'Level', 'Kunci', 'Nama', 'Kerusakan', 'MTTR (menit)', 'Target MTTR (menit)', 'Downtime (jam)', 'Jam operasi',
-      'MTBF (jam)', 'Target MTBF (jam)', 'Tercapai', 'Ditutup pada', 'Ditutup oleh']
+      'MTBF (jam)', 'Target MTBF (jam)', 'Tercapai', 'Ditutup pada', 'Ditutup oleh', 'Availability (%)']
   },
 
   DATE_COLUMNS: {
@@ -121,7 +121,8 @@ var APP = {
     'Istirahat': ['休息', 'Break'], 'Ambil part/alat': ['取备件/工具', 'Get parts/tools'],
     'Menunggu part': ['等待备件', 'Waiting for parts'], 'Menunggu jadwal stop produksi': ['等待停产时间', 'Waiting for production stop'],
     'Butuh teknisi lain': ['需要其他技术员', 'Need another technician'],
-    'Salah line': ['选错产线', 'Wrong line'], 'Input ganda': ['重复录入', 'Duplicate entry'], 'Masalah hilang sendiri': ['问题自行消失', 'Problem resolved itself']
+    'Salah line': ['选错产线', 'Wrong line'], 'Input ganda': ['重复录入', 'Duplicate entry'], 'Masalah hilang sendiri': ['问题自行消失', 'Problem resolved itself'],
+    'Modul Line': ['模组线', 'Module Line'], 'Pack Line': ['PACK线', 'Pack Line'], 'Pre-Assy': ['预装线', 'Pre-Assy']
   },
 
   STATUS: {
@@ -140,7 +141,7 @@ var APP = {
   EVENTS: {
     START: 'start', PAUSE: 'pause', RESUME: 'resume', PENDING: 'pending', CONTINUE: 'lanjut',
     COMPLETE: 'complete', CANCEL: 'cancel', WARN: 'peringatan', CONFIRM: 'masih lanjut',
-    ABANDON: 'abandoned', REVIEW: 'review', TUTUP_BULAN: 'tutup bulan', INPUT_MANUAL: 'input manual'
+    ABANDON: 'abandoned', REVIEW: 'review', TUTUP_BULAN: 'tutup bulan', INPUT_MANUAL: 'input manual', URUT: 'urut ulang'
   },
 
   SYSTEM_USER: 'SYSTEM',
@@ -151,9 +152,34 @@ var APP = {
   /** Status → kolom "Kondisi Perbaikan" laporan. */
   STATUS_LABEL: { Aktif: 'Dikerjakan', Pause: 'Pause', Pending: 'Pending', Completed: 'Selesai', Cancelled: 'Cancel', Abandoned: 'Abandoned' },
 
-  /** Isi awal sheet Factory & Projects. Bebas diubah di sheet. */
-  FACTORY_DEFAULTS: [['F1', 'Factory 1', ''], ['F2', 'Factory 2', '']],
-  PROJECT_DEFAULTS: [['F1', 'VF7'], ['F1', 'Limo7'], ['F2', 'E22H'], ['F2', 'E245']],
+  /**
+   * 2.6.9: tab master yang masih kosong saat setup diberi 3 baris CONTOH (sekali saja; tanda di DocumentProperties) supaya admin
+   * tahu cara mengisi. Baris dengan Aktif = "Contoh" atau ID berawalan "CONTOH-" diabaikan aplikasi (isContohRow_), aman dibiarkan.
+   * Admin menimpa baris contoh (lalu Aktif → Ya) atau menghapusnya.
+   */
+  CONTOH: {
+    Factory: [
+      { 'Factory ID': 'CONTOH-F1', 'Nama': 'Factory 1 (contoh)', 'Lokasi': 'Gedung A' },
+      { 'Factory ID': 'CONTOH-F2', 'Nama': 'Factory 2 (contoh)', 'Lokasi': 'Gedung B' },
+      { 'Factory ID': 'CONTOH-F3', 'Nama': 'Factory 3 (contoh)', 'Lokasi': '' }],
+    Projects: [
+      { 'Factory ID': 'CONTOH-F1', 'Baterai': 'CONTOH-VF7', 'Fase': 'Mass Production', 'Target MTTR (menit)': 40, 'Target MTBF (jam)': 150,
+        'Catatan': 'Satu baris = satu project baterai di satu factory' },
+      { 'Factory ID': 'CONTOH-F1', 'Baterai': 'CONTOH-LIMO7', 'Fase': 'Trial', 'Target MTTR (menit)': 45, 'Target MTBF (jam)': 120, 'Catatan': '' },
+      { 'Factory ID': 'CONTOH-F2', 'Baterai': 'CONTOH-E22H', 'Fase': 'Mass Production', 'Catatan': 'Target kosong = tanpa target' }],
+    Lines: [
+      { 'Line ID': 'CONTOH-F1-ML-01', 'Nama Line': 'Modul Line 1', 'Proses': 'Modul Line', 'Factory ID': 'CONTOH-F1', 'Baterai': 'CONTOH-VF7',
+        'Area': 'Gedung A', 'Nama (中文)': '模组线 1', 'Nama (English)': 'Module Line 1' },
+      { 'Line ID': 'CONTOH-F1-PL-01', 'Nama Line': 'Pack Line 1', 'Proses': 'Pack Line', 'Factory ID': 'CONTOH-F1', 'Baterai': 'CONTOH-VF7, CONTOH-LIMO7',
+        'Area': 'Gedung A', 'Nama (中文)': 'PACK线 1', 'Nama (English)': 'Pack Line 1' },
+      { 'Line ID': 'CONTOH-F2-PA-01', 'Nama Line': 'Pre-Assy 1', 'Proses': 'Pre-Assy', 'Factory ID': 'CONTOH-F2', 'Baterai': '',
+        'Area': 'Gedung B', 'Nama (中文)': '预装线 1', 'Nama (English)': 'Pre-Assy 1' }],
+    Sparepart: [
+      { 'Jenis Sparepart': 'Mekanikal', 'Nama Sparepart': 'Bearing', 'Model': '6205-2RS · P00123', 'Satuan': 'pcs', 'Urutan': 1 },
+      { 'Jenis Sparepart': 'Pneumatik', 'Nama Sparepart': 'Fitting push-in', 'Model': 'Elbow 8 mm PT1/4 · P00456', 'Satuan': 'pcs', 'Urutan': 2 },
+      { 'Jenis Sparepart': 'Elektrikal', 'Nama Sparepart': 'Sensor proximity', 'Model': 'Omron E2E-X5ME1 · P00789', 'Satuan': 'pcs', 'Urutan': 3 }]
+  },
+  CONTOH_AKTIF: 'Contoh',
 
   /** Isi awal sheet Pilihan. Masalah/Penyebab/Penanganan/Part = CONTOH, ganti bersama teknisi senior.
    *  "Lainnya" tidak perlu ditulis: otomatis muncul jika kolom "Lainnya isi sendiri" di sheet Form = Ya. */
@@ -165,7 +191,9 @@ var APP = {
     'Penanganan': ['Ganti part', 'Setting ulang', 'Bersihkan', 'Kencangkan/perbaiki koneksi'],
     'Alasan Pause': ['Istirahat', 'Ambil part/alat'],
     'Yang Tertunda': ['Menunggu part', 'Menunggu jadwal stop produksi', 'Butuh teknisi lain'],
-    'Alasan Cancel': ['Salah line', 'Input ganda', 'Masalah hilang sendiri']
+    'Alasan Cancel': ['Salah line', 'Input ganda', 'Masalah hilang sendiri'],
+    // 2.6.9: daftar proses (dropdown tab Lines + ejaan baku Availability). Proses lain boleh ditambah admin di sini.
+    'Proses': ['Modul Line', 'Pack Line', 'Pre-Assy']
   },
 
   /** Pilihan baru di versi lama: setup() menambahkannya jika belum ada (baris Aktif = Tidak dihitung ada → tidak muncul lagi). */
@@ -219,15 +247,6 @@ var APP = {
     'Total aktif (menit)', 'Total pause (menit)', 'Total pending (menit)', 'Status review', 'Masuk MTTR', 'Status sejak',
     'Konfirmasi terakhir', 'Peringatan pada', 'Teknisi terlibat', 'Direview oleh', 'Direview pada', 'Catatan review', 'Factory',
     'Proses', 'Nama PIC', 'Nama teknisi awal', 'Nama teknisi terlibat'],
-
-  /** Isi awal katalog Sparepart (CONTOH): [Jenis, Nama, Model, Satuan]. Admin mengganti di sheet Sparepart. */
-  SPAREPART_DEFAULTS: [
-    ['Elektrikal', 'Motor Listrik', 'ABB M2QA 0,75kW', 'pcs'], ['Elektrikal', 'Sensor Proximity', 'Omron E2E-X5ME1', 'pcs'],
-    ['Elektrikal', 'Relay', 'Omron MY2N 24VDC', 'pcs'], ['Elektrikal', 'Fuse', '10A', 'pcs'],
-    ['Mekanikal', 'Bearing', '6205-2RS', 'pcs'], ['Mekanikal', 'Bearing', '6204-ZZ', 'pcs'], ['Mekanikal', 'Timing Belt', 'HTD 5M-450', 'pcs'],
-    ['Pneumatik', 'Silinder', 'SMC CQ2B32-50D', 'pcs'], ['Pneumatik', 'Selang PU', '8 mm', 'meter'], ['Pneumatik', 'Solenoid Valve', 'SMC SY5120', 'pcs'],
-    ['Program', 'Backup Program PLC', '', 'kali']
-  ],
 
   /** Sumber kolom laporan yang dihitung aplikasi. Sumber lain = nama kolom sheet Maintenance apa adanya. */
   REPORT_SOURCES: ['NO', 'Factory', 'Nama factory', 'Project', 'Proses', 'Line', 'Station', 'Tanggal', 'Jam mulai', 'Jam selesai',
@@ -287,7 +306,7 @@ var APP = {
     IKON_APLIKASI: { value: '', description: 'Ikon shortcut di layar utama HP: alamat gambar PNG yang bisa dibuka publik (https://…png). Kosong = ikon bawaan Google' }
   },
 
-  LOCK_TIMEOUT_MS: 10000,
+  LOCK_TIMEOUT_MS: 25000,   // 2.6.9: 10 → 25 dtk (±6 tombol bersamaan @ ±4 dtk; klien juga mencoba ulang sekali)
   TRIGGER_MINUTES: 15,
   /** Jam (WIB) pembangunan ulang penuh Laporan & Rekap tiap malam. Sehari-hari keduanya diperbarui langsung tiap aksi. */
   REKAP_HOUR: 1,
@@ -354,6 +373,11 @@ function normDiscipline_(v) {
 /** Kolom Aktif kosong dianggap aktif untuk sheet master (baris baru tidak langsung hilang). */
 function isActiveRow_(v) {
   return String(v == null ? '' : v).trim() === '' || isYes_(v);
+}
+
+/** 2.6.9: baris contoh pengisian (Aktif = "Contoh" atau ID berawalan "CONTOH-") — diabaikan aplikasi di mana pun. */
+function isContohRow_(aktif, id) {
+  return String(aktif == null ? '' : aktif).trim().toLowerCase() === APP.CONTOH_AKTIF.toLowerCase() || /^CONTOH-/i.test(String(id == null ? '' : id).trim());
 }
 
 function splitList_(v) {

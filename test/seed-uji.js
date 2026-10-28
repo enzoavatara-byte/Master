@@ -5,7 +5,8 @@
  * Teknisi fiktif memakai @example.com (email tidak pernah terkirim); Config uji mematikan email peringatan.
  */
 'use strict';
-const { ctx, ss, clock, user } = require('./mock');
+const { ctx, ss, clock, user, bawaanLama } = require('./mock');
+bawaanLama();   // 2.6.9: isi bawaan versi sebelumnya (setup kini menulis baris CONTOH)
 
 const RealNow = Date.now;
 let shiftMs = 0;

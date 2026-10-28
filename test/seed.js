@@ -3,7 +3,8 @@
  * katalog sparepart, ±70 pekerjaan 4 minggu terakhir (sebagian dengan PIC tambahan). Jam mock mengikuti jam asli setelah seeding.
  */
 'use strict';
-const { ctx, ss, clock, user } = require('./mock');
+const { ctx, ss, clock, user, bawaanLama } = require('./mock');
+bawaanLama();   // 2.6.9: data contoh memakai factory / project / sparepart bawaan versi sebelumnya
 
 const RealNow = Date.now;
 let shiftMs = 0;

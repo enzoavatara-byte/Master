@@ -5,7 +5,8 @@
  */
 'use strict';
 const assert = require('assert');
-const { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache, ui } = require('./mock');
+const { ctx, ss, clock, advance, FakeDate, user, lock, triggers, mails, cache, ui, bawaanLama } = require('./mock');
+bawaanLama();   // 2.6.9: test lama memakai factory / project / sparepart bawaan versi sebelumnya
 
 // ---------- helpers ----------
 let passed = 0;
@@ -1885,7 +1886,7 @@ test('2.6 KPI hitung: MTTR, downtime stop line, jam operasi (hari operasi, libur
   jeq(val(pick('Line', 'C')), [1, 30, 0, 600, 600, null, null, '']);
   assert.strictEqual(pick('Line', 'A').nama, 'A · Line A');
   assert.ok(!k.find(o => o.kunci === 'D'), 'line nonaktif tanpa kerusakan tidak tampil');
-  jeq(k.map(o => o.level), ['Plant', 'Project', 'Project', 'Project', 'Line', 'Line', 'Line']);
+  jeq(k.map(o => o.level), ['Plant', 'Project', 'Project', 'Project', 'Proses', 'Proses', 'Line', 'Line', 'Line'], '2.6.9: + Availability per proses + rata-rata');
   // tanpa kerusakan → MTBF kosong, target dianggap tercapai
   const none = ctx.computeKpi_(2026, 8, [], md, s, now).find(o => o.kunci === 'VF7');
   jeq(val(none), [0, null, 0, 26 * 24 * 2, null, 20, 500, '✓'], 'Agustus: 31 hari − 5 Minggu');
@@ -1894,6 +1895,36 @@ test('2.6 KPI hitung: MTTR, downtime stop line, jam operasi (hari operasi, libur
   assert.strictEqual(ctx.kpiDays_(2026, 9, s2, now), 17);
   jeq(val(ctx.computeKpi_(2026, 9, rows, md, s2, now, { levels: ['Plant'] })[0]).slice(0, 4), [4, 32.5, 1.5, 3 * 17 * 24]);
   assert.strictEqual(ctx.computeKpi_(2026, 9, rows, md, s, now, { levels: ['Plant', 'Project'] }).length, 4, 'Dashboard: tanpa level Line');
+});
+
+test('2.6.9 Availability per factory × proses: running hour sekali per proses, downtime semua line, rata-rata, > running hour = 0 %, ejaan proses', () => {
+  const md = { prosesCanon: { modulline: 'Modul Line', packline: 'Pack Line', preassy: 'Pre-Assy' }, projects: [],
+    lines: { A: { active: true, factory: 'F1', proses: 'Modul Line', batteries: [], name: 'A' }, B: { active: true, factory: 'F1', proses: 'Modul Line', batteries: [], name: 'B' },
+      C: { active: true, factory: 'F1', proses: 'Pack Line', batteries: [], name: 'C' }, D: { active: true, factory: 'F2', proses: 'Pre-Assy', batteries: [], name: 'D' },
+      E: { active: false, factory: 'F10', proses: 'Pack Line', batteries: [], name: 'E' } } };
+  const job = (line, mulai, selesai, stop, extra) => Object.assign({ 'Maintenance ID': line + mulai.getTime(), Line: line, Baterai: '', Status: 'Completed', 'Masuk MTTR': 'Ya',
+    Mulai: mulai, Selesai: selesai, 'Status sejak': selesai, 'Total aktif (menit)': 30, 'Stop line': stop }, extra || {});
+  const rows = [
+    job('A', W(2026, 9, 2, 8), W(2026, 9, 2, 14), 'Ya'),                                        // 6 jam
+    job('B', W(2026, 9, 3, 8), W(2026, 9, 3, 12), 'Ya'),                                        // 4 jam → Modul Line F1 = 10 jam
+    job('C', W(2026, 9, 4, 8), W(2026, 9, 4, 9), 'Tidak'),                                      // tanpa stop line → 0
+    job('D', W(2026, 9, 5, 8), W(2026, 9, 5, 8, 30), 'Ya', { Proses: 'pre assy ', Factory: 'F2' }),   // ejaan lain → kelompok Pre-Assy
+    job('E', W(2026, 9, 6, 0), W(2026, 9, 28, 0), 'Ya')                                         // 528 jam > running hour (nonaktif, tetap ada)
+  ];
+  // September 2026: 30 hari × 16 jam = 480 jam running hour per proses (sekali, tidak × jumlah line)
+  const s = { hours: 16, days: ctx.parseHariOperasi_('', []), libur: {}, mulai: '', warn: [] }, now = W(2026, 10, 22, 10);
+  const k = ctx.computeKpi_(2026, 9, rows, md, s, now), P = k.filter(x => x.level === 'Proses');
+  jeq(P.map(x => x.nama), ['F1 · Modul Line', 'F1 · Pack Line', 'F2 · Pre-Assy', 'F10 · Pack Line', ctx.KPI_RATA_], 'urut natural: F2 sebelum F10, rata-rata di akhir');
+  const av = (n) => P.find(x => x.nama === n);
+  jeq([av('F1 · Modul Line').jamOperasi, av('F1 · Modul Line').downtime, av('F1 · Modul Line').availability, av('F1 · Modul Line').kerusakan], [480, 10, 97.9, 2], '(480 − 10) ÷ 480');
+  assert.strictEqual(av('F1 · Pack Line').availability, 100);
+  assert.strictEqual(av('F2 · Pre-Assy').availability, 99.9, 'Proses "pre assy " dari record → Pre-Assy');
+  jeq([av('F10 · Pack Line').availability, av('F10 · Pack Line').lebih], [0, true], 'downtime > running hour → 0 % + tanda');
+  const rata = av(ctx.KPI_RATA_);
+  jeq([rata.kunci, rata.availability, rata.kerusakan, rata.downtime, rata.jamOperasi], ['RATA', Math.round((97.9 + 100 + 99.9 + 0) / 4 * 10) / 10, 5, 538.5, 4 * 480]);
+  assert.strictEqual(k.find(x => x.level === 'Line' && x.kunci === 'A').availability, 98.8, 'per line: (480 − 6) ÷ 480');
+  assert.strictEqual(k.find(x => x.level === 'Plant').availability, null, 'Plant / Project tanpa availability');
+  assert.ok(!ctx.computeKpi_(2026, 9, [], { lines: {}, projects: [] }, s, now).some(x => x.level === 'Proses'), 'tanpa line & data → tanpa baris Proses');
 });
 
 test('2.6 KPI Config: jam operasi, hari operasi, tanggal libur (teks / sel tanggal), KPI_MULAI; salah isi → peringatan, bukan error', () => {
@@ -1957,7 +1988,7 @@ test('2.6 KPI tab + tutup bulan: angka = Rekap, Dashboard, tutup → terkunci wa
   as('budi@gmail.com', () => {
     const d = ctx.apiDashboard({ periode: 7, factory: 'F2' });
     assert.strictEqual(d.kpiMonth.bulan, ym);
-    jeq(d.kpiMonth.rows.map(x => x.level).filter((v, i, a) => a.indexOf(v) === i), ['Plant', 'Project']);
+    jeq(d.kpiMonth.rows.map(x => x.level).filter((v, i, a) => a.indexOf(v) === i), ['Plant', 'Project', 'Proses'], '2.6.9: + Availability per proses');
     assert.strictEqual(d.kpiMonth.rows[0].kerusakan, P0[3]);
     assert.strictEqual(d.kpiMonth.prev, undefined, 'teknisi: tanpa info tutup bulan');
     assert.ok(d.kpi.downtimeMin > 0 && d.kpi.stopN > 0, 'tile downtime');
@@ -2908,6 +2939,107 @@ test('2.6.8 K8 satu kali kirim per tombol: semua baca sebelum tulis (Mulai, Paus
   jeq(Object.values(hasil).map(String), Object.keys(hasil).map(() => '0'), 'kirim terpaksa per tombol: ' + JSON.stringify(hasil));
   assert.strictEqual(rec(id).Status, 'Completed');
   jeq(logOf(id), ['start', 'pause', 'resume', 'masih lanjut', 'pending', 'lanjut', 'complete']);
+});
+
+test('2.6.9 KPI tab kolom M Availability + baris Proses, salinan KPI data pulang-pergi, Ringkasan tabel Availability', () => {
+  const y = ctx.yearOf_(new FakeDate());
+  ctx.buildKpi_(y);
+  const K = ss.getSheetByName('KPI ' + y);
+  assert.strictEqual(K.data[0].length, 13);
+  assert.strictEqual(K.data[0][12], 'Availability (%)\n可用率（%）');
+  const pr = K.data.filter(r => r[1] === 'Proses');
+  assert.ok(pr.length >= 2 && pr.some(r => r[2] === ctx.KPI_RATA_), 'baris Proses + rata-rata');
+  assert.ok(pr.every(r => r[12] === '' || (typeof r[12] === 'number' && r[12] >= 0 && r[12] <= 100)), 'availability 0–100');
+  assert.ok(K.data.filter(r => r[1] === 'Plant' || r[1] === 'Project').every(r => r[12] === ''), 'Plant / Project tanpa availability');
+  // bulan yang sudah ditutup (test sebelumnya): salinan berisi Availability dan dibaca kembali sama
+  const closed = ctx.kpiClosed_(), ym = Object.keys(closed).sort().pop();
+  assert.ok(ym, 'ada bulan tertutup');
+  const snap = ctx.readTable_('KPI data').filter(r => r.Bulan === ym && r.Level === 'Proses');
+  assert.ok(snap.length && snap.every(r => r['Availability (%)'] !== ''), 'KPI data: kolom Availability terisi');
+  jeq(closed[ym].rows.filter(x => x.level === 'Proses').map(x => x.availability), snap.map(r => r['Availability (%)']));
+  // Ringkasan: tabel Availability per proses membaca kolom M tab KPI (B = "Proses", C = nama kelompok)
+  ctx.rapikanTampilan_({});
+  const R = ss.getSheetByName('Ringkasan'), head = findCell(R, /^Availability per proses bulan ini/);
+  assert.ok(head, 'judul tabel');
+  const fx = Object.values(R.formulas || {}).concat(R.data.flat()).map(String).filter(v => /M2:M/.test(v) && /"Proses"/.test(v));
+  assert.ok(fx.length >= 2, 'rumus FILTER kolom M');
+  assert.ok(findCell(R, new RegExp('^' + ctx.KPI_RATA_.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$')), 'baris rata-rata');
+});
+
+test('2.6.9 integritas: tab Maintenance diurutkan admin → ID baru tetap unik; malam mengurutkan ulang + Log', () => {
+  const sh = ss.getSheetByName('Maintenance'), h = sh.data[0], cid = h.indexOf('Maintenance ID'), cl = h.indexOf('Line'), cm = h.indexOf('Mulai');
+  const open = (id) => ctx.readTable_('Maintenance').some(r => r.Line === id && ['Aktif', 'Pause', 'Pending'].includes(r.Status));
+  const line = ctx.readTable_('Lines').map(l => l['Line ID']).filter(id => /^L\d+$/.test(id) && !open(id))[0];
+  const tech = ['budi@gmail.com', 'andi@gmail.com', 'sari@gmail.com', 'dewi@gmail.com'].filter(e => !ctx.readTable_('Maintenance').some(r => String(r['Teknisi terakhir']).toLowerCase() === e && ['Aktif', 'Pause'].includes(r.Status)))[0];
+  const ids = [];
+  for (let i = 0; i < 2; i++) { const id = as(tech, () => ctx.apiStart(line, { baterai: 'E22H' })).open.id; ids.push(id); as(tech, () => ctx.apiComplete(id, done)); advance(3); }
+  // admin mengurutkan tab: pekerjaan hari ini di line itu pindah ke atas, jauh dari ekor yang dibaca tombol
+  const body = sh.data.slice(1), mine = body.filter(r => ids.includes(r[cid]));
+  sh.data = [h].concat(mine, body.filter(r => !ids.includes(r[cid])));
+  const keep = ctx.HOT_TAIL_;
+  ctx.HOT_TAIL_ = 2;
+  let id3;
+  try { id3 = as(tech, () => ctx.apiStart(line, { baterai: 'E22H' })).open.id; } finally { ctx.HOT_TAIL_ = keep; }
+  assert.ok(!ids.includes(id3), 'ID baru ' + id3 + ' tidak memakai ulang ' + ids.join(', '));
+  assert.strictEqual(sh.data.filter(r => r[cid] === id3).length, 1, 'ID unik');
+  assert.strictEqual(Number(id3.slice(-2)), Math.max(...ids.map(x => Number(x.slice(-2)))) + 1, 'urutan berikutnya');
+  as(tech, () => ctx.apiCancel(id3, { values: { 'Alasan cancel': 'Lainnya' }, other: { 'Alasan cancel': 'uji urut' } }));
+  // malam: tab tidak urut → diurutkan ulang menurut Mulai + dicatat
+  const sorts = sh.sorts || 0;
+  ctx.refreshRekap();
+  assert.strictEqual(sh.sorts, sorts + 1, 'diurutkan sekali');
+  const t = sh.data.slice(1).filter(r => r[cm] instanceof Date).map(r => r[cm].getTime());
+  assert.ok(t.every((v, i) => !i || t[i - 1] <= v), 'Mulai urut naik');
+  assert.ok(ctx.readTable_('Log').some(r => r.Kejadian === 'urut ulang'), 'Log: urut ulang');
+  ctx.refreshRekap();
+  assert.strictEqual(sh.sorts, sorts + 1, 'sudah urut → tidak diurutkan lagi');
+});
+
+test('2.6.9 integritas: kolom disisipkan admin di kiri (Maintenance & Users) → data, login, tombol, laporan tetap benar', () => {
+  const ins = (name) => { const sh = ss.getSheetByName(name); sh.data = sh.data.map((r, i) => [i ? (i % 3 ? i : '') : 'No.'].concat(r)); ctx.resetHeaders_(); ctx.invalidateMaster_(); };
+  const del = (name) => { const sh = ss.getSheetByName(name); sh.data = sh.data.map(r => r.slice(1)); ctx.resetHeaders_(); ctx.invalidateMaster_(); };
+  const n0 = ctx.readTable_('Maintenance').length, u0 = ctx.masterData_().users.length;
+  ins('Maintenance'); ins('Users');
+  try {
+    assert.strictEqual(ctx.readTable_('Maintenance').length, n0, 'tidak ada baris "hilang" walau kolom A kosong');
+    assert.strictEqual(ctx.masterData_().users.length, u0, 'semua user tetap terbaca (login)');
+    const line = ctx.readTable_('Lines').map(l => l['Line ID']).filter(id => /^L\d+$/.test(id) && !ctx.readTable_('Maintenance').some(r => r.Line === id && ['Aktif', 'Pause', 'Pending'].includes(r.Status)))[0];
+    const tech = ['budi@gmail.com', 'andi@gmail.com', 'sari@gmail.com', 'dewi@gmail.com'].filter(e => !ctx.readTable_('Maintenance').some(r => String(r['Teknisi terakhir']).toLowerCase() === e && ['Aktif', 'Pause'].includes(r.Status)))[0];
+    const id = as(tech, () => ctx.apiStart(line, { baterai: 'E22H' })).open.id;
+    as(tech, () => ctx.apiComplete(id, done));
+    const r = ctx.readTable_('Maintenance').find(x => x['Maintenance ID'] === id);
+    jeq([r.Line, r.Status, r['No.']], [line, 'Completed', ''], 'nilai masuk kolom yang benar menurut nama');
+    ctx.refreshRekap();
+    assert.ok(findCell(ss.getSheetByName('Laporan ' + ctx.yearOf_(new FakeDate())), new RegExp('^' + id + '$')), 'Laporan memuat pekerjaan baru');
+  } finally { del('Maintenance'); del('Users'); }
+  assert.strictEqual(ctx.APP.LOCK_TIMEOUT_MS, 25000, 'lock menunggu 25 dtk (±6 tombol bersamaan)');
+});
+
+test('2.6.9 kesehatan sistem: malam / cek timeout / backup gagal, tidak selesai, atau tidak jalan → peringatan Dashboard admin', () => {
+  const props = () => ctx.PropertiesService.getDocumentProperties().getProperties();
+  ctx.checkTimeouts(); ctx.backupTerjadwal(); ctx.refreshRekap();
+  const now = new FakeDate();
+  jeq(ctx.sehatPeringatan_(props(), now), [], 'sehat → tanpa peringatan');
+  // langkah gagal: langkah lain tetap jalan, dicatat, trigger berakhir error (Google mengirim email kegagalan ke pemilik)
+  const tpm = ctx.buildTpm_;
+  ctx.buildTpm_ = () => { throw new Error('kuota terjemahan habis'); };
+  try { throwsMsg(() => ctx.refreshRekap(), /gagal sebagian: TPM: kuota terjemahan habis/); } finally { ctx.buildTpm_ = tpm; }
+  const m = JSON.parse(props().MTTR_SEHAT_malam);
+  assert.ok(m.selesai && m.gagal.length === 1, 'tetap selesai, satu langkah gagal');
+  assert.match(ctx.sehatPeringatan_(props(), now).join(' '), /pembaruan malam .* gagal sebagian — TPM: kuota terjemahan habis/);
+  as('owner@gmail.com', () => assert.match(ctx.apiDashboard({ periode: 7 }).warnings[0], /^Sistem: pembaruan malam/));
+  as('budi@gmail.com', () => assert.ok(!ctx.apiDashboard({ periode: 7 }).warnings.some(w => /^Sistem/.test(w)), 'teknisi tidak melihat'));
+  // tidak selesai (lewat 6 menit) & tidak jalan > 36 jam & cek timeout > 2 jam
+  const set = (k, o) => ctx.PropertiesService.getDocumentProperties().setProperty('MTTR_SEHAT_' + k, JSON.stringify(o));
+  set('malam', { mulai: new Date(now.getTime() - 20 * 60000).toISOString(), selesai: '', gagal: [] });
+  assert.match(ctx.sehatPeringatan_(props(), now).join(' '), /tidak selesai \(kemungkinan lewat batas waktu/);
+  set('malam', { mulai: new Date(now.getTime() - 40 * 3600000).toISOString(), selesai: new Date(now.getTime() - 40 * 3600000).toISOString(), gagal: [] });
+  set('timeout', { at: new Date(now.getTime() - 3 * 3600000).toISOString(), gagal: '' });
+  const w = ctx.sehatPeringatan_(props(), now).join(' ');
+  assert.match(w, /lebih dari sehari lalu/);
+  assert.match(w, /cek pekerjaan lewat waktu terakhir jalan/);
+  ctx.checkTimeouts(); ctx.refreshRekap();
+  jeq(ctx.sehatPeringatan_(props(), new FakeDate()), [], 'pulih sendiri sesudah jalan lagi');
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

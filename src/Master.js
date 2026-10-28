@@ -14,7 +14,7 @@
  */
 
 var MD_MEMO_ = null;
-var MD_CACHE_KEY_ = 'mttr-md-25a';   // naikkan jika struktur md berubah (cache lama otomatis diabaikan)
+var MD_CACHE_KEY_ = 'mttr-md-269';   // naikkan jika struktur md berubah (cache lama otomatis diabaikan)
 // 6 jam = batas CacheService. Edit sel tab pengaturan sudah menghapus cache (onEdit), jadi TTL hanya pengaman. Dulu 600 dtk:
 // setiap jeda >10 menit tombol pertama membaca ulang ±12 tab (Mulai 9–11 dtk di Apps Script asli; uji 2.6.1 & uji 1 tahun).
 var MD_CACHE_TTL_ = 21600;           // detik
@@ -100,9 +100,17 @@ function masterData_() {
 function buildMaster_() {
   var warnings = [];
   var md = { warnings: warnings, tr: { zh: {}, en: {} } };
+  // 2.6.9: baris CONTOH diabaikan. Diubah admin tapi Aktif masih "Contoh" / ID masih CONTOH- → diingatkan (data asli ikut terabaikan).
+  var contoh = function (tab, aktif, id, label, isi) {
+    if (!isContohRow_(aktif, id)) return false;
+    var asli = APP.CONTOH[tab].some(function (o) { return Object.keys(o).every(function (k) { return String(o[k]) === String(isi[k] == null ? '' : isi[k]).trim(); }); });
+    if (!asli) warnings.push(tab + ': ' + label + ' ditandai contoh (Aktif = Contoh atau ID berawalan CONTOH-), jadi diabaikan. Bila ini data asli: ganti ID-nya dan isi Aktif = Ya.');
+    return true;
+  };
 
   // ---- Factory ----
   md.factories = readOptional_(APP.SHEETS.FACTORY).filter(function (f) {
+    if (contoh('Factory', f['Aktif'], f['Factory ID'], 'Factory "' + f['Factory ID'] + '"', f)) return false;
     return isActiveRow_(f['Aktif']) && String(f['Factory ID'] || '').trim();
   }).map(function (f) {
     return { id: normLine_(f['Factory ID']), name: String(f['Nama'] || f['Factory ID']), lokasi: String(f['Lokasi'] || '') };
@@ -112,6 +120,7 @@ function buildMaster_() {
 
   // ---- Projects (baterai per factory) ----
   md.projects = readOptional_(APP.SHEETS.PROJECTS).filter(function (p) {
+    if (contoh('Projects', p['Aktif'], String(p['Baterai'] || '').trim() || p['Factory ID'], 'project "' + p['Baterai'] + '"', p)) return false;
     return isActiveRow_(p['Aktif']) && String(p['Baterai'] || '').trim();
   }).map(function (p) {
     var t = Number(p['Target MTTR (menit)']), tb = Number(String(p['Target MTBF (jam)'] == null ? '' : p['Target MTBF (jam)']).replace(',', '.'));
@@ -130,7 +139,7 @@ function buildMaster_() {
   md.lines = {};
   readTable_(APP.SHEETS.LINES).forEach(function (l) {
     var id = normLine_(l['Line ID']);
-    if (!id) return;
+    if (!id || contoh('Lines', l['Aktif'], id, 'line ' + id, l)) return;
     if (!/^[A-Z0-9_.-]{1,50}$/.test(id)) { warnings.push('Lines: Line ID "' + id + '" hanya boleh huruf, angka, - _ . (dilewati).'); return; }
     var factory = normLine_(l['Factory ID']);
     var own = splitList_(l['Baterai']);
@@ -177,6 +186,7 @@ function buildMaster_() {
   });
   Object.keys(APP.OPTION_DEFAULTS).forEach(function (j) { if (!opts[j] || !opts[j].length) opts[j] = APP.OPTION_DEFAULTS[j].slice(); });
   md.options = opts;
+  canonProsesLines_(md, warnings);
 
   // ---- Form ----
   md.forms = readForms_(warnings, opts);
@@ -236,9 +246,17 @@ function partId_(jenis, nama, model) {
 function readSpareparts_(warnings, opts) {
   var seen = {}, out = [];
   var jenisList = opts['Jenis Kerusakan'] || [];
+  var judul = 0;
   readOptional_(APP.SHEETS.SPAREPART).forEach(function (r) {
-    if (!isActiveRow_(r['Aktif'])) return;
     var jenis = String(r['Jenis Sparepart'] || '').trim(), nama = String(r['Nama Sparepart'] || '').trim(), model = String(r['Model'] || '').trim();
+    if (isContohRow_(r['Aktif'], '')) {
+      var asli = APP.CONTOH.Sparepart.some(function (o) { return o['Nama Sparepart'] === nama && o['Model'] === model; });
+      if (!asli) warnings.push('Sparepart: "' + nama + (model ? ' ' + model : '') + '" (baris ' + r._row + ') Aktif = Contoh, jadi diabaikan. Bila ini part asli: isi Aktif = Ya.');
+      return;
+    }
+    if (!isActiveRow_(r['Aktif'])) return;
+    // 2.6.9: paste dari Excel sering membawa baris judul lagi di tengah daftar
+    if (nama.toLowerCase() === 'nama sparepart' || jenis.toLowerCase() === 'jenis sparepart') { judul++; return; }
     if (!nama) return;
     if (!jenis) { warnings.push('Sparepart: "' + nama + '" belum diisi Jenis Sparepart (baris ' + r._row + ').'); return; }
     var id = partId_(jenis, nama, model);
@@ -251,8 +269,43 @@ function readSpareparts_(warnings, opts) {
     out.push({ id: id, jenis: jenis, nama: nama, model: model, satuan: String(r['Satuan'] || ''),
       order: (r['Urutan'] !== '' && isFinite(u)) ? u : 100000 + r._row });
   });
+  if (judul) warnings.push('Sparepart: ' + judul + ' baris judul ("Jenis Sparepart / Nama Sparepart") ikut ter-paste di tengah daftar; diabaikan. Boleh dihapus.');
   out.sort(function (a, b) { return (a.order - b.order) || a.nama.localeCompare(b.nama) || a.model.localeCompare(b.model); });
   return out;
+}
+
+/** 2.6.9: kunci ejaan proses: "Pre-Assy", "pre assy ", "PreAssy" → sama. */
+function prosesKey_(v) { return String(v == null ? '' : v).toLowerCase().replace(/[\s\-_.\/]+/g, ''); }
+
+/**
+ * 2.6.9: ejaan Proses dibakukan (Availability, Statistik per proses, filter): ejaan di Pilihan → Proses menang, lalu ejaan
+ * pertama di tab Lines. Beda ejaan & proses di luar daftar Pilihan → satu peringatan per ejaan (bukan per line).
+ */
+function canonProsesLines_(md, warnings) {
+  var canon = {}, beda = {}, luar = {};
+  (md.options['Proses'] || []).forEach(function (p) { var k = prosesKey_(p); if (k && !canon[k]) canon[k] = p; });
+  var resmi = Object.keys(canon).length;
+  Object.keys(md.lines).forEach(function (id) {
+    var raw = String(md.lines[id].proses || '').replace(/\s+/g, ' ').trim(), k = prosesKey_(raw);
+    if (!k) { md.lines[id].proses = ''; return; }
+    if (!canon[k]) { canon[k] = raw; if (resmi) luar[raw] = (luar[raw] || 0) + 1; }
+    else if (canon[k] !== raw) beda[raw] = (beda[raw] || 0) + 1;
+    else if (luar[raw]) luar[raw]++;
+    md.lines[id].proses = canon[k];
+  });
+  Object.keys(beda).forEach(function (raw) {
+    warnings.push('Lines: Proses "' + raw + '" (' + beda[raw] + ' line) dianggap "' + canon[prosesKey_(raw)] + '". Samakan ejaannya supaya tidak bingung.');
+  });
+  Object.keys(luar).forEach(function (raw) {
+    warnings.push('Lines: Proses "' + raw + '" (' + luar[raw] + ' line) belum ada di Pilihan → Proses. Tambahkan bila memang proses baru (supaya ada di daftar pilihan).');
+  });
+  md.prosesCanon = canon;
+}
+
+/** Ejaan baku proses (data lama / ketikan berbeda ikut kelompok yang sama). */
+function canonProses_(md, v) {
+  var s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  return (s && md.prosesCanon && md.prosesCanon[prosesKey_(s)]) || s;
 }
 
 /** Kolom tab Laporan. Sheet kosong / belum ada → format Excel bawaan. */
@@ -441,7 +494,7 @@ function factoryOfRecord_(md, r) {
 
 /** Proses sebuah pekerjaan: disimpan saat Mulai (2.2), atau Proses line-nya sekarang (data lama). */
 function prosesOfRecord_(md, r) {
-  if (r['Proses']) return String(r['Proses']);
+  if (r['Proses']) return canonProses_(md, r['Proses']);
   var l = lineOf_(md, r['Line']);
   return l ? l.proses : '';
 }

@@ -192,6 +192,26 @@ function configDateText_() {
   });
 }
 
+var CONTOH_PROP_ = 'MTTR_CONTOH_DONE';
+
+/**
+ * 2.6.9: 3 baris CONTOH di tab master yang masih kosong, sekali per tab. Tab yang sudah pernah diperiksa ditandai di
+ * DocumentProperties: contoh yang dihapus admin tidak muncul lagi, dan spreadsheet yang sudah berisi data tidak pernah diberi contoh.
+ */
+function isiContoh_() {
+  var props = PropertiesService.getDocumentProperties(), done = {};
+  try { done = JSON.parse(props.getProperty(CONTOH_PROP_) || '{}') || {}; } catch (e) { done = {}; }
+  var S = APP.SHEETS, tabs = { Factory: S.FACTORY, Projects: S.PROJECTS, Lines: S.LINES, Sparepart: S.SPAREPART };
+  Object.keys(tabs).forEach(function (k) {
+    if (done[k]) return;
+    if (readTable_(tabs[k], true).length === 0) {
+      APP.CONTOH[k].forEach(function (o) { appendObj_(tabs[k], Object.assign({ 'Aktif': APP.CONTOH_AKTIF }, o)); });
+    }
+    done[k] = true;
+  });
+  props.setProperty(CONTOH_PROP_, JSON.stringify(done));
+}
+
 function setup() {
   var t0 = Date.now(), lewat = [];
   var cukup = function (k) { if (Date.now() - t0 < SETUP_BATAS_MS_[k]) return true; lewat.push(k); return false; };
@@ -258,16 +278,7 @@ function setup() {
   notes = notes.concat(migrateTr261_());   // 2.6.1: terjemahan Inggris lama yang salah dibuat ulang
   notes = notes.concat(migrateCancel261_());   // 2.6.1: Cancel tanpa review → antrian lama dibersihkan
 
-  if (readTable_(APP.SHEETS.FACTORY).length === 0) {
-    APP.FACTORY_DEFAULTS.forEach(function (f) {
-      appendObj_(APP.SHEETS.FACTORY, { 'Factory ID': f[0], 'Nama': f[1], 'Lokasi': f[2], 'Aktif': 'Ya' });
-    });
-  }
-  if (readTable_(APP.SHEETS.PROJECTS).length === 0) {
-    APP.PROJECT_DEFAULTS.forEach(function (p) {
-      appendObj_(APP.SHEETS.PROJECTS, { 'Factory ID': p[0], 'Baterai': p[1], 'Fase': '', 'Aktif': 'Ya' });
-    });
-  }
+  isiContoh_();   // 2.6.9: tab Factory / Projects / Lines / Sparepart kosong → 3 baris CONTOH (bukan data palsu yang aktif)
 
   // Form: isi default jika kosong; kembalikan field sistem yang terhapus (tanpa menimpa yang sudah diubah).
   var formRows = readTable_(APP.SHEETS.FORM);
@@ -281,11 +292,6 @@ function setup() {
     }
   });
 
-  if (readTable_(APP.SHEETS.SPAREPART).length === 0) {
-    APP.SPAREPART_DEFAULTS.forEach(function (p, i) {
-      appendObj_(APP.SHEETS.SPAREPART, { 'Jenis Sparepart': p[0], 'Nama Sparepart': p[1], 'Model': p[2], 'Satuan': p[3], 'Urutan': i + 1, 'Aktif': 'Ya' });
-    });
-  }
   if (readTable_(APP.SHEETS.FORMAT).length === 0) {
     APP.REPORT_DEFAULTS.forEach(function (d, i) {
       appendObj_(APP.SHEETS.FORMAT, { 'Kolom': d[0], 'Sumber': d[1], 'Urutan': i + 1, 'Aktif': d[2] });
