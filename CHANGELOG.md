@@ -3,6 +3,24 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.5 — muat ±7 tahun dalam satu file (batas 10 juta sel)
+Ganti `Code`, `Config`, `Db`, `Rekap` (Script), lalu New version. **Run `setup` sekali** (memangkas kolom kosong). Tidak ada sheet, kolom, trigger, atau izin baru.
+
+- **Ditemukan oleh uji 2 tahun** (master Bogor, ±24 laporan/hari, 17.041 pekerjaan, 39.345 baris Log): file sudah memakai **47%** dari batas Google Sheets 10 juta sel per file, padahal separuhnya **sel kosong** (Google menghitungnya juga). Tanpa perbaikan: penuh di tahun ke-4.
+  - Tab baru selalu dibuat 26 kolom; `Log` hanya memakai 5 → 40 ribu baris = ±800 ribu sel kosong. `setup` kini menghapus kolom kosong di kanan `Maintenance`, `Log`, `Pemakaian Sparepart` dan tab arsip.
+  - Arsip tahunan mengosongkan baris tetapi tidak menghapusnya: `Maintenance` tetap 15.729 baris walau isinya tinggal 7.091, jadi arsip justru **menambah** sel. Kini baris kosong dihapus (sisa 500 untuk baris baru); begitu juga sesudah Hapus data testing.
+  - Hasil (simulasi data sama): **27%** sesudah 2 tahun, ±1,2 juta sel per tahun → perkiraan penuh **±7 tahun**. Sekitar tahun ke-5 (±65%) pindahkan tab `Arsip …` / `Laporan <tahun lama>` ke file lain (README §6).
+- Isi data tidak berubah: hanya baris / kolom yang benar-benar kosong yang dihapus; kolom tambahan admin yang berisi data tetap ada.
+
+**Uji:** 1 test baru + cek di test arsip (106 test). Uji beban kini punya profil **2 tahun** (`UJI=bogor2 node test/gas-tahun.js`):
+- master Bogor (`test/data/master-bogor.json`, tanpa email), katalog uji 483 part, 22 teknisi fiktif;
+- PIC tambahan s/d 15, sparepart s/d 20;
+- pending lintas bulan / tahun, Abandoned yang direview sesudah tutup bulan otomatis, Input Manual telat;
+- perubahan manajemen (teknisi masuk / keluar / jadi Admin, Penyebab baru, project baru E30X, line dimatikan);
+- arsip 2024 sudah ada, 2025 belum.
+
+Data dikirim per potongan (memori Apps Script cukup). Menu uji dipecah supaya tiap menu ≤ 6 menit; ada menu baru **Kapasitas** (sebelum & sesudah arsip) dan **Malam Januari**.
+
 ## 2.6.4 — tahan di lapangan: sinyal jelek, ketuk ulang, banyak PIC & sparepart
 Ganti `Api`, `Code`, `Config`, `Maintenance` (Script) dan `App`, `I18n`, `Panduan` (HTML), lalu New version.
 Tidak ada sheet, kolom, trigger, atau izin baru. Run `setup` hanya untuk memunculkan kunci Config baru `IKON_APLIKASI` (opsional).

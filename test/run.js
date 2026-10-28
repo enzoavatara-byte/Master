@@ -990,6 +990,9 @@ test('arsip: pindah pekerjaan final 2026 + Log-nya; yang Pending/menunggu review
   assert.ok(usageArchived >= 5, 'ada pemakaian sparepart yang ikut diarsip: ' + usageArchived);
   const out = ctx.arsipkanTahun_(2026);
   const lapBefore = lap(2026).rows;
+  ['Maintenance', 'Log', 'Pemakaian Sparepart'].forEach(n => { const sh = ss.getSheetByName(n);
+    assert.strictEqual(sh.getMaxRows(), sh.getLastRow() + 500, n + ': baris yang dikosongkan arsip dihapus, sisa 500 (2.6.5)'); });
+  assert.strictEqual(ss.getSheetByName('Arsip Log 2026').getMaxColumns(), ss.getSheetByName('Arsip Log 2026').data[0].length, 'tab arsip tanpa kolom kosong');
   assert.strictEqual(out.maintenance, archived.length);
   assert.strictEqual(out.sparepart, usageArchived);
   assert.strictEqual(ctx.readTable_('Arsip Sparepart 2026').length, usageArchived);
@@ -2769,6 +2772,26 @@ test('2.6.4 batas: PIC tambahan 15, sparepart 20 jenis (sesudah digabung), Log 3
   assert.match(html, /limits\.picMax/);
   assert.match(html, /limits\.partMax/);
   assert.match(html, /height = 15 \* Math\.min\(lines, 25\)/);
+});
+
+test('2.6.5 kapasitas: tab data tanpa kolom kosong sesudah setup; trimSheet_ menyisakan baris cadangan, tidak menyentuh isi', () => {
+  ['Maintenance', 'Log', 'Pemakaian Sparepart'].forEach(n => { const sh = ss.getSheetByName(n);
+    assert.strictEqual(sh.getMaxColumns(), sh.getLastColumn(), n + ': ' + sh.getMaxColumns() + ' kolom = judul'); });
+  assert.strictEqual(ss.getSheetByName('Log').getMaxColumns(), 5, 'Log 26 → 5 kolom');
+  const T = ss.insertSheet('Uji Trim');
+  for (let i = 0; i < 10; i++) T.appendRow(['a' + i, i, '']);
+  const isi = JSON.stringify(T.data);
+  ctx.trimSheet_(T, 5);
+  assert.strictEqual(T.getMaxRows(), 15);
+  assert.strictEqual(T.getMaxColumns(), 3);
+  assert.strictEqual(JSON.stringify(T.data), isi, 'isi tidak berubah');
+  ctx.trimSheet_(T);
+  assert.strictEqual(T.getMaxRows(), 15, 'tanpa spareRows: baris tidak disentuh');
+  ss.deleteSheet(T);
+  // baris baru sesudah dipangkas tetap bisa ditulis (ensureRows_ menambah baris)
+  const id = as('budi@gmail.com', () => ctx.apiStart('L01', { baterai: 'E22H' })).open.id;
+  as('budi@gmail.com', () => ctx.apiCancel(id, { values: { 'Alasan cancel': 'Lainnya' }, other: { 'Alasan cancel': 'uji trim' } }));
+  assert.strictEqual(rec(id).Status, 'Cancelled');
 });
 
 console.log('\n' + passed + ' test lulus' + (process.exitCode ? ', ADA YANG GAGAL' : ''));

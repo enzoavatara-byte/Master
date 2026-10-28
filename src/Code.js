@@ -196,6 +196,10 @@ function setup() {
     sh.getRange(1, 1, 1, sh.getLastColumn()).setFontWeight('bold');
   });
   registerMasterSheets_(ss);   // catat sheetId: setelah ini admin bebas mengganti nama tab pengaturan
+  // 2.6.5: tab data tanpa kolom kosong di kanan (Log 26 → 5 kolom = ±800 ribu sel kosong per 40 ribu baris)
+  ss.getSheets().forEach(function (sh) {
+    if ([APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN].indexOf(sh.getName()) !== -1 || /^Arsip( Log| Sparepart)? \d{4}$/.test(sh.getName())) trimSheet_(sh);
+  });
 
   Object.keys(APP.DATE_COLUMNS).forEach(function (name) {
     var sh = ss.getSheetByName(name);

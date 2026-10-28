@@ -88,6 +88,10 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 
 ## 2. Upgrade
 
+### Ke 2.6.5 (dari 2.6.4)
+Ganti `Code`, `Config`, `Db`, `Rekap` (Script), lalu Deploy → Manage deployments → ✏️ → **New version**, lalu **Run `setup` sekali** (kolom kosong di tab data dipangkas).
+Dari 2.6.3 atau lebih lama: paste semua file `src/`.
+
 ### Ke 2.6.4 (dari 2.6.3)
 Ganti `Api`, `Code`, `Config`, `Maintenance` (Script) dan `App`, `I18n`, `Panduan` (HTML), lalu Deploy → Manage deployments → ✏️ → **New version**.
 Script dan HTML **harus diganti bersama** (HTML baru memanggil fungsi server `apiAct`). Tidak ada sheet / kolom / trigger / izin baru; Run `setup` hanya
@@ -327,12 +331,15 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
   - Cek silang: Kerusakan & MTTR Plant = angka `Rekap` bulan itu (persis, kecuali bulan `KPI_MULAI` jika tanggalnya di tengah bulan). Jumlah baris `TPM <project>` sebulan ≈ Kerusakan project itu; bisa beda sedikit karena TPM memakai tanggal **mulai** dan hanya Completed, KPI memakai tanggal **selesai** dan ikut menghitung Abandoned yang disetujui admin.
 - **Statistik** (Dashboard → Statistik): periode (hari ini / tanggal / bulan / tahun / rentang) + filter → lihat per line, proses, project, teknisi (semua PIC), jenis kerusakan, discipline, masalah, sparepart, hari, bulan.
   Ukuran: Jumlah + **Pareto** (biru = ±80% total), MTTR, Downtime, MTBF (line/proses/project). Dasar = kerusakan yang sudah selesai (sama dengan KPI). Tap batang → daftar pekerjaan → Detail.
-- **Download Riwayat** (Riwayat → ⬇ Download): pekerjaan yang dimulai di periode + filter & status Riwayat; teknisi = pekerjaannya sendiri, admin "Semua" = semua. Kolom = tab Laporan. File **.xlsx** (tanggal asli, sparepart ke bawah, judul dibekukan, filter), maks 5000 baris. Library Excel (ExcelJS 4.4.0) dimuat dari CDN saat dipakai; gagal → CSV.
+- **Download Riwayat** (Riwayat → ⬇ Download): pekerjaan yang dimulai di periode + filter & status Riwayat; teknisi = pekerjaannya sendiri, admin "Semua" = semua. Kolom = tab Laporan. File **.xlsx** (tanggal asli, sparepart ke bawah, judul dibekukan, filter), maks 12.000 baris (±24 laporan/hari = 1 tahun ±8.800; rentang 2 tahun dipotong dengan pemberitahuan → unduh per tahun). Library Excel (ExcelJS 4.4.0) dimuat dari CDN saat dipakai; gagal → CSV.
 - **Hapus data testing** (sebelum mulai pakai sungguhan): menu → **Hapus data testing…** → tanggal mulai pakai (dd/mm/yyyy; kosong = semua) → cek jumlah → ketik `HAPUS`.
   Menghapus permanen pekerjaan yang dimulai sebelum tanggal itu dari `Maintenance`, `Log`, `Pemakaian Sparepart` dan tab Arsip (termasuk sheet yang diproteksi), lalu membangun ulang Laporan, Rekap, TPM & KPI. Bulan KPI yang sudah ditutup s/d tanggal itu dibuka lagi (tutup ulang setelah dicek). Tab `Maintenance <baterai>` & `Pending Work` ikut bersih (rumus). Sheet master tidak disentuh.
   Menghapus baris langsung di tab Laporan/Rekap **tidak bisa**: tab itu selalu dibuat ulang dari `Maintenance`. Backup dulu (File → Make a copy); bisa dikembalikan lewat File → Version history.
 - **Arsip** (awal tahun, menu → Arsipkan data tahun lalu): pekerjaan final + Log + **pemakaian sparepart** pindah ke `Arsip <tahun>`, `Arsip Log <tahun>`, `Arsip Sparepart <tahun>`.
   Laporan tahun itu tetap utuh karena ikut membaca tab arsip.
+  **Wajib tiap Januari.** Uji 2 tahun (±24/hari): tanpa arsip, `Maintenance` berisi 2 tahun (±15.700 baris) dan layar admin yang membaca penuh (Dashboard, Riwayat, Statistik, Download) makin lambat; Dashboard memperingatkan bila ada tahun lalu yang belum diarsip.
+- **Kapasitas file** (2.6.5): Google Sheets maks **10 juta sel per file**, sel kosong ikut dihitung. Dengan ±24 laporan/hari dan arsip tiap Januari: ±27% sesudah 2 tahun, ±1,2 juta sel per tahun → perkiraan penuh ±7 tahun.
+  Sekitar tahun ke-5 (±65%): klik kanan tab `Arsip <tahun lama>`, `Arsip Log …`, `Arsip Sparepart …`, `Laporan <tahun lama>`, `Rekap …`, `KPI …` → **Copy to → New spreadsheet** (file arsip), cek isinya, lalu hapus tab itu di file utama. KPI bulan tertutup tetap aman di `KPI data`.
 
 ---
 
@@ -387,10 +394,13 @@ BOM dihapus, jadi halaman line tidak lagi membawa daftar BOM.
 ## 9. Test & preview
 
 ```bash
-npm test          # 85 test logika server (mock Sheets + jam palsu + Google Translate palsu)
+npm test          # 106 test logika server (mock Sheets + jam palsu + Google Translate palsu)
 npm run perf      # jumlah panggilan ke Sheets per aksi
 npm run preview   # http://localhost:8787/?as=owner@gmail.com
                   # simulasi QR: &line=L01
+npm run uji-tahun                     # bundel uji beban 1 tahun (±15/hari, master lama) → build/gas-tahun
+UJI=bogor2 node test/gas-tahun.js     # bundel uji 2 tahun (master Bogor, ±24/hari, katalog 483 part) ±12 menit
 ```
+Bundel uji beban di-push ke proyek Apps Script **uji** (bukan produksi); menu "🧪 Uji 1 tahun" / "🧪 Uji 2 tahun" di spreadsheet uji, dijalankan berurutan, hasil di tab dengan nama sama.
 User preview: `owner@gmail.com` (Admin), `budi@`, `andi@`, `sari@gmail.com` (Teknisi), `li@gmail.com` (Teknisi, bahasa 中文; terjemahan preview berupa `[zh-CN] teks`). Data: 2 factory, proses, line = unit (L01 & L01-W), katalog sparepart, target KPI, PIC tambahan.
 **Tidak** diuji: hasil Google Translate asli & kuotanya, OAuth asli, trigger sungguhan, rumus FILTER di Sheets asli, kamera di HP sungguhan, email, tampilan tab Laporan di Google Sheets asli.

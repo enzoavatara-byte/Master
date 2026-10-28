@@ -528,6 +528,9 @@ function arsipkanTahun_(year) {
     rewriteKeeping_(msh, mvals, function (row) { return !ids[String(row[mId])]; });
     rewriteKeeping_(lsh, lvals, function (row) { return !ids[String(row[lId])]; });
     if (uRows.length) rewriteKeeping_(ush, uvals, function (row) { return !ids[String(row[uId])]; });
+    // 2.6.5: baris yang dikosongkan dihapus (sisa 500 untuk baris baru) → arsip benar-benar mengurangi sel, bukan menambah
+    [msh, lsh, ush].forEach(function (sh) { if (sh) trimSheet_(sh, 500); });
+    [archiveName_(year), archiveLogName_(year), archiveUsageName_(year)].forEach(function (n) { var a = SpreadsheetApp.getActive().getSheetByName(n); if (a) trimSheet_(a, 0); });
     return { year: year, maintenance: n, log: lRows.length, sparepart: uRows.length, rekap: rekap };
   });
 }
@@ -624,7 +627,7 @@ function hapusDataTesting_(cutoff) {
       if (!sh || sh.getLastRow() < 2) return;
       var vals = sh.getDataRange().getValues();
       var iId = vals[0].map(function (h) { return String(h).trim(); }).indexOf('Maintenance ID');
-      if (iId >= 0) rewriteKeeping_(sh, vals, function (row) { return !ids[String(row[iId])]; });
+      if (iId >= 0) { rewriteKeeping_(sh, vals, function (row) { return !ids[String(row[iId])]; }); trimSheet_(sh, 500); }   // 2.6.5: baris kosong dihapus
     });
     all.forEach(function (name) {
       var sh = ss.getSheetByName(name);

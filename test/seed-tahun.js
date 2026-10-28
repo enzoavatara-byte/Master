@@ -5,11 +5,17 @@
  * jumlah PIC, jam kejadian) di line asli "Maintenance Bogor" (test/data/lines-bogor.json). Orang fiktif (@example.com),
  * email peringatan mati. PRNG ber-seed: data sama setiap dijalankan pada tanggal yang sama.
  *   node test/seed-tahun.js   → ringkasan sebaran (tanpa menulis file)
+ * Profil UJI=bogor2 (2.6.4, uji 2 tahun): 24 bulan s/d kemarin, ±24 laporan per hari, master Bogor (test/data/master-bogor.json, line BGR-…),
+ * katalog uji 483 part, PIC tambahan s/d 15, sparepart s/d 20, arsip 2024 di Januari 2025 (2025 sengaja belum diarsip), perubahan manajemen.
+ *   UJI=bogor2 SEED_PROGRESS=1 node test/seed-tahun.js
  */
 'use strict';
 const { ctx, ss, clock, user } = require('./mock');
 const POLA = require('./data/pola-troublelog.json');
 const LINES = require('./data/lines-bogor.json').lines;
+const BOGOR = process.env.UJI === 'bogor2';
+const BG = BOGOR ? require('./seed-bogor') : null;
+const MB = BOGOR ? require('./data/master-bogor.json') : null;
 
 const RealNow = Date.now;
 let shiftMs = 0;
@@ -18,7 +24,7 @@ const setTime = (ms) => { shiftMs = ms - RealNow(); };
 const as = (email, fn) => { const p = user.email; user.email = email; try { return fn(); } finally { user.email = p; } };
 
 // ---------- acak ber-seed ----------
-let seed = 0x20261024 >>> 0;
+let seed = (BOGOR ? 0x20261029 : 0x20261024) >>> 0;
 const rnd = () => {
   seed = (seed + 0x6D2B79F5) >>> 0;
   let t = seed;
@@ -41,8 +47,11 @@ const pad = (n) => String(n).padStart(2, '0');
 const ymd = (ms) => { const d = W(ms); return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); };
 const dmy = (ms) => { const d = W(ms); return pad(d.getUTCDate()) + '/' + pad(d.getUTCMonth() + 1) + '/' + d.getUTCFullYear(); };
 const hm = (ms) => { const d = W(ms); return pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()); };
-const today0 = wib0(nowMs), START = today0 - 365 * DAY, CUTOFF = today0;   // data s/d kemarin 24:00
 const at0 = (y, m, d) => Date.UTC(y, m - 1, d) - 7 * H;
+// bogor2: mulai tanggal 1, 24 bulan lalu (Nov 2024 bila sekarang Okt 2026) → KPI per bulan utuh
+const today0 = wib0(nowMs), CUTOFF = today0;   // data s/d kemarin 24:00
+const START = BOGOR ? at0(W(today0).getUTCFullYear() - 2, W(today0).getUTCMonth() + 2, 1) : today0 - 365 * DAY;
+const DAYS = Math.round((CUTOFF - START) / DAY);
 const monthKey = (ms) => ymd(ms).slice(0, 7);
 
 // ---------- master ----------
@@ -54,7 +63,7 @@ const tableOf = (sheet, objs) => { const sh = ss.getSheetByName(sheet); sh.data 
 const ADMIN = 'admin@uji.invalid';   // diganti email pelaksana di Apps Script
 const SPV = 'spv@example.com';
 const TECH = {};                     // email → {nama, zh, grup, masuk, keluar}
-const GRUP = {
+const GRUP = BOGOR ? BG.GRUP : {
   A: [['agus', 'Agus Setiawan'], ['rudi', 'Rudi Hartono'], ['fajar', 'Fajar Nugroho'], ['wanglei', 'Wang Lei 王磊', 'zh']],
   B: [['dimas', 'Dimas Prasetyo'], ['eko', 'Eko Saputra'], ['hendra', 'Hendra Wijaya'], ['rizal', 'Rizal Fauzi']],
   C: [['bayu', 'Bayu Pratama'], ['joko', 'Joko Susilo'], ['rian', 'Rian Hidayat'], ['zhangwei', 'Zhang Wei 张伟', 'zh']],
@@ -62,6 +71,7 @@ const GRUP = {
 };
 const JOIN = { galih: { nama: 'Galih Permana', grup: 'B', masuk: at0(2026, 2, 2) } };   // teknisi baru (Feb)
 const LEAVE = { rizal: at0(2026, 7, 1) };                                               // keluar (Jul)
+if (BOGOR) { JOIN.putra = { nama: 'Putra Ramadhan', grup: 'A', masuk: at0(2025, 9, 1) }; LEAVE.andre = at0(2025, 3, 15); }
 Object.keys(GRUP).forEach(g => GRUP[g].forEach(([k, nama, lang]) => {
   TECH[k + '@example.com'] = { nama, zh: lang === 'zh', grup: g, masuk: 0, keluar: LEAVE[k] || Infinity };
 }));
@@ -71,24 +81,32 @@ tableOf('Users', [{ Email: ADMIN, Nama: 'Admin Uji', Peran: 'Admin', Aktif: 'Ya'
   { Email: SPV, Nama: 'Supervisor Maintenance', Peran: 'Admin', Aktif: 'Ya', Bahasa: '' }]
   .concat(Object.keys(TECH).filter(e => !TECH[e].masuk).map(userRow)));
 
-tableOf('Factory', [['F1', 'Factory 1 (Limo)'], ['F2', 'Factory 2 (Geely)'], ['F6', 'Factory 6 (2W)'], ['F10', 'Factory 10 (2W)']]
+const mbRows = (name) => { const [h, ...rows] = MB[name]; return rows.map(r => Object.fromEntries(h.map((k, i) => [k, r[i]]))); };
+if (BOGOR) { tableOf('Factory', mbRows('Factory')); tableOf('Projects', mbRows('Projects')); }
+else tableOf('Factory', [['F1', 'Factory 1 (Limo)'], ['F2', 'Factory 2 (Geely)'], ['F6', 'Factory 6 (2W)'], ['F10', 'Factory 10 (2W)']]
   .map(([id, nama]) => ({ 'Factory ID': id, Nama: nama, Lokasi: 'Bogor', Aktif: 'Ya' })));
-tableOf('Projects', [['F1', 'Limo7', 'Mass Production', 40, 150], ['F1', 'VF7', 'Trial', 45, 120], ['F2', 'E22H', 'Mass Production', 35, 120],
+if (!BOGOR) tableOf('Projects', [['F1', 'Limo7', 'Mass Production', 40, 150], ['F1', 'VF7', 'Trial', 45, 120], ['F2', 'E22H', 'Mass Production', 35, 120],
   ['F2', 'E245', 'Ramp-up', 45, 100], ['F6', '2W', 'Mass Production', 30, 200], ['F10', '2W', 'Mass Production', 30, 200]]
   .map(([f, b, fase, mttr, mtbf]) => ({ 'Factory ID': f, Baterai: b, Fase: fase, 'Target MTTR (menit)': mttr, Aktif: 'Ya', 'Target MTBF (jam)': mtbf })));
 
 // Lines asli; sumber punya 1 Line ID dobel (GX-YN-01-4097 di F1 & F6) dan nama kembar dalam satu factory → diberi pembeda.
 const nameCount = {}, nameSeen = {};
 LINES.forEach(l => { const k = l[3] + '|' + l[1]; nameCount[k] = (nameCount[k] || 0) + 1; });
-const LN = LINES.map(([id, nama, proses, fac, bat, area, aktif, zh]) => {
+const LN = BOGOR ? mbRows('Lines').map(l => ({ id: l['Line ID'], nama: l['Nama Line'], proses: l['Proses'], fac: l['Factory ID'], bat: l['Baterai'],
+  area: l['Area'], aktif: l['Aktif'], zh: l['Nama (中文)'], w: 1 })) : LINES.map(([id, nama, proses, fac, bat, area, aktif, zh]) => {
   if (id === 'GX-YN-01-4097' && fac === 'F6') id = 'GX-YN-01-4148';
   const k = fac + '|' + nama;
   if (nameCount[k] > 1) { nameSeen[k] = (nameSeen[k] || 0) + 1; nama += ' #' + nameSeen[k]; zh += ' #' + nameSeen[k]; }
   return { id, nama, proses, fac, bat: bat || '2W', area, aktif: 'Ya', zh, w: 1 };
 });
-tableOf('Lines', LN.map(l => ({ 'Line ID': l.id, 'Nama Line': l.nama, Proses: l.proses, 'Factory ID': l.fac, Baterai: l.bat, Area: l.area,
+if (BOGOR) tableOf('Lines', mbRows('Lines'));
+else tableOf('Lines', LN.map(l => ({ 'Line ID': l.id, 'Nama Line': l.nama, Proses: l.proses, 'Factory ID': l.fac, Baterai: l.bat, Area: l.area,
   Aktif: l.aktif, 'Nama (中文)': l.zh, 'Nama (English)': l.nama })));
 LN.forEach(l => { l.w = chance(0.15) ? 4 : 1; });   // ±15% mesin "kronis" (Pareto)
+// bogor2: 8 line F2 ikut project baru E30X (Mar 2026), 1 line F1 dimatikan (Jun 2026)
+if (BOGOR) LN.filter(l => l.fac === 'F2' && l.aktif === 'Ya').slice(0, 8).forEach(l => { l.e30x = true; });
+const LINE_MATI = BOGOR ? LN.filter(l => l.fac === 'F1' && l.aktif === 'Ya').slice(-1)[0] : null;
+if (LINE_MATI) LINE_MATI.mati = at0(2026, 6, 1) + 7 * H;
 
 // Katalog dari isi Troublelog
 const CATALOG = [
@@ -104,9 +122,17 @@ const CATALOG = [
   ['Mekanikal', 'Gripper / jig OCV', 'FX021', 'pcs'], ['Mekanikal', 'Baut', 'M6 x 20 SUS', 'pcs'], ['Mekanikal', 'Stopper conveyor', '30 mm', 'pcs'],
   ['Mekanikal', 'Lensa pelindung laser', '120 x 5 mm', 'pcs'], ['Mekanikal', 'Lem 2K', 'Kuning / biru', 'cartridge'],
   ['Mekanikal', 'Bearing', '6205-2RS', 'pcs'], ['Mekanikal', 'Timing belt', 'HTD 5M-450', 'pcs'], ['Program', 'Backup program PLC', '', 'kali']];
-tableOf('Sparepart', CATALOG.map(([j, n, m, s], i) => ({ 'Jenis Sparepart': j, 'Nama Sparepart': n, Model: m, Satuan: s, Urutan: i + 1, Aktif: 'Ya' })));
-const PART = {};
+const KAT = BOGOR ? BG.katalog() : CATALOG;   // bogor2: katalog uji 483 part
+tableOf('Sparepart', KAT.map(([j, n, m, s], i) => ({ 'Jenis Sparepart': j, 'Nama Sparepart': n, Model: m, Satuan: s, Urutan: i + 1, Aktif: 'Ya' })));
+const PART = {}, MODELS = {};
 CATALOG.forEach(([j, n, m]) => { PART[n + (n === 'Selang PU' ? ' ' + m : '')] = ctx.partId_(j, n, m); });
+KAT.forEach(([j, n, m]) => { (MODELS[n] = MODELS[n] || []).push({ id: ctx.partId_(j, n, m), label: n + (m ? ' ' + m : '') }); });
+// part dari teks: bogor2 = model berbobot (model pertama paling sering), profil lama = model tetap
+const partOf = (nama) => {
+  if (!BOGOR) { const c = CATALOG.find(c => c[1] === nama.replace(/ 6 mm$/, '')); return { id: PART[nama], label: c[1] + (c[2] ? ' ' + c[2] : '') }; }
+  const ms = MODELS[nama];
+  return ms[weighted(ms.map((_, i) => (i === 0 ? 6 : (i === 1 ? 3 : 1))))];
+};
 
 // Pilihan sesuai kasus di Troublelog (label 中文 / English diisi admin)
 const OPSI = {
@@ -128,7 +154,8 @@ const OPSI = {
 const OPSI_TAMBAH = { 'Alasan Pause': [['Menunggu operator / produksi', '等待操作员/生产', 'Waiting for operator']],
   'Yang Tertunda': [['Menunggu vendor / teknisi China', '等待供应商/中方技术员', 'Waiting for vendor']],
   'Alasan Cancel': [['Sudah ditangani operator', '操作员已处理', 'Handled by operator']] };
-(function () {
+if (BOGOR) tableOf('Pilihan', mbRows('Pilihan'));
+else (function () {
   const P = ss.getSheetByName('Pilihan'), h = P.data[0].map(String);
   P.data = P.data.filter((r, i) => i === 0 || !OPSI[r[h.indexOf('Jenis')]]);
   const add = (jenis, list, from) => list.forEach(([v, zh, en], i) => P.appendRow(rowOf('Pilihan',
@@ -136,9 +163,16 @@ const OPSI_TAMBAH = { 'Alasan Pause': [['Menunggu operator / produksi', '等待�
   Object.keys(OPSI).forEach(j => add(j, OPSI[j], 0));
   Object.keys(OPSI_TAMBAH).forEach(j => add(j, OPSI_TAMBAH[j], 10));
 })();
-const CONFIG = { NAMA_APLIKASI: 'MTTR Uji 1 Tahun', EMAIL_PERINGATAN: 'Tidak', JAM_OPERASI_PER_HARI: 22, HARI_OPERASI: 'Sen-Min',
-  TANGGAL_LIBUR: '01/01/2026, 20/03/2026, 21/03/2026', KPI_MULAI: dmy(START), LAPORAN_LANGSUNG: 'Tidak' };
-const setConfig = (k, v) => { const C = ss.getSheetByName('Config'), ch = C.data[0]; const r = C.data.find((x, i) => i && x[ch.indexOf('Key')] === k); r[ch.indexOf('Value')] = v; };
+const LIBUR = BOGOR ? BG.LIBUR : ['2026-01-01', '2026-03-20', '2026-03-21'];
+const CONFIG = BOGOR
+  ? Object.assign(Object.fromEntries(mbRows('Config').map(r => [r.Key, r.Value])), { NAMA_APLIKASI: 'MTTR Uji 2 Tahun (Bogor)', EMAIL_PERINGATAN: 'Tidak',
+    TANGGAL_LIBUR: LIBUR.map(k => k.slice(8) + '/' + k.slice(5, 7) + '/' + k.slice(0, 4)).join(', '), KPI_MULAI: dmy(START), LAPORAN_LANGSUNG: 'Tidak' })
+  : { NAMA_APLIKASI: 'MTTR Uji 1 Tahun', EMAIL_PERINGATAN: 'Tidak', JAM_OPERASI_PER_HARI: 22, HARI_OPERASI: 'Sen-Min',
+    TANGGAL_LIBUR: '01/01/2026, 20/03/2026, 21/03/2026', KPI_MULAI: dmy(START), LAPORAN_LANGSUNG: 'Tidak' };
+const setConfig = (k, v) => {
+  const C = ss.getSheetByName('Config'), ch = C.data[0], r = C.data.find((x, i) => i && x[ch.indexOf('Key')] === k);
+  if (r) r[ch.indexOf('Value')] = v; else C.appendRow(rowOf('Config', { Key: k, Value: v }));
+};
 Object.keys(CONFIG).forEach(k => setConfig(k, CONFIG[k]));
 ctx.invalidateMaster_();
 
@@ -182,21 +216,35 @@ const ZH = {
   laser: ['焊接不良', '保护镜片脏污', '更换保护镜片']
 };
 const firstMatch = (rules, text, def) => { for (const [re, v] of rules) if (re.test(text)) return v; return def; };
+const RULE = BOGOR ? { penyebab: BG.PENYEBAB, penanganan: BG.PENANGANAN, def: BG.DEF_PENYEBAB, part: BG.PART_RULE } : null;
+const PZ = BOGOR ? BG.PAUSE : { istirahat: 'Istirahat', part: 'Ambil part/alat', operator: 'Menunggu operator / produksi' };
+const T_GETAR = at0(2025, 7, 1);   // bogor2: admin menambah Penyebab baru di tengah tahun pertama
+const GETAR = 'Getaran / mesin tidak rata';
 const DEF_PENYEBAB = { vision: 'Vision / kamera NG', robot: 'Posisi robot / servo hilang', lem: 'Komponen aus / rusak / habis', mes: 'Program / parameter / bug',
   printer: 'Program / parameter / bug', angin: 'Komponen aus / rusak / habis', uji: 'Kabel / konektor longgar' };
 const NON_PART = /\b(meja|modul|produk|pack|tray|cell|baki|palet|posisi|shift|program|aplikasi|software)\b/;
-function isian(kasus, zh) {
+function isian(kasus, zh, t) {
   const [jenis0, masalah] = KLASTER[kasus.k];
   const lc = (kasus.c + ' ' + kasus.a).toLowerCase(), la = kasus.a.toLowerCase();
   const jenis = kasus.k === 'uji' && /kabel|cable|konektor|connector/.test(kasus.c.toLowerCase()) ? 'Elektrikal' : jenis0;
-  const v = { 'Jenis kerusakan': jenis, Masalah: masalah, Penyebab: firstMatch(PENYEBAB, kasus.c.toLowerCase(), DEF_PENYEBAB[kasus.k] || 'Komponen aus / rusak / habis'),
-    Penanganan: firstMatch(PENANGANAN, la, 'Home / reset / restart') };
-  const t = zh && chance(0.6) ? ZH[kasus.k] : [kasus.p, kasus.c, kasus.a];
-  v['Detail masalah'] = t[0]; v['Detail penyebab'] = t[1]; v['Detail penanganan'] = t[2];
-  const parts = [];
+  const PY = RULE ? RULE.penyebab : PENYEBAB, PN = RULE ? RULE.penanganan : PENANGANAN, DP = RULE ? RULE.def : DEF_PENYEBAB;
+  const v = { 'Jenis kerusakan': jenis, Masalah: masalah, Penyebab: firstMatch(PY, kasus.c.toLowerCase(), null), Penanganan: firstMatch(PN, la, 'Home / reset / restart') };
+  if (!v.Penyebab) v.Penyebab = BOGOR && v.Penanganan === 'Home / reset / restart' && !DP[kasus.k] ? BG.BELUM_TAHU : (DP[kasus.k] || 'Komponen aus / rusak / habis');
+  if (BOGOR && t >= T_GETAR && v.Penyebab === 'Komponen aus / rusak / habis' && chance(0.15)) v.Penyebab = GETAR;
+  const tx = zh && chance(0.6) ? ZH[kasus.k] : [kasus.p, kasus.c, kasus.a];
+  v['Detail masalah'] = tx[0]; v['Detail penyebab'] = tx[1]; v['Detail penanganan'] = tx[2];
+  if (BOGOR) {   // isian yang jarang tapi nyata: teks panjang, emoji, teks yang bisa diubah Sheets jadi jam / rumus
+    if (chance(0.01)) v['Detail masalah'] = (tx[0] + '. Kronologi: ' + [tx[1], tx[2], 'cek ulang sensor dan kabel', 'koordinasi dengan leader produksi'].join('; ') + '. ').repeat(6).slice(0, 760);
+    if (chance(0.01)) v['Detail penanganan'] = tx[2] + ' ✅ normal kembali 👍';
+    if (chance(0.004)) v['Detail masalah'] = pick(['16:53 alarm servo', '- ganti sensor', '+62 812 vendor', '=cek ulang', '07.30 mesin berhenti']);
+  }
+  const parts = [], PR = RULE ? RULE.part : PART_RULE;
   if (/ganti|penggantian|pergantian|tuker|tukar|replace|\bbaru\b/.test(la)) {
-    for (const [re, nama] of PART_RULE) {
-      if (parts.length < 2 && re.test(lc) && !parts.some(p => p.nama === nama)) parts.push({ nama, id: PART[nama], qty: /Baut|Selang/.test(nama) ? between(2, 4) : 1 });
+    for (const [re, nama] of PR) {
+      if (parts.length < 2 && re.test(lc) && !parts.some(p => p.nama === nama)) {
+        const c = partOf(nama);
+        parts.push({ nama, id: c.id, label: c.label, qty: /Baut|Selang|Mur/.test(nama) ? between(2, 4) : 1 });
+      }
     }
     if (!parts.length) {   // "ganti <benda>" yang tidak ada di katalog → part manual (nama dari teks)
       const m = /(?:ganti|penggantian|pergantian)\s+([a-z0-9 \-]{3,30})/.exec(la);
@@ -228,8 +276,8 @@ const RULES = {
     [/printer|print|scanner|label/, /Nameplate/]],
   F10: []
 };
-const FAC_W = { F1: 0.55, F2: 0.30, F6: 0.13, F10: 0.02 };
-const activeLine = (l, t) => l.aktif === 'Ya' && !(l.fac === 'F10' && t >= at0(2026, 6, 1));
+const FAC_W = BOGOR ? { F1: 0.55, F2: 0.32, F6: 0.13, F10: 0 } : { F1: 0.55, F2: 0.30, F6: 0.13, F10: 0.02 };   // Bogor: line F10 nonaktif
+const activeLine = (l, t) => l.aktif === 'Ya' && !(l.fac === 'F10' && t >= at0(2026, 6, 1)) && !(l.mati && t >= l.mati);
 function lineCandidates(kasus, fac, t) {
   const pool = LN.filter(l => l.fac === fac && activeLine(l, t));
   const text = kasus.proc + ' ' + kasus.p.toLowerCase();
@@ -239,7 +287,10 @@ function lineCandidates(kasus, fac, t) {
   if (ab) { const c = cand.filter(l => ab.test(l.nama)); if (c.length) cand = c; }
   return cand;
 }
+const T_E30X = at0(2026, 3, 1);   // bogor2: project baru di F2
 const batteryOf = (l, t) => {
+  if (BOGOR && l.fac === 'F1') return 'Limo7';
+  if (BOGOR && l.e30x && t >= T_E30X && chance(0.3)) return 'E30X';
   if (l.fac === 'F1') return chance(0.85) ? 'Limo7' : 'VF7';
   if (l.fac === 'F2') return chance(t < at0(2026, 4, 1) ? 0.6 : 0.4) ? 'E245' : 'E22H';   // E245 ramp-up: lebih sering di awal
   return '2W';
@@ -286,29 +337,54 @@ function pickLine(kasus, t, span) {
   return cand[weighted(cand.map(l => l.w))];
 }
 
-function planJob(t0) {
+const activeTechs = (t) => Object.keys(TECH).filter(e => TECH[e].masuk <= t && TECH[e].keluar > t);
+/** @param {string=} force bogor2: alur dipaksa ('pending' / 'abandon') untuk situasi akhir bulan / akhir tahun */
+function planJob(t0, force) {
   planNow = t0;
   const kasus = pick(POLA.kasus);
   let dur = kasus.dur ? Math.round(kasus.dur * (0.75 + rnd() * 0.5)) : pick(POLA.durasi);
   dur = Math.max(3, Math.min(480, dur));
   const r = rnd(), night = W(t0).getUTCHours() >= 22 || W(t0).getUTCHours() < 1;
-  let flow = r < 0.02 ? 'cancel' : (night && r < 0.035 ? 'abandon' : ((kasus.wait && chance(0.35)) || r > 0.98 ? 'pending' : (chance(0.15) ? 'pause' : 'normal')));
+  let flow = force || (r < 0.02 ? 'cancel' : (night && r < 0.035 ? 'abandon' : ((kasus.wait && chance(0.35)) || r > 0.98 ? 'pending' : (chance(0.15) ? 'pause' : 'normal'))));
   const pauseLen = flow === 'pause' ? between(10, 40) : 0;
   const span = (flow === 'cancel' ? between(2, 8) : (flow === 'abandon' ? 255 : (flow === 'pending' ? Math.round(dur * (0.3 + rnd() * 0.3)) : dur + pauseLen))) * MIN;
   for (let tries = 0; tries < 5; tries++, t0 += 15 * MIN) {
     if (t0 + span >= CUTOFF) return false;
     const line = pickLine(kasus, t0, span), tech = line && pickTech(t0, span);
     if (!line || !tech) continue;
-    const job = { id: '', line, tech, kasus, flow, t0 };
+    const job = { id: '', line, tech, kasus, flow, t0, force: !!force };
     jobs.push(job);
     reserve(tech, t0, t0 + span); reserve(line.id, t0, t0 + span);
     const zh = TECH[tech].zh, bat = batteryOf(line, t0), stopLine = kasus.stop ? 'Ya' : 'Tidak';
     ev(t0, () => { job.id = as(tech, () => ctx.apiStart(line.id, { baterai: bat, stopLine })).open.id; });
     stats.jobs++; bump(stats.flow, flow); bump(stats.fac, line.fac); stats.hour[W(t0).getUTCHours()]++;
     const selesai = (email, tEnd) => {
-      const x = isian(kasus, TECH[email].zh);
-      const mates = onDuty(tEnd).filter(e => e !== email);
-      const pics = []; for (let i = 1; i < kasus.npic && mates.length; i++) { const m = pick(mates); if (pics.indexOf(m) === -1) pics.push(m); }
+      const x = isian(kasus, TECH[email].zh, tEnd);
+      let mates = onDuty(tEnd).filter(e => e !== email);
+      const pics = [];
+      if (!BOGOR) for (let i = 1; i < kasus.npic && mates.length; i++) { const m = pick(mates); if (pics.indexOf(m) === -1) pics.push(m); }
+      else {
+        // ekor: kerusakan besar, banyak teknisi dipanggil (PIC tambahan s/d 15, dari semua teknisi aktif) / banyak part diganti (s/d 20)
+        let npic = kasus.npic;
+        const q = rnd();
+        if (q < 0.003) npic = chance(0.35) ? 16 : between(9, 15); else if (q < 0.018) npic = between(4, 8);
+        if (npic > 3) mates = activeTechs(tEnd).filter(e => e !== email);
+        while (pics.length < npic - 1 && pics.length < mates.length) { const m = pick(mates); if (pics.indexOf(m) === -1) pics.push(m); }
+        if (pics.length >= 3) stats.bigPics = (stats.bigPics || 0) + 1;
+        stats.maxPics = Math.max(stats.maxPics || 0, pics.length);
+        const qp = rnd(), np = qp < 0.0015 ? (chance(0.35) ? 20 : between(13, 19)) : (qp < 0.0065 ? between(6, 12) : 0);
+        if (np) {
+          x.parts = [];
+          while (x.parts.length < np) {
+            if (chance(0.1)) { x.parts.push({ manual: true, jenis: 'Mekanikal', nama: 'Part rakitan khusus ' + (x.parts.length + 1), model: '', qty: 1 }); continue; }
+            const c = pick(KAT), id = ctx.partId_(c[0], c[1], c[2]);
+            if (!x.parts.some(p => p.id === id)) x.parts.push({ nama: c[1], id, label: c[1] + (c[2] ? ' ' + c[2] : ''), qty: between(1, 4) });
+          }
+          x.values.Penanganan = 'Ganti part';
+          stats.bigParts = (stats.bigParts || 0) + 1;
+        }
+        stats.maxParts = Math.max(stats.maxParts || 0, x.parts.length);
+      }
       if (chance(0.06)) x.values['Catatan'] = pick(['Perlu dicek ulang saat PM mingguan', 'Sudah info ke leader produksi', 'Stok part cadangan tinggal 1', 'Kejadian berulang, usul ganti part saat stop line']);
       if (x.parts.length) stats.parts++;
       if (x.parts.some(p => p.manual)) stats.manualParts++;
@@ -322,7 +398,8 @@ function planJob(t0) {
     } else if (flow === 'abandon') {   // shift malam, lupa ditutup: peringatan 3 jam → Abandoned 4 jam → review admin pagi
       ev(t0 + 185 * MIN, () => ctx.checkTimeouts());
       ev(t0 + 250 * MIN, () => ctx.checkTimeouts());
-      const tr = wib0(t0 + 6 * H) + between(8 * 60 + 30, 10 * 60 + 30) * MIN;
+      // akhir bulan (bogor2): review baru tanggal 3–4, sesudah jadwal tutup bulan otomatis tanggal 2 → tutup bulan menunggu review
+      const tr = wib0(t0 + 6 * H) + between(8 * 60 + 30, 10 * 60 + 30) * MIN + (job.force ? between(2, 3) * DAY : 0);
       if (tr < CUTOFF) {
         const hitung = chance(0.7);
         ev(tr, () => job.id && as(chance(0.5) ? ADMIN : SPV, () => ctx.apiReview(job.id, hitung
@@ -335,7 +412,8 @@ function planJob(t0) {
       const vendor = /vendor|supplier|china|cina|nanshi|remote/.test(kasus.a.toLowerCase());
       const tunda = vendor ? 'Menunggu vendor / teknisi China' : (/ganti|part|spare/.test(kasus.a.toLowerCase()) ? 'Menunggu part' : pick(['Menunggu jadwal stop produksi', 'Butuh teknisi lain', 'Menunggu part']));
       const tenggat = tunda === 'Butuh teknisi lain' ? 'SHIFT' : (vendor ? 'TANGGAL' : 'BESOK');
-      const gap = { 'Menunggu vendor / teknisi China': between(20, 72), 'Menunggu part': between(4, 30), 'Menunggu jadwal stop produksi': between(10, 26), 'Butuh teknisi lain': between(1, 8) }[tunda] * H;
+      let gap = { 'Menunggu vendor / teknisi China': between(20, 72), 'Menunggu part': between(4, 30), 'Menunggu jadwal stop produksi': between(10, 26), 'Butuh teknisi lain': between(1, 8) }[tunda] * H;
+      if (job.force) gap = between(26, 60) * H;   // pending di akhir bulan / 31 Des → dilanjutkan bulan / tahun berikutnya
       ev(tp, () => job.id && as(tech, () => ctx.apiPending(job.id, { values: { 'Pekerjaan dilakukan': ('Cek awal: ' + kasus.c).slice(0, 300), 'Yang tertunda': tunda,
         Catatan: vendor ? 'Vendor sudah dihubungi' : (tunda === 'Menunggu part' ? 'Part sudah diminta ke gudang' : '') }, tenggat, tanggal: ymd(tp + 3 * DAY) })));
       const rest = Math.max(5, dur - Math.round(span / MIN) + between(5, 20)) * MIN;
@@ -354,7 +432,7 @@ function planJob(t0) {
     } else {
       if (flow === 'pause') {
         const tp = t0 + Math.round(dur * (0.3 + rnd() * 0.4)) * MIN, h = W(tp).getUTCHours();
-        const alasan = MEAL.some(([mh]) => Math.abs(h - mh) <= 1) ? 'Istirahat' : pick(['Ambil part/alat', 'Menunggu operator / produksi']);
+        const alasan = MEAL.some(([mh]) => Math.abs(h - mh) <= 1) ? PZ.istirahat : pick([PZ.part, PZ.operator]);
         ev(tp, () => job.id && as(tech, () => ctx.apiPause(job.id, { values: { 'Alasan pause': alasan } })));
         ev(tp + pauseLen * MIN, () => job.id && as(tech, () => ctx.apiResume(job.id)));
       }
@@ -377,8 +455,7 @@ function planManual(tJob, tInput, late) {
   const tech = pickTech(tJob, dur * MIN);
   if (!tech) return;
   reserve(line.id, tJob, tJob + dur * MIN);
-  const x = isian(kasus, false), part = x.parts.filter(p => !p.manual).map(p => {
-    const c = CATALOG.find(c => c[1] === p.nama.replace(/ 6 mm$/, '')); return c[1] + (c[2] ? ' ' + c[2] : '') + ' x' + p.qty; }).join('; ');
+  const x = isian(kasus, false, tJob), part = x.parts.filter(p => !p.manual).map(p => p.label + ' x' + p.qty).join('; ');
   const mate = pick(onDuty(tJob).filter(e => e !== tech));
   const row = { Tanggal: dmy(tJob), 'Jam mulai': hm(tJob), 'Jam selesai': hm(tJob + dur * MIN), Line: line.id, Baterai: batteryOf(line, tJob),
     'Stop line': kasus.stop ? 'Ya' : 'Tidak', 'Jenis kerusakan': x.values['Jenis kerusakan'],
@@ -397,17 +474,26 @@ function planManual(tJob, tInput, late) {
 
 // ---------- kalender ----------
 const FAKTOR_BULAN = { '01': 1.1, '02': 1.0, '03': 0.85, '04': 1.05, '05': 1.0, '06': 0.95, '07': 1.1, '08': 1.0, '09': 1.05, '10': 1.0, '11': 1.05, '12': 0.95 };
-const LIBUR = ['2026-01-01', '2026-03-20', '2026-03-21'];
 const hourW = POLA.jam.map(x => x + 1);
-for (let d = 0; d < 365; d++) {
+for (let d = 0; d < DAYS; d++) {
   const day0 = START + d * DAY, key = ymd(day0);
   const f = FAKTOR_BULAN[key.slice(5, 7)] * (LIBUR.indexOf(key) !== -1 ? 0.2 : 1);
-  const n = Math.max(LIBUR.indexOf(key) !== -1 ? 1 : 6, Math.min(26, Math.round(15 * f + gauss() * 3.2)));
+  const libur = LIBUR.indexOf(key) !== -1;
+  const n = BOGOR ? Math.max(libur ? 2 : 10, Math.min(40, Math.round(24 * f + gauss() * 4.5))) : Math.max(libur ? 1 : 6, Math.min(26, Math.round(15 * f + gauss() * 3.2)));
   const times = [];
   for (let i = 0; i < n; i++) times.push(day0 + weighted(hourW) * H + between(0, 59) * MIN);
-  times.sort((a, b) => a - b).forEach(planJob);
-  if (key.slice(8) === '05') ev(day0 + H, key.slice(5, 7) === '01' ? () => ctx.refreshRekap() : () => ctx.kpiTutupOtomatis_());   // trigger malam: tutup bulan otomatis
-  if (d > 2 && chance(4 / 30)) planManual(day0 - between(1, 2) * DAY + between(7, 21) * H, day0 + between(9 * 60, 10 * 60) * MIN, false);
+  times.sort((a, b) => a - b).forEach(t => planJob(t));
+  if (BOGOR) {
+    // trigger malam tiap hari: tutup bulan otomatis mulai tanggal KPI_TUTUP_OTOMATIS = 2 (menunggu review bila masih ada); 2 Januari = bangun ulang penuh
+    const dd = Number(key.slice(8));
+    if (dd === 2 && key.slice(5, 7) === '01') ev(day0 + H, () => ctx.refreshRekap());
+    else if (dd >= 2 && dd <= 8) ev(day0 + H, () => ctx.kpiTutupOtomatis_());
+    if (ymd(day0 + DAY).slice(8) === '01') {   // hari terakhir bulan: pending dilanjutkan bulan depan (31 Des → Januari), shift malam lupa ditutup
+      planJob(day0 + 22 * H + between(0, 40) * MIN, 'pending');
+      if (chance(0.5)) planJob(day0 + 23 * H + between(0, 20) * MIN, 'abandon');
+    }
+  } else if (key.slice(8) === '05') ev(day0 + H, key.slice(5, 7) === '01' ? () => ctx.refreshRekap() : () => ctx.kpiTutupOtomatis_());   // trigger malam: tutup bulan otomatis
+  if (d > 2 && chance((BOGOR ? 6 : 4) / 30)) planManual(day0 - between(1, 2) * DAY + between(7, 21) * H, day0 + between(9 * 60, 10 * 60) * MIN, false);
 }
 // satu laporan WeChat Februari yang baru masuk setelah tutup bulan (⚠) → admin menutup ulang Februari
 planManual(at0(2026, 2, 26) + 14 * H, at0(2026, 3, 8) + 10 * H, true);
@@ -417,6 +503,22 @@ ev(JOIN.galih.masuk, () => { ss.getSheetByName('Users').appendRow(rowOf('Users',
 ev(LEAVE.rizal + 7 * H, () => { const U = ss.getSheetByName('Users'), h = U.data[0]; U.data.find(r => r[0] === 'rizal@example.com')[h.indexOf('Aktif')] = 'Tidak'; ctx.invalidateMaster_(); });
 ev(at0(2026, 6, 1) + 7 * H, () => { const L = ss.getSheetByName('Lines'), h = L.data[0];
   L.data.forEach((r, i) => { if (i && r[h.indexOf('Factory ID')] === 'F10') r[h.indexOf('Aktif')] = 'Tidak'; }); ctx.invalidateMaster_(); });
+const sheetSet = (sheet, key, val, col, v) => { const S = ss.getSheetByName(sheet), h = S.data[0]; S.data.forEach((r, i) => { if (i && r[h.indexOf(key)] === val) r[h.indexOf(col)] = v; }); };
+if (BOGOR) {   // 2 tahun perubahan manajemen / sistem: semua lewat sheet, tanpa kode
+  planManual(at0(2025, 8, 27) + 14 * H, at0(2025, 9, 9) + 10 * H, true);
+  ev(JOIN.putra.masuk, () => { ss.getSheetByName('Users').appendRow(rowOf('Users', userRow('putra@example.com'))); ctx.invalidateMaster_(); });
+  ev(LEAVE.andre + 7 * H, () => { sheetSet('Users', 'Email', 'andre@example.com', 'Aktif', 'Tidak'); ctx.invalidateMaster_(); });
+  ev(at0(2026, 1, 15) + 7 * H, () => { sheetSet('Users', 'Email', 'hendra@example.com', 'Peran', 'Admin'); ctx.invalidateMaster_(); });   // teknisi jadi admin
+  ev(T_GETAR - MIN, () => { ss.getSheetByName('Pilihan').appendRow(rowOf('Pilihan', { Jenis: 'Penyebab', Nilai: GETAR, Urutan: 13, Aktif: 'Ya',
+    'Nilai (中文)': '振动/设备不平', 'Nilai (English)': 'Vibration / machine not level' })); ctx.invalidateMaster_(); });
+  ev(T_E30X - MIN, () => {
+    ss.getSheetByName('Projects').appendRow(rowOf('Projects', { 'Factory ID': 'F2', Baterai: 'E30X', Fase: 'Trial', Catatan: 'Project baru (uji 2 tahun)', Aktif: 'Ya' }));
+    LN.filter(l => l.e30x).forEach(l => sheetSet('Lines', 'Line ID', l.id, 'Baterai', 'E22H, E245, E30X'));
+    ctx.invalidateMaster_();
+  });
+  ev(LINE_MATI.mati, () => { sheetSet('Lines', 'Line ID', LINE_MATI.id, 'Aktif', 'Tidak'); ctx.invalidateMaster_(); });
+  ev(at0(2025, 1, 10) + 10 * H, () => as(ADMIN, () => ctx.arsipkanTahun_(2024)));   // admin mengarsip 2024 tepat waktu; 2025 sengaja belum
+}
 
 // ---------- jalankan ----------
 events.sort((a, b) => a.t - b.t || a.s - b.s);
@@ -436,17 +538,26 @@ ctx.setup();
 
 const year = W(nowMs).getUTCFullYear();
 const todayKey = ymd(nowMs);
+// untuk UjiTahun: line Input Manual, isian yang berbeda per master, 15 PIC + 20 part untuk tombol terberat
+const lineAktif = LN.filter(l => l.fac === 'F1' && l.aktif === 'Ya' && l !== LINE_MATI);
+const usersAktif = ctx.readTable_('Users').filter(u => u.Aktif === 'Ya' && /@example\.com$/.test(u.Email)).map(u => u.Email);
 module.exports = { ADMIN, SPV, CONFIG, year, todayKey, generatedMs: nowMs, start: ymd(START), end: ymd(CUTOFF - DAY), stats, errors, events: events.length,
-  manualRows, seedMs: RealNow() - T0 };
+  manualRows, seedMs: RealNow() - T0, profil: BOGOR ? 'bogor2' : 'cikarang1', days: DAYS,
+  years: BOGOR ? [year, year - 1, year - 2] : [year, year - 1], archived: BOGOR ? [year - 2] : [],
+  manualLine: BOGOR ? (lineAktif.find(l => /Scanning/.test(l.nama)) || lineAktif[0]).id : 'GX-YN-01-4109',
+  isian: { pause: PZ.istirahat }, pics15: usersAktif.filter(e => e !== 'agus@example.com').slice(0, 15),
+  parts20: KAT.slice(0, 20).map(([j, n, m]) => ({ id: ctx.partId_(j, n, m), qty: 1 })) };
 
 if (require.main === module) {
   const d = stats.dur.slice().sort((a, b) => a - b), q = (p) => d[Math.floor(p * (d.length - 1))];
-  console.log('periode ' + module.exports.start + ' – ' + module.exports.end + ' · ' + stats.jobs + ' pekerjaan (' + (stats.jobs / 365).toFixed(1) + '/hari) · ' +
+  console.log('periode ' + module.exports.start + ' – ' + module.exports.end + ' · ' + stats.jobs + ' pekerjaan (' + (stats.jobs / DAYS).toFixed(1) + '/hari) · ' +
     events.length + ' kejadian · ' + Math.round(module.exports.seedMs / 1000) + ' dtk');
   console.log('alur', JSON.stringify(stats.flow), '· factory', JSON.stringify(stats.fac), '· dilewati', stats.skipped);
   console.log('durasi median ' + q(0.5) + ' (p25 ' + q(0.25) + ', p75 ' + q(0.75) + ', p90 ' + q(0.9) + ', p95 ' + q(0.95) + ') · part ' + stats.parts +
     ' (manual ' + stats.manualParts + ') · PIC tambahan ' + stats.pics + ' · detail 中文 ' + stats.zh + ' · input manual ' + stats.manualInput);
   console.log('jam', stats.hour.join(' '));
+  if (BOGOR) console.log('PIC tambahan ≥3: ' + stats.bigPics + ' (maks ' + stats.maxPics + ') · part ≥6: ' + stats.bigParts + ' (maks ' + stats.maxParts + ') · katalog ' + KAT.length +
+    ' · tab ' + ss.getSheets().map(x => x.getName() + ' ' + (x.data.length - 1)).filter(x => /Arsip|Maintenance$|Log$|Laporan|KPI \d/.test(x)).join(', '));
   console.log('error', JSON.stringify(errors));
   const M = ctx.readTable_('Maintenance'), st = {};
   M.forEach(r => bump(st, r['Status'] + (r['Status review'] ? '/' + r['Status review'] : '')));

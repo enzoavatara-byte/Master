@@ -321,6 +321,21 @@ function ensureRows_(sh, last, spare) {
   if (last > max) sh.insertRowsAfter(max, last - max + (spare || 0));
 }
 
+/**
+ * 2.6.5: batas Google Sheets 10 juta sel per file menghitung sel KOSONG juga (uji 2 tahun: 47% terpakai, separuhnya kosong).
+ * Kolom kosong di kanan judul dihapus (tab baru selalu 26 kolom; Log hanya 5). Dengan spareRows: baris kosong di bawah data
+ * juga dihapus, tersisa spareRows (arsip mengosongkan baris tetapi tidak menghapusnya). Gagal = dibiarkan: hanya hemat ruang.
+ */
+function trimSheet_(sh, spareRows) {
+  try {
+    var w = Math.max(1, sh.getLastColumn()), mc = sh.getMaxColumns();
+    if (mc > w) sh.deleteColumns(w + 1, mc - w);
+    if (spareRows == null) return;
+    var keep = Math.max(2, sh.getLastRow() + spareRows), mr = sh.getMaxRows();
+    if (mr > keep) sh.deleteRows(keep + 1, mr - keep);
+  } catch (e) { console.warn('Rapikan ukuran tab ' + sh.getName() + ': ' + e); }
+}
+
 function colLetter_(n) {
   var s = '';
   while (n > 0) {

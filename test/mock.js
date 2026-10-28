@@ -137,10 +137,12 @@ class Sheet {
   getLastColumn() { return this.data.reduce((m, r) => Math.max(m, r.length), 0); }
   // Seperti Sheets: tab baru 1000 baris; getRange di luar batas = error (appendRow menambah baris sendiri).
   getMaxRows() { return Math.max(this.maxRows || 1000, this.data.length); }
-  getMaxColumns() { return Math.max(26, this.getLastColumn()); }
+  getMaxColumns() { return Math.max(this.maxCols || 26, this.getLastColumn()); }
   hideColumns(c, n) { this.hidden = this.hidden || new Set(); for (let i = 0; i < (n || 1); i++) this.hidden.add(c + i); }
   showColumns() { this.hidden = new Set(); }
   deleteRow(r) { const m = this.getMaxRows(); this.data.splice(r - 1, 1); this.maxRows = Math.max(1, m - 1); }
+  deleteRows(r, n) { const m = this.getMaxRows(); this.data.splice(r - 1, n); this.maxRows = Math.max(1, m - n); this.deleted = (this.deleted || 0) + n; }
+  deleteColumns(c, n) { const m = this.getMaxColumns(); this.data.forEach(row => { if (row.length >= c) row.splice(c - 1, n); }); this.maxCols = Math.max(1, m - n); }
   getRange(r, c, nr, nc) {
     if (typeof r === 'string') { const rg = new Range(this, 1, 1, 1, 1); rg.a1 = r; return rg; }
     if (r + (nr || 1) - 1 > this.getMaxRows()) throw new Error('Those rows are out of bounds. (' + this.name + ' baris ' + (r + (nr || 1) - 1) + ' > ' + this.getMaxRows() + ')');
@@ -152,7 +154,7 @@ class Sheet {
   setFrozenColumns(n) { this.frozenCols = n; }
   clear() { this.data = []; this.formulas = {}; this.fmt = []; }
   clearContents() { this.data = this.data.length ? [] : this.data; this.formulas = {}; return this; }
-  insertColumnsAfter() { return this; }
+  insertColumnsAfter(after, n) { this.maxCols = this.getMaxColumns() + (n || 0); return this; }
   getProtections() { return this.protections; }
   protect() {
     const p = { unprotected: [], setDescription() { return p; }, setWarningOnly() { return p; },
