@@ -89,6 +89,9 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 
 ## 2. Upgrade
 
+### Ke 2.6.10 (dari 2.6.9)
+Ganti `Rekap`, `Config` (Script), lalu Deploy → Manage deployments → ✏️ → **New version**. Run `setup` tidak wajib. Dari 2.6.8 atau lebih lama: lihat *Ke 2.6.9*.
+
 ### Ke 2.6.9 (dari 2.6.8)
 Paste **semua** file `src/`, lalu Deploy → Manage deployments → ✏️ → **New version**, lalu **Run `setup`** (kolom `Availability (%)` di `KPI data`, Pilihan `Proses`, dropdown).
 Spreadsheet yang sudah berisi data tidak diberi baris CONTOH. Bulan KPI yang ditutup sebelum 2.6.9 tidak punya baris Availability; tutup ulang bila perlu.
@@ -239,7 +242,7 @@ Cek kapan saja, login sebagai akun yang menjalankan `setup`: Apps Script → ⏰
 | Serah terima akun pemilik | Lihat *Serah terima ke akun lain* di atas | Apps Script |
 
 ### Uji 2 tahun sendiri (sebelum serah terima berikutnya)
-- Tempatnya **proyek uji** (bukan produksi), yang sudah berisi bundel data simulasi. Buka spreadsheet uji → menu **🧪 Uji 2 tahun** → **▶ Jalankan SEMUA otomatis** → tunggu ±1–2 jam (spreadsheet boleh ditutup).
+- Tempatnya **proyek uji** (bukan produksi), yang sudah berisi bundel data simulasi. Buka spreadsheet uji → menu **🧪 Uji 2 tahun** → **▶ Jalankan SEMUA otomatis** (klik **sekali**) → tunggu ±1,5–2 jam (spreadsheet boleh ditutup, sebaiknya tidak dipakai).
 - Hasil ada di tab **Uji 2 tahun**: per tahap LULUS / GAGAL / INFO; baris tahap 99 "Rantai" menunjukkan kemajuan. Kirim tab itu ke developer / Claude bila ada GAGAL.
 - Membuat data simulasi baru (master lain, lebih banyak tahun, versi kode baru) butuh developer:
   1. `UJI=bogor2 SEED_PROGRESS=1 node test/gas-tahun.js` (±15 menit);

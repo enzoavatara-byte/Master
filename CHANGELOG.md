@@ -3,6 +3,28 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.10 — hasil putaran 1 uji 2 tahun: urut ulang malam yang pasti, uji otomatis tidak boleh ganda
+Ganti `Rekap`, `Config` (Script), lalu New version. Tidak ada sheet, kolom, trigger, atau izin baru (Run `setup` tidak wajib).
+
+**Putaran 1 di Apps Script asli** (▶ Jalankan SEMUA otomatis, 28 Okt malam, 88 menit): 85 LULUS, 70 GAGAL. Sebagian besar karena alat uji, bukan aplikasi:
+- **Dua rantai uji berjalan bersamaan.** Akibatnya:
+  - pemuat data uji kehilangan ±6.000 baris (Maintenance 11.151 dari 17.145): semua cek isi Laporan / TPM / KPI / Dashboard / arsip ikut GAGAL;
+  - semua waktu terukur di bawah beban ganda (tombol 5–7 dtk, baca tab kecil 14 dtk, dua tahap terbunuh di batas 6 menit);
+  - baris palsu "Tahap 2 berhenti".
+- **Tetap terbukti di Google asli:** ID baru unik walau tab diurutkan; kolom sisipan di kiri tidak merusak login / data; 1.460 part aktif dengan cache master 12 potongan; serbuan tanpa ID dobel; tombol saat lock malam tersimpan; malam 167 dtk, Januari 202 dtk, arsip 183 dtk, kapasitas 27–29%.
+
+**Diperbaiki — aplikasi:**
+- **Urut ulang malam tidak bekerja di Sheets asli** (tab yang berfilter + disaring tetap tidak urut, padahal di mock lulus). Kini tanpa `Range.sort`: tab dibaca, diurutkan di memori menurut Mulai lalu ID, ditulis kembali seperti tulis ulang arsip (teks tetap teks). Baris ketikan admin tanpa ID tetap di bawah.
+- Urut ulang hanya dijalankan bila **lebih dari 50 baris** tidak urut (= admin mengurutkan tab). Input Manual bertanggal mundur tidak memicu tulis ulang tiap malam.
+
+**Diperbaiki — alat uji (proyek uji saja):**
+- Rantai ▶ memakai **sewa**: hanya satu eksekusi rantai / pemuat pada satu waktu. Klik ▶ kedua bertanya "mulai ulang dari awal?".
+- Menu 1 mengecek **kelengkapan data** (jumlah baris tiap tab = bundel). Tidak lengkap → rantai berhenti, tidak menguji di atas data rusak.
+- Tahap 4 & 7b dipecah: tombol (4 / 7b) dan layar + Download (**4b / 7d**), supaya jauh di bawah 6 menit.
+- Serbuan mencoba ulang sekali bila "sibuk", seperti HP.
+
+**Uji:** test urut ulang diganti (isi baris identik, sedikit baris tidak urut = dibiarkan) — 118 test. Dry-run mock semua menu + rantai ▶ ujung ke ujung: 172 LULUS, 10 GAGAL (cek rumus FILTER tab per project, tidak dihitung mock). Rantai kedua & menu 1 kedua ditolak.
+
 ## 2.6.9 — final serah terima: Availability per proses, spreadsheet kosong siap pakai, tahan admin ceroboh, kesehatan sistem
 Paste **semua** file `src/` (banyak file berubah), lalu Deploy → Manage deployments → ✏️ → **New version**, lalu **Run `setup`**
 (kolom `Availability (%)` di `KPI data`, Pilihan `Proses`, dropdown baru). Tidak ada izin Google baru. Spreadsheet produksi baru: lihat README → *Mulai dari spreadsheet kosong*.

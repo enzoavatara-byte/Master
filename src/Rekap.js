@@ -173,11 +173,14 @@ function refreshRekap() {
 var MALAM_LOCK_MS_ = 120000;   // trigger malam menunggu teknisi shift malam selesai menekan tombol (bukan gagal)
 
 /**
- * 2.6.9: tab Maintenance diurutkan admin (mis. per Line) → ekor tab bukan lagi pekerjaan terbaru (readHot_, ID baru, layar
- * line). Malam hari, di dalam lock: bila kolom Mulai tidak urut naik, seluruh tab diurutkan ulang menurut Mulai lalu ID, dan
- * dicatat di Log. Baris Input Manual yang ditambah di bawah (tanggal mundur) ikut masuk ke tempatnya.
+ * 2.6.9: tab Maintenance diurutkan admin (mis. per Line) → ekor tab bukan lagi pekerjaan terbaru (readHot_, layar line).
+ * Malam hari, di dalam lock, bila lebih dari URUT_MIN_ baris tidak urut naik menurut Mulai: tab diurutkan ulang menurut Mulai
+ * lalu ID dan dicatat di Log. Input Manual bertanggal mundur (beberapa baris, sudah selesai) tidak memicu tulis ulang.
+ * 2.6.10: tanpa Range.sort (di Sheets asli tab berfilter tidak ikut terurut, uji 2 tahun 6c): seluruh tab dibaca, diurutkan
+ * di memori, ditulis kembali dengan cellText_ seperti rewriteKeeping_ (arsip). Baris tanpa ID (ketikan admin) tetap di bawah.
  * @return {boolean} diurutkan
  */
+var URUT_MIN_ = 50;
 function urutkanMaintenance_(now) {
   var sh = sheet_(APP.SHEETS.MAINT), last = sh.getLastRow();
   if (last < 3) return false;
@@ -190,10 +193,15 @@ function urutkanMaintenance_(now) {
     if (t < prev) turun++;
     else prev = t;
   });
-  if (!turun) return false;
-  try { sh.getRange(2, 1, last - 1, sh.getLastColumn()).sort([{ column: cm + 1, ascending: true }, { column: ci + 1, ascending: true }]); }
-  catch (e) { var f = sh.getFilter(); if (!f) throw e; f.sort(cm + 1, true); }   // tab berfilter yang tidak bisa diurutkan per range: urutkan lewat filternya
-  log_(now, 'Tab Maintenance', APP.EVENTS.URUT, APP.SYSTEM_USER, 'Tab Maintenance tidak urut (' + turun + ' baris; mis. diurutkan manual atau Input Manual tanggal mundur) → diurutkan ulang menurut Mulai.');
+  if (turun <= URUT_MIN_) return false;
+  var w = sh.getLastColumn(), body = sh.getRange(2, 1, last - 1, w).getValues();
+  var tm = function (r) { return r[cm] instanceof Date ? r[cm].getTime() : Infinity; };
+  var ada = [], tanpa = [];
+  body.forEach(function (r, i) { (isBlank_(r[ci]) ? tanpa : ada).push([r, i]); });
+  ada.sort(function (a, b) { return (tm(a[0]) - tm(b[0])) || String(a[0][ci]).localeCompare(String(b[0][ci])) || (a[1] - b[1]); });
+  var out = ada.concat(tanpa).map(function (x) { return x[0].map(cellText_); });   // teks "16:53" tetap teks
+  sh.getRange(2, 1, out.length, w).setValues(out);
+  log_(now, 'Tab Maintenance', APP.EVENTS.URUT, APP.SYSTEM_USER, 'Tab Maintenance tidak urut (' + turun + ' baris, mis. diurutkan manual) → diurutkan ulang menurut Mulai.');
   return true;
 }
 

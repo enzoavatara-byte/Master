@@ -2984,15 +2984,29 @@ test('2.6.9 integritas: tab Maintenance diurutkan admin → ID baru tetap unik; 
   assert.strictEqual(sh.data.filter(r => r[cid] === id3).length, 1, 'ID unik');
   assert.strictEqual(Number(id3.slice(-2)), Math.max(...ids.map(x => Number(x.slice(-2)))) + 1, 'urutan berikutnya');
   as(tech, () => ctx.apiCancel(id3, { values: { 'Alasan cancel': 'Lainnya' }, other: { 'Alasan cancel': 'uji urut' } }));
-  // malam: tab tidak urut → diurutkan ulang menurut Mulai + dicatat
-  const sorts = sh.sorts || 0;
+  // malam: tab diurutkan admin (per Line, Z→A) → diurutkan ulang menurut Mulai di memori (2.6.10, tanpa Range.sort) + dicatat
+  const sig = (rows) => rows.map(r => JSON.stringify(r.map(v => (v instanceof Date ? v.getTime() : v)))).sort().join('\n');
+  sh.data = [h].concat(sh.data.slice(1).filter(r => r.some(v => v !== '')).sort((a, b) => String(b[cl]).localeCompare(String(a[cl]))));
+  sh.data.push(h.map((x, j) => (j === 2 ? 'cek lagi besok (admin)' : '')));   // ketikan admin di bawah data (tanpa ID)
+  const isi0 = sig(sh.data.slice(1)), urut = () => ctx.readTable_('Log').filter(r => r.Kejadian === 'urut ulang').length, u0 = urut();
+  const min0 = ctx.URUT_MIN_;
+  ctx.URUT_MIN_ = 5;   // data test kecil (±30 baris); produksi 50
+  try {
   ctx.refreshRekap();
-  assert.strictEqual(sh.sorts, sorts + 1, 'diurutkan sekali');
   const t = sh.data.slice(1).filter(r => r[cm] instanceof Date).map(r => r[cm].getTime());
-  assert.ok(t.every((v, i) => !i || t[i - 1] <= v), 'Mulai urut naik');
-  assert.ok(ctx.readTable_('Log').some(r => r.Kejadian === 'urut ulang'), 'Log: urut ulang');
+  assert.ok(t.length > 20 && t.every((v, i) => !i || t[i - 1] <= v), 'Mulai urut naik (' + t.length + ' baris)');
+  assert.strictEqual(sig(sh.data.slice(1)), isi0, 'isi baris identik, hanya urutannya');
+  assert.strictEqual(sh.data[sh.data.length - 1][2], 'cek lagi besok (admin)', 'baris tanpa ID tetap di bawah');
+  assert.strictEqual(urut(), u0 + 1, 'Log: urut ulang');
+  sh.data.pop();
   ctx.refreshRekap();
-  assert.strictEqual(sh.sorts, sorts + 1, 'sudah urut → tidak diurutkan lagi');
+  assert.strictEqual(urut(), u0 + 1, 'sudah urut → tidak ditulis ulang');
+  // sedikit baris tidak urut (Input Manual bertanggal mundur ditambah di bawah) → tidak ditulis ulang tiap malam
+  const rest = sh.data.slice(1), few = rest.splice(5, 3);
+  sh.data = [h].concat(rest, few);
+  ctx.refreshRekap();
+  assert.strictEqual(urut(), u0 + 1, '3 baris bertanggal mundur di bawah → dibiarkan');
+  } finally { ctx.URUT_MIN_ = min0; }
 });
 
 test('2.6.9 integritas: kolom disisipkan admin di kiri (Maintenance & Users) → data, login, tombol, laporan tetap benar', () => {
