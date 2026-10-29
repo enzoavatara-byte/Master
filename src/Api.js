@@ -1,0 +1,731 @@
+/**
+ * API baca (beranda, halaman line, pending, riwayat, review, dashboard, QR) + keputusan review.
+ * Date tidak boleh dikirim lewat google.script.run, jadi semua tanggal dikirim sebagai ISO string.
+ */
+
+function ctx_() {
+  return { md: masterData_(), names: userNameMap_(), now: new Date() };
+}
+
+function nameOf_(c, email) {
+  var e = String(email || '').toLowerCase();
+  if (!e) return '';
+  if (e === APP.SYSTEM_USER.toLowerCase()) return 'Sistem';
+  return c.names[e] || e;
+}
+
+function serialize_(r, c) {
+  var line = lineOf_(c.md, r['Line']);
+  var tenggat = r['Tenggat'] instanceof Date ? r['Tenggat'] : null;
+  var factory = factoryOfRecord_(c.md, r);
+  return {
+    id: String(r['Maintenance ID']),
+    line: String(r['Line']),
+    lineName: line ? line.name : '',
+    factory: factory,
+    factoryName: c.md.factoryMap[factory] ? c.md.factoryMap[factory].name : factory,
+    battery: String(r['Baterai'] || ''),
+    tipe: String(r['Tipe'] || ''),
+    mesinId: String(r['Mesin ID'] || ''),
+    mesin: String(r['Nama Mesin'] || ''),
+    status: String(r['Status']),
+    techFirst: String(r['Teknisi awal'] || ''),
+    techFirstName: nameOf_(c, r['Teknisi awal']),
+    techLast: String(r['Teknisi terakhir'] || ''),
+    techLastName: nameOf_(c, r['Teknisi terakhir']),
+    startIso: iso_(r['Mulai']),
+    startText: fmtDate_(r['Mulai']),
+    finishIso: iso_(r['Selesai']),
+    finishText: fmtDate_(r['Selesai']),
+    sinceIso: iso_(r['Status sejak']),
+    activeMin: Number(r['Total aktif (menit)'] || 0),
+    pauseMin: Number(r['Total pause (menit)'] || 0),
+    pendingMin: Number(r['Total pending (menit)'] || 0),
+    masalah: String(r['Masalah'] || ''),
+    penyebab: String(r['Penyebab'] || ''),
+    penanganan: String(r['Penanganan'] || ''),
+    part: String(r['Part'] || ''),
+    parts: String(r['Part'] || '').split(/\n|; /).map(function (x) { return x.trim(); }).filter(String),
+    proses: prosesOfRecord_(c.md, r),
+    stopLine: String(r['Stop line'] || ''),
+    jenisKerusakan: String(r['Jenis kerusakan'] || ''),
+    detailMasalah: textOf_(r['Detail masalah']),
+    detailPenyebab: textOf_(r['Detail penyebab']),
+    detailPenanganan: textOf_(r['Detail penanganan']),
+    tertunda: String(r['Yang tertunda'] || ''),
+    tenggatIso: iso_(tenggat),
+    tenggatText: fmtDate_(tenggat),
+    overdue: !!(tenggat && r['Status'] === APP.STATUS.PENDING && tenggat < c.now),
+    cancelReason: String(r['Alasan cancel'] || ''),
+    review: String(r['Status review'] || ''),
+    mttr: String(r['Masuk MTTR'] || ''),
+    confirmIso: iso_(r['Konfirmasi terakhir']),
+    warnedIso: iso_(r['Peringatan pada']),
+    dikerjakan: String(r['Pekerjaan dilakukan'] || ''),
+    catatan: String(r['Catatan'] || ''),
+    reviewedByName: nameOf_(c, r['Direview oleh']),
+    reviewedText: fmtDate_(r['Direview pada']),
+    reviewNote: String(r['Catatan review'] || ''),
+    extra: extraFields_(r, c)
+  };
+}
+
+/** Field tambahan (dibuat admin di sheet Form) untuk ditampilkan di Detail. */
+function extraFields_(r, c) {
+  var out = [];
+  var system = ['Masalah', 'Penyebab', 'Penanganan', 'Yang tertunda', 'Alasan cancel', 'Catatan', 'Pekerjaan dilakukan',
+    'Jenis kerusakan', 'Detail masalah', 'Detail penyebab', 'Detail penanganan'];
+  APP.FORMS.forEach(function (f) {
+    (c.md.forms[f] || []).forEach(function (d) {
+      if (d.type === 'sistem' || system.indexOf(d.field) !== -1) return;
+      if (r[d.field] !== undefined && r[d.field] !== '' && !out.some(function (o) { return o.label === d.label; })) {
+        out.push({ label: d.label, value: textOf_(r[d.field]) });
+      }
+    });
+  });
+  return out;
+}
+
+function sortPending_(list) {
+  return list.sort(function (a, b) {
+    if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+    return String(a.sinceIso).localeCompare(String(b.sinceIso)); // paling lama dulu
+  });
+}
+
+/** Review = keputusan admin. 2.6: Pending tidak lagi (Cek dihapus); 2.6.1: Cancelled juga tidak (hanya bisa "Setujui"). */
+function reviewVisible_(r, user) {
+  return r['Status review'] === APP.REVIEW.NEEDED && r['Status'] === APP.STATUS.ABANDONED && isAdmin_(user);
+}
+
+function canDecide_(r, user) {
+  return isAdmin_(user);
+}
+
+// ---------- Bootstrap & beranda ----------
+
+/**
+ * @param {string} lineId  dari QR (?line=)
+ * @param {string} mesinId dari QR mesin lama (?mesin=): diabaikan sejak 2.6 (line = unit), QR lama tetap membuka line-nya
+ * @param {Object} filter  filter Beranda yang tersimpan di HP
+ */
+function apiBootstrap(lineId, mesinId, filter) {
+  return bootstrap_(requireUser_(), lineId, mesinId, filter);
+}
+
+/** Data awal. Dipanggil doGet (ditanam di halaman → hemat satu perjalanan) atau apiBootstrap. */
+function bootstrap_(user, lineId, mesinId, filter) {
+  // 2.6.3: baris panas cukup untuk pekerjaan saya, jumlah pending / review, grafik 7 hari (ekor ±4 minggu) & aktivitas terakhir
+  var rows = readHot_();
+  var c = ctx_();
+  var mine = openForUser_(rows, user.email);
+  return {
+    user: user,
+    serverNowIso: c.now.toISOString(),
+    limits: (function (l) { l.picMax = APP.PIC_MAX; l.partMax = APP.PART_MAX; return l; })(getLimits_()),
+    master: clientMaster_(c.md),
+    notes: c.md.notes.filter(function (n) { return user.role === APP.ROLES.ADMIN || n.untuk !== APP.ROLES.ADMIN; }),
+    stopLineDefault: splitList_(getConfig_('STOP_LINE_DEFAULT')),
+    cekAkun: isYes_(getConfig_('CEK_AKUN')),
+    myOpen: mine ? serialize_(mine, c) : null,
+    counts: withSaran_(counts_(rows, user), user),
+    stats: stats_(rows, c, filter),
+    recent: recent_(rows, c, filter),
+    lineView: lineId ? lineView_(lineId, rows, c, user) : null
+  };
+}
+
+/**
+ * Akun Google yang benar-benar dipakai untuk panggilan google.script.run. Bisa BEDA dengan akun yang membuka halaman
+ * jika browser login beberapa akun (bug Google: panggilan memakai akun utama browser). Tanpa baca sheet.
+ */
+function apiWhoAmI() {
+  return currentEmail_();
+}
+
+/** Ringan: dipanggil ulang saat app kembali dibuka / tiap menit. */
+/**
+ * @param {string=} clientVersion versi halaman yang sedang terbuka di HP. Beda dengan server (admin baru deploy
+ *   versi baru) → `updated` + URL aplikasi, supaya HP menampilkan ajakan muat ulang.
+ */
+function apiRefresh(filter, clientVersion) {
+  var user = requireUser_();
+  var rows = readHot_();
+  var c = ctx_();
+  var mine = openForUser_(rows, user.email);
+  var out = {
+    serverNowIso: c.now.toISOString(),
+    myOpen: mine ? serialize_(mine, c) : null,
+    counts: withSaran_(counts_(rows, user), user),
+    stats: stats_(rows, c, filter),
+    recent: recent_(rows, c, filter)
+  };
+  if (clientVersion && clientVersion !== APP.VERSION) {
+    out.updated = APP.VERSION;
+    try { out.appUrl = ScriptApp.getService().getUrl(); } catch (e) { /* tanpa URL: HP diminta buka ulang manual */ }
+  }
+  return out;
+}
+
+function counts_(rows, user) {
+  var pending = 0, review = 0;
+  rows.forEach(function (r) {
+    if (r['Status'] === APP.STATUS.PENDING) pending++;
+    if (reviewVisible_(r, user) || (isAdmin_(user) && isOpen_(r) && r['Peringatan pada'] instanceof Date)) review++;
+  });
+  return { pending: pending, review: review };
+}
+
+/** 7 hari terakhir (WIB): jumlah maintenance selesai per hari (semua tipe) + MTTR (hanya Masuk MTTR = Ya). */
+function stats_(rows, c, filter) {
+  var days = [], idx = {};
+  var names = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+  for (var i = 6; i >= 0; i--) {
+    var d = new Date(c.now.getTime() - i * 86400000);
+    var key = fmtTz_(d, 'yyyy-MM-dd');
+    var dow = Number(fmtTz_(d, 'u')) % 7; // 1=Senin..7=Minggu -> 0=Minggu
+    idx[key] = days.length;
+    days.push({ key: key, label: i === 0 ? 'Hari ini' : names[dow], count: 0 });
+  }
+  var sum = 0, n = 0, prev = 0;
+  rows.forEach(function (r) {
+    if (r['Status'] !== APP.STATUS.COMPLETED && r['Masuk MTTR'] !== APP.MTTR.YES) return;
+    if (!matchFilter_(c.md, r, filter, c.names)) return;
+    var when = r['Selesai'] instanceof Date ? r['Selesai'] : r['Status sejak'];
+    if (!(when instanceof Date)) return;
+    var k = fmtTz_(when, 'yyyy-MM-dd');
+    if (!idx.hasOwnProperty(k)) return;
+    days[idx[k]].count++;
+    if (r['Masuk MTTR'] === APP.MTTR.YES) { sum += Number(r['Total aktif (menit)'] || 0); n++; }
+    else prev++;
+  });
+  return { days: days, mttrMin: n ? round2_(sum / n) : null, mttrN: n, otherN: prev };
+}
+
+function recent_(rows, c, filter) {
+  var byId = {};
+  rows.forEach(function (r) { byId[String(r['Maintenance ID'])] = r; });
+  return readTail_(APP.SHEETS.LOG, 80).reverse().filter(function (e) {
+    var r = byId[String(e['Maintenance ID'])];
+    return !filter || !r || matchFilter_(c.md, r, { factory: filter.factory, baterai: filter.baterai, line: filter.line }, c.names);
+  }).slice(0, 8).map(function (e) {
+    var r = byId[String(e['Maintenance ID'])];
+    return {
+      whenIso: iso_(e['Timestamp']),
+      event: String(e['Kejadian']),
+      userName: nameOf_(c, e['User']),
+      id: String(e['Maintenance ID']),
+      line: r ? String(r['Line']) : '',
+      mesin: r ? String(r['Nama Mesin'] || '') : '',
+      battery: r ? String(r['Baterai'] || '') : '',
+      detail: String(e['Detail'] || '')
+    };
+  });
+}
+
+// ---------- Halaman line ----------
+
+function apiGetLine(lineId) {
+  var user = requireUser_();
+  return lineView_(lineId, readHot_(), ctx_(), user);
+}
+
+/** Halaman line. 2.6: line = unit kerja → satu pekerjaan terbuka per line, tanpa pilih mesin. */
+function lineView_(lineId, rows, c, user) {
+  var md = c.md;
+  var line = lineOf_(md, lineId);
+  if (!line) return { found: false, lineId: normLine_(lineId), serverNowIso: c.now.toISOString() };
+  var mineRow = openForUser_(rows, user.email);
+  var key = line.id;
+  var opens = rows.filter(function (r) { return isOpen_(r) && normLine_(r['Line']) === key; });
+  var mineHere = mineRow && normLine_(mineRow['Line']) === key ? mineRow : null;
+  var others = opens.filter(function (r) { return r !== mineHere; });
+
+  var pendings = rows.filter(function (r) {
+    return r['Status'] === APP.STATUS.PENDING && normLine_(r['Line']) === key;
+  }).map(function (r) { return serialize_(r, c); });
+
+  var last = lastBattery_(rows, key);
+  var first = mineHere || others[0] || null;
+
+  return {
+    found: true,
+    line: {
+      id: line.id, name: line.name, factory: line.factory, proses: line.proses,
+      factoryName: md.factoryMap[line.factory] ? md.factoryMap[line.factory].name : line.factory,
+      batteries: line.batteries, area: line.area, active: line.active
+    },
+    open: first ? serialize_(first, c) : null,
+    openIsMine: !!(first && first === mineHere),
+    others: others.map(function (r) { return serialize_(r, c); }),
+    lineLocked: !mineHere && others.length > 0,
+    myOpenElsewhere: (mineRow && !mineHere) ? serialize_(mineRow, c) : null,
+    pendings: sortPending_(pendings),
+    lastBattery: line.batteries.indexOf(last) !== -1 ? last : (line.batteries[0] || ''),
+    serverNowIso: c.now.toISOString()
+  };
+}
+
+// ---------- Pending ----------
+
+function apiListPending(filter) {
+  requireUser_();
+  var c = ctx_();
+  var list = readHot_()
+    .filter(function (r) { return r['Status'] === APP.STATUS.PENDING && matchFilter_(c.md, r, filter, c.names); })
+    .map(function (r) { return serialize_(r, c); });
+  return { serverNowIso: c.now.toISOString(), items: sortPending_(list) };
+}
+
+/** Detail + riwayat kejadian (dari Log) untuk satu Maintenance ID. */
+function apiGetDetail(id) {
+  var user = requireUser_();
+  var c = ctx_();
+  // 2.6.3: satu pekerjaan & Log-nya dicari di server, bukan membaca seluruh Maintenance + Log (±14.000 baris setahun)
+  var r = findHot_([], id);
+  if (!r) throw new Error('Maintenance tidak ditemukan.');
+  var events = readWhere_(APP.SHEETS.LOG, 'Maintenance ID', id)
+    .map(function (e) {
+      return { whenIso: iso_(e['Timestamp']), whenText: fmtDate_(e['Timestamp']), event: String(e['Kejadian']), userName: nameOf_(c, e['User']), detail: String(e['Detail'] || '') };
+    });
+  var rec = serialize_(r, c);
+  rec.canDecide = rec.review === APP.REVIEW.NEEDED && canDecide_(r, user);
+  return { serverNowIso: c.now.toISOString(), record: rec, events: events };
+}
+
+// ---------- Riwayat ----------
+
+/** @param {{scope?:'mine'|'all', status?:string, tipe?:string, factory?, baterai?, battery?, line?, q?}} f  scope 'all' hanya Admin. */
+function apiHistory(f) {
+  var user = requireUser_();
+  f = f || {};
+  if (f.battery && !f.baterai) f.baterai = f.battery;
+  var all = f.scope === 'all' && isAdmin_(user);
+  var c = ctx_();
+  var rows = readTable_(APP.SHEETS.MAINT).filter(function (r) {
+    if (!all && !isInvolved_(r, user.email)) return false;
+    if (f.status && r['Status'] !== f.status) return false;
+    if (f.tipe && String(r['Tipe'] || '') !== f.tipe) return false;
+    return matchFilter_(c.md, r, f, c.names);
+  });
+  rows.sort(function (a, b) { return (b['Mulai'] || 0) - (a['Mulai'] || 0); });
+  return {
+    serverNowIso: c.now.toISOString(),
+    total: rows.length,
+    truncated: rows.length > APP.HISTORY_LIMIT,
+    items: rows.slice(0, APP.HISTORY_LIMIT).map(function (r) { return serialize_(r, c); }),
+    spreadsheetUrl: isAdmin_(user) ? SpreadsheetApp.getActive().getUrl() : ''
+  };
+}
+
+/**
+ * Download Riwayat (2.6): kolom = tab Laporan (sheet Format Laporan), pekerjaan yang DIMULAI di rentang tanggal + filter Riwayat.
+ * Teknisi: hanya pekerjaan yang ia ikuti; Admin: scope "all" = semua. Cancelled hanya jika dipilih di filter status.
+ * Tanggal dikirim sebagai {d: ISO} supaya klien menulis sel tanggal Excel asli. Maks APP.EXPORT_LIMIT baris (paling awal).
+ * @param {{from:string, to:string, scope?:string, status?:string, tipe?:string, factory?, baterai?, proses?, line?, q?}} f
+ */
+function apiExport(f) {
+  var user = requireUser_();
+  f = f || {};
+  var all = f.scope === 'all' && isAdmin_(user);
+  var c = ctx_(), rg = statsRange_(f);
+  var rows = periodRows_(rg, function (r) {
+    if (!all && !isInvolved_(r, user.email)) return false;
+    if (f.status ? r['Status'] !== f.status : r['Status'] === APP.STATUS.CANCELLED) return false;
+    if (f.tipe && String(r['Tipe'] || '') !== f.tipe) return false;
+    return matchFilter_(c.md, r, f, c.names);
+  });
+  var total = rows.length;
+  rows = rows.slice(0, APP.EXPORT_LIMIT);
+  var cell = function (v) { return v instanceof Date ? { d: v.toISOString() } : (v == null ? '' : v); };
+  return {
+    serverNowIso: c.now.toISOString(), from: rg.fromKey, to: rg.toKey, total: total, truncated: total > rows.length, limit: APP.EXPORT_LIMIT,
+    title: String(getConfig_('LAPORAN_JUDUL') || ''), appName: appName_(),
+    columns: c.md.report.map(function (k) { return { name: k.kolom, source: k.sumber }; }),
+    rows: laporanCells_(rows, rg, c).map(function (row) { return row.map(cell); })
+  };
+}
+
+/** Pekerjaan yang DIMULAI di rentang rg (tab Maintenance + arsip tahun-tahun itu), tanpa dobel, urut waktu mulai. keep(r) = saringan. */
+function periodRows_(rg, keep) {
+  var seen = {}, rows = [];
+  var add = function (r) {
+    var id = String(r['Maintenance ID']);
+    if (seen[id] || !(r['Mulai'] instanceof Date) || r['Mulai'] < rg.from || r['Mulai'] >= rg.to || !keep(r)) return;
+    seen[id] = true;
+    rows.push(r);
+  };
+  readTable_(APP.SHEETS.MAINT).forEach(add);
+  for (var y = yearOf_(rg.from); y <= yearOf_(new Date(rg.to.getTime() - 1)); y++) {
+    if (findSheet_(archiveName_(y))) readTable_(archiveName_(y)).forEach(add);
+  }
+  rows.sort(function (a, b) { return (a['Mulai'] - b['Mulai']) || String(a['Maintenance ID']).localeCompare(String(b['Maintenance ID'])); });
+  return rows;
+}
+
+/** Nilai sel format Laporan (kolom Format Laporan) untuk `rows`; Date tetap Date. Dipakai Download Riwayat & tab backup. */
+function laporanCells_(rows, rg, c) {
+  var usage = statsUsage_(rows, rg), cols = c.md.report;
+  return rows.map(function (r, i) {
+    var used = usage[String(r['Maintenance ID'])] || [];
+    return cols.map(function (k) { return laporanValue_(k.sumber, r, i, used, c.md, c.names); });
+  });
+}
+
+// ---------- Review ----------
+
+function apiListReview(filter) {
+  var user = requireUser_();
+  var c = ctx_();
+  // review = Abandoned "Perlu review", peringatan = terbuka → semuanya ada di baris panas
+  var rows = readHot_().filter(function (r) { return matchFilter_(c.md, r, filter, c.names); });
+  var items = rows.filter(function (r) { return reviewVisible_(r, user); }).map(function (r) {
+    var s = serialize_(r, c);
+    s.canDecide = canDecide_(r, user);
+    return s;
+  });
+  var order = {};
+  order[APP.STATUS.ABANDONED] = 0; order[APP.STATUS.PENDING] = 1; order[APP.STATUS.CANCELLED] = 2;
+  items.sort(function (a, b) { return (order[a.status] - order[b.status]) || String(b.sinceIso).localeCompare(String(a.sinceIso)); });
+  var warnings = isAdmin_(user)
+    ? rows.filter(function (r) { return isOpen_(r) && r['Peringatan pada'] instanceof Date; }).map(function (r) { return serialize_(r, c); })
+    : [];
+  return { serverNowIso: c.now.toISOString(), items: items, warnings: warnings };
+}
+
+/**
+ * Keputusan review.
+ * @param {{action:'SETUJU'|'HITUNG'|'KELUARKAN', note?:string, activeMin?:number}} p  (Admin; Cek Pending dihapus di 2.6)
+ *   SETUJU   : Cancelled disetujui.
+ *   HITUNG   : Abandoned dihitung dengan menit aktif hasil koreksi Admin (masuk MTTR hanya jika tipenya dihitung).
+ *   KELUARKAN: Abandoned dikeluarkan dari MTTR.
+ */
+function apiReview(id, p, filter) {
+  var user = requireUser_();
+  p = p || {};
+  var note = cleanText_(p.note, 500);
+  withLock_(function () {
+    var rows = readHot_();
+    var r = findHot_(rows, id);
+    if (!r) throw new Error('Maintenance tidak ditemukan.');
+    if (r['Status review'] !== APP.REVIEW.NEEDED) throw new Error('Record ini tidak ada di antrian review.');
+    if (!canDecide_(r, user)) throw new Error('Anda tidak berwenang mereview record ini.');
+    var st = r['Status'], detail;
+    var now = new Date();
+
+    if (st === APP.STATUS.CANCELLED && p.action === 'SETUJU') {
+      detail = 'Cancel disetujui';
+    } else if (st === APP.STATUS.ABANDONED && (p.action === 'HITUNG' || p.action === 'KELUARKAN')) {
+      if (!note) throw new Error('Catatan review wajib diisi untuk Abandoned.');
+      if (p.action === 'HITUNG') {
+        var min = Number(p.activeMin);
+        var maxMin = (now.getTime() - r['Mulai'].getTime()) / 60000;
+        if (!(isFinite(min) && min > 0 && min <= maxMin)) throw new Error('Menit aktif harus > 0 dan tidak lebih dari waktu sejak Mulai (' + Math.floor(maxMin) + ' menit).');
+        detail = 'Dihitung: aktif ' + r['Total aktif (menit)'] + ' -> ' + round2_(min) + ' menit';
+        r['Total aktif (menit)'] = round2_(min);
+        r['Masuk MTTR'] = countsForMttr_(r) ? APP.MTTR.YES : APP.MTTR.NO;
+      } else {
+        detail = 'Dikeluarkan dari MTTR';
+        r['Masuk MTTR'] = APP.MTTR.NO;
+      }
+    } else {
+      throw new Error('Keputusan review tidak valid untuk status ' + st + '.');
+    }
+    r['Status review'] = APP.REVIEW.DONE;
+    r['Direview oleh'] = user.email;
+    r['Direview pada'] = now;
+    r['Catatan review'] = note;
+    writeObj_(APP.SHEETS.MAINT, r);
+    log_(now, r['Maintenance ID'], APP.EVENTS.REVIEW, user.email, detail + (note ? ' · ' + note : ''));
+    syncReports_(r, rows);
+  });
+  return apiListReview(filter);
+}
+
+// ---------- Dashboard ----------
+
+function inc_(map, key, minutes, mttr) {
+  if (!map[key]) map[key] = { key: key, count: 0, minutes: 0, mttrSum: 0, mttrN: 0 };
+  var o = map[key];
+  o.count++;
+  o.minutes += minutes;
+  if (mttr) { o.mttrSum += minutes; o.mttrN++; }
+  return o;
+}
+
+/** @param {string=} by 'minutes' = urut total waktu (terlama); default urut jumlah (tersering). */
+function topList_(map, n, extra, by) {
+  return Object.keys(map).map(function (k) {
+    var o = map[k];
+    var out = { key: o.key, count: o.count, minutes: round2_(o.minutes), mttr: o.mttrN ? round2_(o.mttrSum / o.mttrN) : null };
+    if (extra) extra(out, o);
+    return out;
+  }).sort(by === 'minutes'
+    ? function (a, b) { return (b.minutes - a.minutes) || (b.count - a.count); }
+    : function (a, b) { return (b.count - a.count) || (b.minutes - a.minutes); }).slice(0, n);
+}
+
+/**
+ * Agregasi untuk Dashboard. Dihitung di server supaya HP tidak menerima ribuan baris.
+ * @param {{periode?:number, factory?, baterai?, line?}} f  periode = hari ke belakang (default 30), berdasarkan Mulai.
+ */
+function apiDashboard(f) {
+  var user = requireUser_();
+  f = f || {};
+  var c = ctx_();
+  var md = c.md;
+  var ytd = f.periode === 'ytd';
+  var days = ytd ? 0 : ([7, 30, 90, 365].indexOf(Number(f.periode)) !== -1 ? Number(f.periode) : 30);
+  // "Tahun ini" = 1 Januari (WIB) s/d sekarang, sama dengan tab Rekap <tahun>.
+  var from = ytd ? Utilities.parseDate(yearOf_(c.now) + '-01-01 00:00:00', APP.TZ, 'yyyy-MM-dd HH:mm:ss') : new Date(c.now.getTime() - days * 86400000);
+  var filt = { factory: f.factory, baterai: f.baterai, proses: f.proses, line: f.line };
+  var allRows = readTable_(APP.SHEETS.MAINT);
+  var all = allRows.filter(function (r) { return matchFilter_(md, r, filt, c.names); });
+  var inPeriod = all.filter(function (r) { return r['Mulai'] instanceof Date && r['Mulai'] >= from; });
+
+  var kpi = { mttr: null, mttrN: 0, corrective: 0, activeMin: 0, cancelled: 0, abandoned: 0,
+    openNow: 0, pendingNow: 0, overdueNow: 0, downtimeMin: 0, stopN: 0 };
+  var sum = 0;
+  var byLine = {}, byTech = {}, byProblem = {}, byOther = {}, byJenis = {};
+  var mttrTypes = mttrTypes_();
+  var lineName = function (out) { var l = c.md.lines[out.key]; out.name = l ? l.name : ''; };
+
+  inPeriod.forEach(function (r) {
+    var st = r['Status'];
+    var min = Number(r['Total aktif (menit)'] || 0);
+    var counted = r['Masuk MTTR'] === APP.MTTR.YES;
+    var tipe = String(r['Tipe'] || '');
+    if (st === APP.STATUS.CANCELLED) { kpi.cancelled++; return; }
+    if (st === APP.STATUS.ABANDONED) kpi.abandoned++;
+    if (st === APP.STATUS.COMPLETED) {
+      if (!tipe || mttrTypes.indexOf(tipe.toLowerCase()) !== -1) kpi.corrective++;
+      kpi.activeMin += min;
+      // Downtime (2.6) = Mulai → Selesai pekerjaan stop line, sama dengan KPI & "Durasi stop line" Laporan
+      if (r['Stop line'] === APP.YES && r['Selesai'] instanceof Date) { kpi.downtimeMin += (r['Selesai'].getTime() - r['Mulai'].getTime()) / 60000; kpi.stopN++; }
+    }
+    if (counted) { sum += min; kpi.mttrN++; }
+    // Frekuensi: semua pekerjaan non-cancel (termasuk yang masih berjalan/pending) = seberapa sering line (unit) bermasalah.
+    inc_(byLine, String(r['Line']), min, counted);
+    // 2.6: pekerjaan bersama dihitung untuk setiap teknisi terlibat (termasuk PIC tambahan), bukan hanya teknisi terakhir.
+    if (st === APP.STATUS.COMPLETED || counted) {
+      uniq_(String(r['Teknisi terlibat'] || r['Teknisi terakhir'] || '').split(',').map(function (e) { return e.trim().toLowerCase(); }).filter(String))
+        .forEach(function (e) { inc_(byTech, nameOf_(c, e), min, counted); });
+    }
+    if (r['Masalah']) inc_(byProblem, String(r['Masalah']), min, counted);
+    if (st === APP.STATUS.COMPLETED && r['Jenis kerusakan']) inc_(byJenis, String(r['Jenis kerusakan']), min, counted);
+    ['Masalah', 'Penyebab', 'Penanganan', 'Yang tertunda', 'Alasan cancel'].forEach(function (col) {
+      var v = String(r[col] || '');
+      if (v.indexOf(APP.OTHER_PREFIX) === 0) inc_(byOther, col + ' → ' + v.slice(APP.OTHER_PREFIX.length).trim().toLowerCase(), 0, false);
+    });
+  });
+  kpi.mttr = kpi.mttrN ? round2_(sum / kpi.mttrN) : null;
+  kpi.activeMin = round2_(kpi.activeMin);
+  kpi.downtimeMin = round2_(kpi.downtimeMin);
+  all.forEach(function (r) {
+    if (isOpen_(r)) kpi.openNow++;
+    if (r['Status'] === APP.STATUS.PENDING) {
+      kpi.pendingNow++;
+      if (r['Tenggat'] instanceof Date && r['Tenggat'] < c.now) kpi.overdueNow++;
+    }
+  });
+
+  // Sparepart: dari sheet Pemakaian Sparepart (satu baris per part), periode & filter sama.
+  var byPart = {};
+  var idsInPeriod = {};
+  inPeriod.forEach(function (r) { idsInPeriod[String(r['Maintenance ID'])] = true; });
+  if (SpreadsheetApp.getActive().getSheetByName(APP.SHEETS.PEMAKAIAN)) {
+    readTable_(APP.SHEETS.PEMAKAIAN).forEach(function (u) {
+      if (!idsInPeriod[String(u['Maintenance ID'])]) return;
+      var key = String(u['Nama Sparepart']) + (u['Model'] ? ' ' + u['Model'] : '');
+      var o = inc_(byPart, key, 0, false);
+      o.qty = (o.qty || 0) + Number(u['Jumlah'] || 0);
+      o.jenis = String(u['Jenis Sparepart'] || '');
+      if (isYes_(u['Manual'])) inc_(byOther, 'Sparepart manual → ' + key.toLowerCase(), 0, false);
+    });
+  }
+
+  // Tren 12 minggu (tidak tergantung periode).
+  var weeks = [];
+  var weekMs = 7 * 86400000;
+  for (var w = 11; w >= 0; w--) {
+    var end = new Date(c.now.getTime() - w * weekMs);
+    weeks.push({ startMs: end.getTime() - weekMs, endMs: end.getTime(), label: fmtTz_(new Date(end.getTime() - weekMs + 86400000), 'dd/MM'), count: 0, sum: 0, n: 0 });
+  }
+  all.forEach(function (r) {
+    if (r['Status'] !== APP.STATUS.COMPLETED && r['Masuk MTTR'] !== APP.MTTR.YES) return;
+    var t = (r['Selesai'] instanceof Date ? r['Selesai'] : r['Status sejak']);
+    if (!(t instanceof Date)) return;
+    for (var i = 0; i < weeks.length; i++) {
+      if (t.getTime() > weeks[i].startMs && t.getTime() <= weeks[i].endMs) {
+        weeks[i].count++;
+        if (r['Masuk MTTR'] === APP.MTTR.YES) { weeks[i].sum += Number(r['Total aktif (menit)'] || 0); weeks[i].n++; }
+        break;
+      }
+    }
+  });
+
+  // Project: fase & target dari sheet Projects + angka otomatis.
+  var projects = md.projects.filter(function (p) {
+    return (!f.factory || p.factory === normLine_(f.factory)) && (!f.baterai || p.battery === f.baterai);
+  }).map(function (p) {
+    var rowsP = all.filter(function (r) { return String(r['Baterai']) === p.battery && (!p.factory || factoryOfRecord_(md, r) === p.factory); });
+    var per = rowsP.filter(function (r) { return r['Mulai'] instanceof Date && r['Mulai'] >= from && r['Masuk MTTR'] === APP.MTTR.YES; });
+    var s = per.reduce(function (a, r) { return a + Number(r['Total aktif (menit)'] || 0); }, 0);
+    var mttr = per.length ? round2_(s / per.length) : null;
+    var pend = rowsP.filter(function (r) { return r['Status'] === APP.STATUS.PENDING; });
+    return {
+      factory: p.factory, factoryName: md.factoryMap[p.factory] ? md.factoryMap[p.factory].name : p.factory,
+      battery: p.battery, fase: p.fase, catatan: p.catatan, target: p.target,
+      mttr: mttr, n: per.length,
+      openNow: rowsP.filter(isOpen_).length,
+      pendingNow: pend.length,
+      overdueNow: pend.filter(function (r) { return r['Tenggat'] instanceof Date && r['Tenggat'] < c.now; }).length,
+      health: (p.target && mttr !== null) ? (mttr <= p.target ? 'ok' : 'over') : ''
+    };
+  });
+
+  var warnings = isAdmin_(user) ? md.warnings.slice(0, 30) : [];
+  if (isAdmin_(user)) {   // 2.6.9: trigger malam / cek timeout / backup yang gagal atau tidak jalan
+    try { warnings = sehatPeringatan_(PropertiesService.getDocumentProperties().getProperties(), c.now).concat(warnings); } catch (e) { /* abaikan */ }
+  }
+  if (isAdmin_(user)) {   // 2.6.6: tab backup menumpuk = file makin penuh (batas 10 juta sel)
+    var lama = backupLama_(c.now);
+    if (lama.length) warnings.unshift(lama.length + ' tab backup lebih dari ' + BACKUP_UMUR_HARI_ + ' hari belum dihapus (' + lama.slice(0, 3).join(', ') +
+      (lama.length > 3 ? ', …' : '') + '). Download / pindahkan isinya, lalu hapus tab itu supaya file tidak penuh.');
+  }
+  if (isAdmin_(user) && monthOf_(c.now) >= 2) {
+    var un = unarchivedByYear_(allRows, c.now);
+    Object.keys(un).sort().forEach(function (y) {
+      warnings.unshift(un[y] + ' pekerjaan tahun ' + y + ' belum diarsipkan. Spreadsheet → menu ' + APP.NAME + ' → "Arsipkan data tahun lalu" supaya aplikasi tetap cepat.');
+    });
+  }
+
+  return {
+    serverNowIso: c.now.toISOString(),
+    periode: ytd ? 'ytd' : days,
+    kpi: kpi,
+    weeks: weeks.map(function (x) { return { label: x.label, count: x.count, mttr: x.n ? round2_(x.sum / x.n) : null }; }),
+    // Top 5 (2.6): tersering (jumlah → MTBF) dan terlama (total waktu aktif → MTTR), per line = unit
+    linesFreq: topList_(byLine, 5, lineName),
+    linesLong: topList_(byLine, 5, lineName, 'minutes'),
+    techs: topList_(byTech, 10),
+    problems: topList_(byProblem, 8),
+    jenis: topList_(byJenis, 10),
+    parts: topList_(byPart, 10, function (out, o) { out.qty = o.qty; out.jenis = o.jenis; }),
+    others: topList_(byOther, 10),
+    projects: projects,
+    // KPI bulan berjalan (2.6): semua line, tidak ikut filter & periode (sama dengan tab KPI <tahun>)
+    kpiMonth: kpiDashboard_(user, allRows, md, c.now, c.names),
+    warnings: warnings,
+    mttrTypes: String(getConfig_('MTTR_TIPE'))
+  };
+}
+
+// ---------- Laporan (Admin) ----------
+
+/**
+ * Bangun ulang penuh tab "Laporan <tahun>" dan "Rekap <tahun>" sekarang (sehari-hari diperbarui langsung tiap aksi),
+ * lalu tab TPM per project (di luar lock: menerjemahkan teks baru). TPM gagal → Laporan & Rekap tetap dilaporkan berhasil.
+ */
+function apiBuildReports(year) {
+  requireUser_([APP.ROLES.ADMIN]);
+  var y = year ? checkYear_(year) : yearOf_(new Date());
+  var built = withLock_(function () { return { lap: buildLaporan_(y), rek: buildRekap_(y) }; });   // tidak bentrok dengan sinkron langsung
+  var lap = built.lap, rek = built.rek, tpm = null, tpmError = '', kpi = null, kpiError = '';
+  try { tpm = buildTpm_(); } catch (e) { tpmError = String(e && e.message || e); }
+  try { kpi = buildKpi_(y); } catch (e) { kpiError = String(e && e.message || e); }
+  return { year: y, laporan: lap.sheet, rows: lap.rows, rekap: rek.sheet, spreadsheetUrl: SpreadsheetApp.getActive().getUrl(),
+    tpm: tpm ? tpm.sheets : [], tpmUntranslated: tpm ? tpm.untranslated : 0, tpmWarn: tpm ? tpm.warn : '', tpmError: tpmError,
+    kpi: kpi ? kpi.sheet : '', kpiWarn: kpi ? kpi.warn : '', kpiError: kpiError };
+}
+
+// ---------- Saran teknisi → admin ----------
+
+/** Admin: jumlah saran berstatus Baru (badge). Teknisi: tanpa baca sheet. */
+function withSaran_(counts, user) {
+  counts.saran = 0;
+  if (isAdmin_(user) && SpreadsheetApp.getActive().getSheetByName(APP.SHEETS.SARAN)) {
+    counts.saran = readTable_(APP.SHEETS.SARAN).filter(function (r) { return String(r['Status'] || 'Baru') === 'Baru'; }).length;
+  }
+  return counts;
+}
+
+function serializeSaran_(r, user, names) {
+  var by = String(r['Ditanggapi oleh'] || '').toLowerCase();
+  return {
+    id: String(r['ID']), whenIso: iso_(r['Tanggal']), nama: String(r['Nama'] || r['Email']),
+    email: isAdmin_(user) ? String(r['Email'] || '') : '', mine: String(r['Email']).toLowerCase() === user.email,
+    kategori: String(r['Kategori'] || ''), isi: String(r['Isi'] || ''), bahasa: String(r['Bahasa'] || ''),
+    terjemahan: String(r['Terjemahan'] || ''), status: String(r['Status'] || 'Baru'), tanggapan: String(r['Tanggapan'] || ''),
+    oleh: by ? (names[by] || by) : '', padaIso: iso_(r['Ditanggapi pada'])
+  };
+}
+
+/** Teknisi: saran miliknya. Admin: semua saran. Terbaru dulu, maks 200. */
+function apiSaranList() {
+  var user = requireUser_();
+  var names = userNameMap_();
+  var rows = SpreadsheetApp.getActive().getSheetByName(APP.SHEETS.SARAN) ? readTable_(APP.SHEETS.SARAN) : [];
+  var items = rows.filter(function (r) { return isAdmin_(user) || String(r['Email']).toLowerCase() === user.email; })
+    .sort(function (a, b) { return (b['Tanggal'] instanceof Date ? b['Tanggal'].getTime() : 0) - (a['Tanggal'] instanceof Date ? a['Tanggal'].getTime() : 0); })
+    .slice(0, 200).map(function (r) { return serializeSaran_(r, user, names); });
+  return { items: items, kategori: APP.SARAN_KATEGORI, statuses: APP.SARAN_STATUS, isAdmin: isAdmin_(user) };
+}
+
+/** @param {{kategori:string, isi:string}} p */
+function apiSaranKirim(p) {
+  var user = requireUser_();
+  p = p || {};
+  var isi = cleanText_(p.isi, 1000);
+  if (!isi) throw new Error('Tulis saranmu dulu.');
+  var kat = cleanText_(p.kategori, 60);
+  if (APP.SARAN_KATEGORI.indexOf(kat) === -1) kat = 'Lainnya';
+  var lang = textLang_(isi);
+  // Diterjemahkan sebelum lock (Google Translate ±1 dtk) supaya teknisi lain tidak menunggu.
+  var tr = lang === 'zh' ? translate_([isi], 'id', { max: 1 })[0] : '';
+  withLock_(function () {
+    var now = new Date();
+    appendObj_(APP.SHEETS.SARAN, {
+      'ID': 'S' + fmtTz_(now, 'yyMMddHHmmss') + '-' + Math.floor(Math.random() * 46656).toString(36),
+      'Tanggal': now, 'Email': user.email, 'Nama': user.name, 'Kategori': kat, 'Isi': isi, 'Bahasa': lang,
+      'Terjemahan': tr === isi ? '' : tr, 'Status': 'Baru'
+    });
+  });
+  return apiSaranList();
+}
+
+/** Admin: ubah status & tulis tanggapan. @param {{status:string, tanggapan:string}} p */
+function apiSaranTanggapi(id, p) {
+  var user = requireUser_([APP.ROLES.ADMIN]);
+  p = p || {};
+  var status = cleanText_(p.status, 30);
+  if (APP.SARAN_STATUS.indexOf(status) === -1) throw new Error('Status saran tidak dikenal: ' + status);
+  var tanggapan = cleanText_(p.tanggapan, 1000);
+  withLock_(function () {
+    var r = readTable_(APP.SHEETS.SARAN).filter(function (x) { return String(x['ID']) === String(id); })[0];
+    if (!r) throw new Error('Saran tidak ditemukan.');
+    r['Status'] = status;
+    r['Tanggapan'] = tanggapan;
+    r['Ditanggapi oleh'] = user.email;
+    r['Ditanggapi pada'] = new Date();
+    writeObj_(APP.SHEETS.SARAN, r);
+  });
+  return apiSaranList();
+}
+
+// ---------- QR ----------
+
+function apiListLinesForQr() {
+  requireUser_([APP.ROLES.ADMIN]);
+  var md = masterData_();
+  var lines = Object.keys(md.lines).map(function (k) { return md.lines[k]; }).sort(function (a, b) { return a.id.localeCompare(b.id); });
+  return {
+    baseUrl: ScriptApp.getService().getUrl(),
+    lines: lines.map(function (l) {
+      return {
+        id: l.id, name: l.name, area: l.area, active: l.active, proses: l.proses,
+        factoryName: md.factoryMap[l.factory] ? md.factoryMap[l.factory].name : l.factory
+      };
+    })
+  };
+}

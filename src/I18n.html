@@ -1,0 +1,364 @@
+<script>
+/**
+ * Bahasa tampilan: id (Indonesia = teks asli di App.html) / zh (中文 简体).
+ * - Kunci kamus = teks Indonesia persis. Teks tetap yang masuk ke layar diganti otomatis (i18nObserve);
+ *   teks yang berisi angka/nama memakai t('… {x} …', { x: … }) di App.html.
+ * - Label dari Google Sheet (pilihan, mesin, line, form) ikut dari kolom 中文 di sheet masing-masing dan menang atas kamus ini.
+ * - Yang tidak ada di kamus tetap tampil dalam bahasa Indonesia (tidak error).
+ * Terjemahan dibuat dengan bantuan AI; minta rekan berbahasa Mandarin mengoreksi istilah pabrik di sini.
+ */
+var LANG = 'id';
+var I18N_DICT = {};
+var I18N = { zh: {} };
+
+function t(s, vars) {
+  var out = (LANG !== 'id' && I18N_DICT[s] != null) ? I18N_DICT[s] : s;
+  if (vars) out = String(out).replace(/\{(\w+)\}/g, function (m, k) { return vars[k] == null ? '' : vars[k]; });
+  return out;
+}
+
+/** @param {string} lang 'id' | 'zh'  @param {Object} extra label master {teks Indonesia: 中文} */
+function i18nSet(lang, extra) {
+  LANG = lang === 'zh' ? 'zh' : 'id';
+  I18N_DICT = {};
+  if (LANG === 'id') return;
+  var k;
+  for (k in I18N[LANG]) I18N_DICT[k] = I18N[LANG][k];
+  for (k in (extra || {})) I18N_DICT[k] = extra[k];   // label 中文 dari Google Sheet menang atas kamus bawaan
+}
+
+var I18N_ATTRS = ['placeholder', 'title', 'aria-label'];
+function i18nNode(n) {
+  var v = n.nodeValue, k = v.trim();
+  if (!k) return;
+  var tr = I18N_DICT[k];
+  if (tr != null && tr !== k) n.nodeValue = v.replace(k, tr);
+}
+/** Terjemahkan teks & atribut di dalam el. Elemen .notr / [data-tr] (teks bebas user) & isi textarea (bisa tersimpan) dilewati. */
+function i18nEl(el) {
+  if (LANG === 'id' || !el) return;
+  if (el.nodeType === 3) { var p = el.parentNode; if (!(p && p.closest && p.closest('.notr,[data-tr],textarea'))) i18nNode(el); return; }
+  if (el.nodeType !== 1 || (el.closest && el.closest('.notr,[data-tr]'))) return;
+  if (el.tagName === 'TEXTAREA') { i18nAttrs(el); return; }
+  var walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode: function (n) {
+      if (n.nodeType === 1 && (n.classList.contains('notr') || n.hasAttribute('data-tr') || /^(SCRIPT|STYLE|TEMPLATE)$/.test(n.tagName))) return NodeFilter.FILTER_REJECT;
+      if (n.nodeType === 3 && n.parentNode && n.parentNode.tagName === 'TEXTAREA') return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  var node = el;
+  do {
+    if (node.nodeType === 3) i18nNode(node); else i18nAttrs(node);
+  } while ((node = walker.nextNode()));
+}
+function i18nAttrs(node) {
+  for (var i = 0; i < I18N_ATTRS.length; i++) {
+    var a = node.getAttribute(I18N_ATTRS[i]);
+    if (a && I18N_DICT[a.trim()] != null) node.setAttribute(I18N_ATTRS[i], I18N_DICT[a.trim()]);
+  }
+}
+/** Setiap elemen baru di layar (render, sheet, toast) diterjemahkan otomatis. */
+function i18nObserve(root) {
+  new MutationObserver(function (list) {
+    if (LANG === 'id') return;
+    for (var i = 0; i < list.length; i++) for (var j = 0; j < list[i].addedNodes.length; j++) i18nEl(list[i].addedNodes[j]);
+  }).observe(root, { childList: true, subtree: true });
+}
+
+/* ===================== Kamus 中文 (简体) =====================
+ * Kunci = teks Indonesia persis (termasuk tag HTML & {x}). Istilah tetap:
+ * Maintenance 维修 · Corrective 故障维修 · Preventive 预防性维护 · Pending 挂起 · Tertunda 待处理 · Tenggat 期限
+ * Line 产线 · Mesin 设备 · Proses 工序 · Baterai 电池项目 · Sparepart 备件 · Review 审核 · Saran 建议
+ * Nama sheet Google (Laporan 2026, Rekap, Pilihan, …) sengaja tidak diterjemahkan supaya sama dengan tab di spreadsheet.
+ */
+I18N.zh = {
+  // ---------- navigasi & umum ----------
+  'Beranda': '首页', 'Pending': '挂起', 'pending': '挂起', 'Dashboard': '看板', 'Riwayat': '历史', 'Review': '审核',
+  'Panduan': '使用指南', 'Saran': '建议', '💡 Saran': '💡 建议', 'Rencana': '计划', 'Bahasa / 语言': '语言 / Bahasa',
+  'Memuat…': '加载中…', 'Memproses…': '处理中…', 'Menyimpan…': '保存中…', 'Mengirim…': '发送中…', 'Membuka…': '打开中…',
+  'Melanjutkan…': '继续中…', 'Menghitung…': '计算中…', 'Menerjemahkan…': '翻译中…', 'Membuat laporan…': '正在生成报表…',
+  'Membuka kamera…': '正在打开相机…', 'Mencari QR…': '正在识别二维码…', 'Memuat detail…': '正在加载详情…',
+  'Memuat line…': '正在加载产线…', 'Memuat pending…': '正在加载挂起工作…', 'Memuat review…': '正在加载审核…',
+  'Gagal memuat': '加载失败', 'Coba lagi': '重试', 'Muat ulang': '重新加载',
+  '← Kembali': '← 返回', '← Beranda': '← 首页', '← Dashboard': '← 看板',
+  'Detail ›': '详情 ›', 'Dashboard ›': '看板 ›', 'Lihat riwayat ›': '查看历史 ›', 'Buka ›': '打开 ›',
+  'Detail': '详情', 'Filter': '筛选', 'Terapkan': '应用', 'Reset': '重置', 'Semua': '全部', 'Ya': '是', 'Tidak': '否',
+  'Lainnya': '其他', 'Tidak ada': '无', 'Hapus': '删除', 'Tambah': '增加', 'Kurangi': '减少', 'Cetak': '打印',
+  '(opsional)': '（选填）', 'manual': '手动', 'baru saja': '刚刚', '{d} lalu': '{d}前', 'mnt': '分钟', '{n} mnt': '{n} 分钟',
+  'Admin': '管理员', 'Teknisi': '技术员', 'Sistem': '系统', 'SYSTEM': '系统',
+  '🌐 Terjemahkan': '🌐 翻译', 'Tampilkan teks asli': '显示原文',
+
+  // ---------- status, kejadian, kolom ----------
+  'Aktif': '进行中', 'Pause': '暂停', 'Completed': '已完成', 'Cancelled': '已取消', 'Abandoned': '已放弃',
+  'Perlu review': '待审核', 'Direview': '已审核', 'Menunggu': '等待中',
+  'Mulai': '开始', 'Lanjut kerja': '恢复工作', 'Pending dilanjutkan': '挂起后继续', 'Selesai': '完成', 'Cancel': '取消',
+  'Peringatan': '超时提醒', 'Konfirmasi masih lanjut': '确认仍在进行', 'Masih lanjut': '仍在进行', 'masih lanjut': '仍在进行',
+  'Factory': '工厂', 'Proses': '工序', 'Baterai': '电池项目', 'Baterai / project': '电池项目', 'Mesin': '设备', 'Line': '产线',
+  'Stop line': '停线', 'Tertunda': '待处理', 'Tenggat': '期限', 'Jenis kerusakan': '故障类型', 'Masalah': '问题',
+  'Penyebab': '原因', 'Penanganan': '处理措施', 'Sparepart': '备件', 'Alasan cancel': '取消原因', 'Catatan': '备注',
+  'Dikerjakan': '已完成工作', 'Masuk MTTR': '计入 MTTR', 'Riwayat kejadian': '事件记录', 'Maintenance ID': '维修单号',
+  'Mesin ID': '设备 ID', 'Model': '型号', 'Waktu aktif': '有效时间', 'Waktu pause': '暂停时间', 'Total aktif': '有效时间合计',
+  'Total aktif (menit)': '有效时间（分钟）', 'Total pause (menit)': '暂停时间（分钟）', 'Total pending (menit)': '挂起时间（分钟）',
+  'Teknisi awal': '首位技术员', 'Teknisi terakhir': '最后技术员', 'Status review': '审核状态',
+  'Corrective': '故障维修', 'Preventive': '预防性维护', 'Tipe maintenance': '维修类型',
+  'Sen': '周一', 'Sel': '周二', 'Rab': '周三', 'Kam': '周四', 'Jum': '周五', 'Sab': '周六', 'Min': '周日', 'Hari ini': '今天',
+  // Isi contoh yang umum (nilai asli dari sheet tetap; admin bisa menambah kolom 中文 di sheet)
+  'Assembly': '组装', 'Formation': '化成', 'Packing': '包装', 'Modul Line': '模组线',
+  'Trial': '试产', 'Ramp-up': '爬坡', 'Mass Production': '量产',
+
+  // ---------- label form bawaan (sheet Form tanpa kolom 中文) ----------
+  'Apakah line berhenti (stop line)?': '产线是否停线？', 'Ya, line berhenti': '是，产线停线', 'Alasan pause': '暂停原因',
+  'Pekerjaan yang sudah dilakukan': '已完成的工作', 'Yang tertunda': '待处理事项', 'Fenomena / masalah': '故障现象',
+  'Detail masalah': '现象详情', 'Detail penyebab': '原因详情', 'Detail penanganan': '处理详情', 'Alasan / penyebab': '原因',
+  'Tindakan penanganan': '处理措施', 'Sparepart yang diganti': '更换的备件', 'Catatan (opsional)': '备注（选填）',
+
+  // ---------- akun Google ----------
+  'Akun Google tidak cocok': 'Google 账号不一致',
+  'Aplikasi dibuka sebagai {a}, tetapi Google mengirim tombol sebagai {b} (akun utama di browser ini). Ini bug Google saat satu browser login dengan beberapa akun. Aplikasi dihentikan supaya data tidak tercatat atas nama yang salah.':
+    '应用以 {a} 的身份打开，但 Google 以 {b}（此浏览器的主账号）发送了操作。这是浏览器同时登录多个 Google 账号时的 Google 缺陷。为避免数据记在错误的人名下，应用已停止。',
+  'Tidak terhubung ke akun Google': '未连接到 Google 账号',
+  'Google menolak permintaan dari browser ini{u}. Tekan <b>Muat ulang</b> dulu (mungkin sesi login habis). Kalau masih muncul, biasanya karena browser login dengan beberapa akun Google:':
+    'Google 拒绝了此浏览器的请求{u}。请先点<b>重新加载</b>（可能登录已过期）。如果仍然出现，通常是浏览器登录了多个 Google 账号：',
+  ' untuk {e}': '（{e}）',
+  '<b>Cepat:</b> buka link aplikasi di tab <b>Incognito / Private</b>, login hanya dengan akun kerja.':
+    '<b>快速：</b>在<b>无痕 / 隐私</b>标签页打开应用链接，只登录工作账号。',
+  '<b>Permanen di HP:</b> pakai satu browser khusus kerja (mis. Firefox, Edge, Samsung Internet) yang hanya login akun kerja, lalu ⋮ → <b>Tambahkan ke layar utama</b>.':
+    '<b>手机长期方案：</b>使用一个只登录工作账号的专用浏览器（如 Firefox、Edge、Samsung Internet），然后 ⋮ → <b>添加到主屏幕</b>。',
+  '<b>Permanen di PC:</b> buat <b>profil Chrome</b> khusus akun kerja, atau keluar dari semua akun lalu login akun kerja <b>paling dulu</b> (akun pertama = akun utama).':
+    '<b>电脑长期方案：</b>为工作账号建立专用的 <b>Chrome 个人资料</b>，或退出所有账号后<b>最先</b>登录工作账号（第一个账号 = 主账号）。',
+  'Versi baru ({v}) sudah terpasang. Simpan isian yang sedang dibuka, lalu muat ulang.': '新版本（{v}）已安装。请先保存正在填写的内容，再重新加载。',
+  'Tutup & buka lagi aplikasinya.': '请关闭并重新打开应用。',
+
+  // ---------- beranda ----------
+  'Halo, {n},': '你好，{n}，', 'Selamat bekerja!': '工作顺利！', 'Semangat kerjanya!': '加油！',
+  '<b>Versi {v}</b> · ada yang baru. Lihat panduan singkat ›': '<b>版本 {v}</b> · 有新功能。查看简要说明 ›',
+  '💡 Punya saran untuk aplikasi? Kirim ke admin': '💡 对应用有建议？发送给管理员', '💡 Saran dari teknisi': '💡 技术员的建议',
+  'Mulai kerja': '开始工作', 'Scan QR di line / mesin': '扫描产线 / 设备上的二维码', 'SCAN QR': '扫描二维码',
+  'Cari line (jika QR rusak)': '搜索产线（二维码损坏时）', 'Cari line manual': '手动搜索产线', 'Cari line': '搜索产线',
+  'Pekerjaan saya': '我的工作', 'Sedang berjalan': '进行中', 'Aktivitas terbaru': '最新动态', 'Belum ada aktivitas.': '暂无动态。',
+  'Maintenance selesai 7 hari ({n})': '近 7 天完成的维修（{n}）', '{d}: {n} selesai': '{d}：完成 {n}',
+  'Pekerjaan sebelumnya': '之前的工作',
+
+  // ---------- filter & pilih line ----------
+  'Berlaku di Beranda, Pending, Review, Riwayat & Dashboard. Tersimpan di HP ini.': '适用于首页、挂起、审核、历史和看板。保存在本手机上。',
+  'Semua factory': '所有工厂', 'Semua baterai': '所有电池项目', 'Semua line': '所有产线', 'Semua item': '全部项目',
+  'Item milik saya': '我的项目', 'Semua status': '所有状态', 'Semua tipe': '所有类型', 'Saya saja': '只看我的',
+  'Alias: {a}': '别名：{a}', 'Baterai {b}': '电池项目 {b}', '{g} (semua sub-line)': '{g}（所有子产线）', 'Grup {g}': '{g} 组',
+  'Seluruh line': '整条产线', 'Ketik line, nama, proses…': '输入产线、名称、工序…',
+  'Tidak ada line yang cocok.': '没有匹配的产线。', 'Line tidak ditemukan': '未找到产线',
+  'Line <b>{l}</b> tidak terdaftar. QR mungkin salah atau line sudah dihapus. Hubungi Admin.': '产线 <b>{l}</b> 未登记。二维码可能有误或产线已删除。请联系管理员。',
+  'Line ini nonaktif. Maintenance tidak bisa dimulai.': '此产线已停用，无法开始维修。',
+  'QR mesin {m} tidak cocok dengan satu line. Pilih line-nya.': '设备二维码 {m} 不能对应到唯一的产线，请选择产线。',
+  'QR mesin lama tanpa line. Cetak ulang QR dari Dashboard → QR.': '这是不含产线的旧设备二维码。请在 看板 → 二维码 重新打印。',
+
+  // ---------- halaman line & mulai ----------
+  'Mulai maintenance': '开始维修', 'Atau mulai maintenance baru': '或开始新的维修', 'Sedang dikerjakan di line ini': '此产线正在维修',
+  'Line ini sedang dikerjakan. Tunggu selesai atau koordinasi dengan PIC di atas.': '此产线正在维修。请等待完成，或与上方负责人协调。',
+  'Waktu mulai & Maintenance ID dibuat server saat tombol ditekan.': '开始时间和维修单号在按下按钮时由服务器生成。',
+  '▶ MULAI': '▶ 开始', '▶ RESUME': '▶ 恢复', '▶ Lanjutkan': '▶ 继续', '▶ Lanjutkan (scan QR)': '▶ 继续（扫码）', '(scan QR)': '（扫码）',
+  '✔ SELESAI': '✔ 完成', 'Cancel maintenance': '取消维修',
+  'Mesin <b>{m}</b> dari QR tidak terdaftar di line ini. Pilih mesin di bawah.': '二维码中的设备 <b>{m}</b> 未在此产线登记。请在下方选择设备。',
+  'Anda masih punya pekerjaan <b>{s}</b> di {l}. Selesaikan, pending, atau cancel dulu.': '您在 {l} 还有一项<b>{s}</b>的工作。请先完成、挂起或取消。',
+  'Tulis nama mesin/alat…': '填写设备 / 工具名称…', 'Tulis {x}…': '填写{x}…', 'Pilih…': '请选择…',
+  'Konfirmasi Anda benar-benar di mesin.': '请确认您确实在设备旁。', '{n} · sejak {w} · {id}': '{n} · 自 {w} · {id}',
+  'dikerjakan {n}': '{n} 正在维修', 'Tenggat {w}': '期限 {w}', 'tenggat {w}': '期限 {w}', 'LEWAT': '已逾期', 'Lewat': '已逾期',
+  '<b>Sudah lebih dari {h} jam.</b> Masih dikerjakan? Jika tidak dijawab sampai {a} jam, status jadi Abandoned.':
+    '<b>已超过 {h} 小时。</b>还在进行吗？如果到 {a} 小时仍未回复，状态将变为“已放弃”。',
+  'Waktu aktif (MTTR)': '有效时间（MTTR）',
+
+  // ---------- pesan singkat (toast) ----------
+  'Maintenance dimulai. Timer berjalan.': '维修已开始，正在计时。', 'Pause. Tap RESUME saat kembali.': '已暂停。回来后点“恢复”。',
+  'Lanjut kerja. Timer aktif berjalan.': '已恢复工作，有效时间计时中。', 'Tercatat: masih dikerjakan.': '已记录：仍在进行。',
+  'Tersimpan sebagai Pending.': '已保存为挂起。', 'Maintenance selesai. Terima kasih!': '维修完成，谢谢！',
+  'Maintenance dibatalkan.': '维修已取消。', 'Menunggu review Admin.': '等待管理员审核。',
+  'Pending dilanjutkan. Timer aktif berjalan.': '挂起工作已继续，有效时间计时中。', 'Pending ditandai sudah dicek.': '挂起工作已标记为已检查。',
+  'Keputusan review tersimpan.': '审核结果已保存。', 'Tanggapan tersimpan.': '回复已保存。', 'Tulis saranmu dulu.': '请先填写建议。',
+  'Terima kasih! Saran terkirim ke admin.': '谢谢！建议已发送给管理员。',
+
+  // ---------- pause / pending / cancel ----------
+  'Pilih {x} — langsung tersimpan. Timer aktif berhenti, timer pause berjalan.': '选择{x}后立即保存。有效时间停止，暂停时间开始计时。',
+  'Pilih alasan pause — langsung tersimpan. Timer aktif berhenti, timer pause berjalan.': '选择暂停原因后立即保存。有效时间停止，暂停时间开始计时。',
+  'Tanpa alasan': '无原因', 'Pekerjaan tertunda': '挂起工作', 'Simpan pending': '保存为挂起', 'Shift berikutnya': '下一班',
+  'Besok': '明天', 'Pilih tanggal': '选择日期', 'Pekerjaan yang sudah dilakukan wajib diisi.': '必须填写已完成的工作。',
+  'Satu form. Pekerjaan ini akan muncul di tab Pending untuk semua teknisi.': '只需一张表单。此工作将显示在所有技术员的“挂起”页。',
+  'Konfirmasi cancel': '确认取消', 'Tidak dihitung ke MTTR. Alasan tercatat di Riwayat.': '不计入 MTTR。原因记录在历史中。',
+  'Tulis alasan…': '填写原因…',
+
+  // ---------- selesai & sparepart ----------
+  'Tidak ada pergantian': '无更换', 'Ada part': '有更换备件', 'Simpan & selesai': '保存并完成',
+  'waktu selesai dicatat server saat disimpan.': '完成时间在保存时由服务器记录。',
+  'Cari sparepart (nama / model)…': '搜索备件（名称 / 型号）…',
+  'Belum ada part. Cari, atau pilih jenis → nama → model di bawah.': '尚未添加备件。请搜索，或在下方依次选择 类别 → 名称 → 型号。',
+  'Part dipakai ({n})': '使用的备件（{n}）', 'Nama sparepart ({n})': '备件名称（{n}）', '{n} model': '{n} 个型号',
+  '← Pilih nama sparepart': '← 先选择备件名称',
+  'Tidak ditemukan di katalog. Pakai <b>Tambah manual</b> di bawah.': '目录中未找到。请使用下方的<b>手动添加</b>。',
+  '+ Tidak ada di daftar? Tambah manual': '+ 列表里没有？手动添加', 'Tambah manual': '手动添加',
+  'Jenis sparepart *': '备件类别 *', 'Nama sparepart * (mis. Bearing)': '备件名称 *（如 Bearing 轴承）',
+  'Model / tipe (opsional)': '型号 / 规格（选填）', 'Tambah ke daftar': '加入列表',
+  'Sering dipakai? Minta admin memasukkannya ke sheet Sparepart.': '经常使用？请管理员加入 Sparepart 表。',
+  'Katalog sparepart belum diisi admin. Pakai tambah manual.': '管理员尚未填写备件目录。请手动添加。',
+  'Pilih jenis sparepart.': '请选择备件类别。', 'Isi nama sparepart.': '请填写备件名称。', 'Jumlah harus 1–999.': '数量必须为 1–999。',
+  'Ditambahkan: {p}': '已添加：{p}', 'Ditambahkan (manual): {p}': '已添加（手动）：{p}',
+  // 2.6.4: sinyal putus, ketuk ulang, draf, batas
+  'Masih memproses… jangan tutup aplikasi': '仍在处理中…请不要关闭应用',
+  'Sudah tersimpan sebelumnya (sinyal sempat putus). Tidak dicatat dua kali.': '之前已保存（信号曾中断），不会重复记录。',
+  'Sinyal terputus. Isian masih di layar — ketuk lagi saat ada sinyal; tidak akan tercatat dua kali.': '信号中断。填写内容仍在屏幕上——有信号时再点一次，不会重复记录。',
+  'Isian sebelumnya dipulihkan.': '已恢复之前填写的内容。',
+  'PIC tambahan maksimal {n} orang.': '其他参与人员最多 {n} 人。',
+  'Sparepart maksimal {n} jenis per pekerjaan.': '每项工作最多 {n} 种备件。',
+  'Sparepart: pilih "{a}" atau "{b}".': '备件：请选择“{a}”或“{b}”。',
+  'Tambahkan minimal satu part, atau pilih "{a}".': '请至少添加一个备件，或选择“{a}”。',
+
+  // ---------- scan QR ----------
+  'Scan QR line {l}': '扫描产线 {l} 的二维码', 'Scan QR line / mesin': '扫描产线 / 设备二维码',
+  'Arahkan kamera ke QR yang ditempel di line/mesin.': '将相机对准贴在产线 / 设备上的二维码。',
+  '<b>Kamera tidak bisa dibuka di dalam aplikasi</b> ({r}).': '<b>无法在应用内打开相机</b>（{r}）。',
+  'Tutup layar ini, lalu scan QR line <b>{l}</b> dengan aplikasi kamera HP. Halaman line akan terbuka dengan tombol <b>Lanjutkan</b> tanpa scan ulang.':
+    '请关闭此画面，用手机相机扫描产线 <b>{l}</b> 的二维码。产线页面会打开并显示<b>继续</b>按钮，无需再次扫描。',
+  'Scan QR dengan aplikasi kamera HP (halaman line terbuka otomatis), atau pakai <b>Cari line manual</b>.':
+    '用手机相机扫描二维码（会自动打开产线页面），或使用<b>手动搜索产线</b>。',
+  'Ini QR {q}, bukan line {l}.': '这是 {q} 的二维码，不是产线 {l}。', 'QR {q} terbaca ✓': '已识别二维码 {q} ✓',
+  'QR tidak dikenali, coba lagi…': '无法识别二维码，请重试…', 'izin ditolak': '权限被拒绝', 'browser tidak mendukung': '浏览器不支持',
+  'decoder QR gagal dimuat': '二维码解码器加载失败',
+
+  // ---------- pending, riwayat, review ----------
+  'Tidak ada pekerjaan pending.': '没有挂起的工作。', 'Urutan: lewat tenggat, lalu paling lama': '排序：先逾期，再按等待时间',
+  'Cari line, ID, masalah…': '搜索产线、单号、问题…', '{n} pending': '挂起 {n}',
+  '{n} lewat': '逾期 {n}', '{n} lewat tenggat': '逾期 {n}', 'Tandai sudah dicek': '标记为已检查',
+  '{n} pekerjaan': '{n} 项工作', '(ditampilkan {n} terbaru)': '（显示最新 {n} 条）', '{w} · aktif {d}': '{w} · 有效 {d}',
+  '{n} part': '{n} 个备件', 'Belum ada data.': '暂无数据。', 'Semua beres': '全部处理完毕',
+  'Tidak ada item yang perlu direview untuk filter ini.': '此筛选条件下没有需要审核的项目。',
+  'Tidak ada item yang perlu direview.': '没有需要审核的项目。',
+  'Peringatan > {h} jam (menunggu jawaban teknisi)': '超时提醒 > {h} 小时（等待技术员回复）',
+  '{id} · diperingatkan {w} · Abandoned otomatis jika tidak dijawab': '{id} · {w} 已提醒 · 未回复将自动变为“已放弃”',
+  'Alasan: {a}': '原因：{a}', 'Tercatat aktif {a}, pause {p} · Abandoned {w}': '记录：有效 {a}，暂停 {p} · {w} 放弃',
+  'Setujui cancel': '同意取消', 'Menit aktif sebenarnya (jika dihitung)': '实际有效分钟（如计入）',
+  'Catatan review * (dasar keputusan)': '审核备注 *（决定依据）',
+  'mis. konfirmasi teknisi via telepon, selesai ±14:30': '例如：已电话确认技术员，约 14:30 完成',
+  'Hitung': '计入 MTTR', 'Keluarkan': '不计入',
+
+  // ---------- dashboard ----------
+  '7 hari': '7 天', '30 hari': '30 天', '90 hari': '90 天', 'Tahun ini': '今年',
+  'MTTR & kesehatan mesin': 'MTTR 与设备状况', 'MTTR, MTBF & kesehatan line': 'MTTR、MTBF 与产线状况', 'MTTR (Corrective)': 'MTTR（故障维修）', 'MTTR 7 hari (Corrective)': '近 7 天 MTTR（故障维修）',
+  'MTTR ({x})': 'MTTR（{x}）', '{n} pekerjaan dihitung': '计入 {n} 项工作', '{d} total aktif': '有效时间合计 {d}',
+  'tidak masuk MTTR': '不计入 MTTR', '{a} dihitung · {b} berjalan · {c} pending': '计入 {a} · 进行中 {b} · 挂起 {c}',
+  'Corrective selesai': '完成的故障维修', 'Dihitung ke MTTR': '计入 MTTR', 'Sparepart manual': '手动备件', 'Preventive selesai': '完成的预防性维护',
+  'Maintenance selesai per minggu (12 minggu)': '每周完成的维修（12 周）',
+  'Minggu {w}: {n} selesai · MTTR {m} mnt': '第 {w} 周：完成 {n} · MTTR {m} 分钟',
+  'Minggu {w}: <b>{n}</b> selesai · MTTR {m} mnt. Tap batang untuk detail.': '第 {w} 周：完成 <b>{n}</b> · MTTR {m} 分钟。点击柱形查看详情。',
+  'Minggu {w}: <b>{n}</b> selesai · MTTR {m} mnt': '第 {w} 周：完成 <b>{n}</b> · MTTR {m} 分钟',
+  'MTTR {m} mnt': 'MTTR {m} 分钟', '{n} mnt aktif': '有效 {n} 分钟', '▲ Di atas target': '▲ 高于目标', '✓ Sesuai target': '✓ 达到目标',
+  'Target': '目标', 'Mesin paling sering bermasalah': '故障最多的设备', 'Line paling sering di-maintenance': '维修最多的产线',
+  'Masalah terbanyak': '最常见的问题', 'Sparepart paling sering dipakai': '最常用的备件', 'Isian "Lainnya" terbanyak': '最常见的“其他”内容',
+  'Semua pekerjaan non-cancel di periode ini, termasuk preventive & yang masih berjalan.': '此期间所有未取消的工作，包括预防性维护和进行中的工作。',
+  'Pekerjaan selesai di periode ini.': '此期间完成的工作。',
+  'Berapa kali dipakai (jumlah pekerjaan). Data dari sheet <b>Pemakaian Sparepart</b>.': '使用次数（工作数）。数据来自 <b>Pemakaian Sparepart</b> 表。',
+  'total {n}': '合计 {n}',
+  '5 line tersering rusak': '故障最多的 5 条产线', '5 line terlama diperbaiki': '维修时间最长的 5 条产线',
+  'Jumlah kerusakan di periode ini (termasuk yang masih berjalan). Paling menurunkan MTBF.': '此期间的故障次数（包括进行中的）。对 MTBF 影响最大。',
+  'Total waktu aktif perbaikan di periode ini. Paling menaikkan MTTR.': '此期间维修有效时间合计。对 MTTR 影响最大。',
+  // Statistik & Download (2.6)
+  'Ringkasan': '概览', 'Statistik': '统计', 'Project': '项目', 'Discipline': '范围', 'Hari': '日', 'Bulan': '月', 'Jumlah': '次数', 'Tanggal': '日期', 'Tahun': '年', 'Rentang': '日期范围',
+  'Periode (kerusakan yang selesai)': '期间（已完成的故障）', 'Lihat per': '按…查看', 'Ukuran': '指标', 'Jumlah dipakai': '使用数量', 'Jumlah kerusakan': '故障次数',
+  '{m} per {b}': '按{b}的{m}', '{n} kerusakan · MTTR {m} mnt · downtime {d} jam': '故障 {n} 次 · MTTR {m} 分钟 · 停机 {d} 小时',
+  'Biru = kelompok yang menyumbang ±80% total (Pareto). Mulai perbaikan dari atas.': '蓝色 = 占总数约 80% 的项目（帕累托）。请从上往下改善。',
+  'Rata-rata waktu aktif perbaikan per kerusakan.': '每次故障的平均有效维修时间。',
+  'Rata-rata jam operasi antar kerusakan. Paling atas = MTBF terendah (paling sering rusak).': '故障之间的平均运行时间。最上面 = MTBF 最低（最常故障）。',
+  'Jumlah dipakai, dari sheet Pemakaian Sparepart. Biru = ±80% pemakaian.': '使用数量，来自 Pemakaian Sparepart 表。蓝色 = 约 80% 的用量。',
+  'Belum ada kerusakan selesai di periode ini.': '此期间暂无已完成的故障。', 'Tap batang untuk melihat daftar pekerjaannya.': '点击柱形查看工作列表。',
+  '{n}× rusak · jam operasi {h}': '故障 {n} 次 · 运行 {h} 小时', 'downtime {d} jam': '停机 {d} 小时', 'kumulatif {p}%': '累计 {p}%',
+  '+{n} kelompok lain tidak ditampilkan. Persempit dengan filter.': '另有 {n} 项未显示，请用筛选缩小范围。',
+  '⬇ Download': '⬇ 下载', 'Download riwayat': '下载记录', 'Semua teknisi': '所有技术员', 'Pekerjaan yang dimulai': '开始的工作',
+  'Kolom sama dengan tab Laporan (format Excel). Filter, status & pilihan "{s}" di Riwayat ikut. Cancelled hanya jika status Cancelled dipilih.':
+    '列与 Laporan 标签页相同（Excel 格式）。沿用记录页的筛选、状态和“{s}”。只有选择 Cancelled 状态时才包含已取消的工作。',
+  'Download Excel (.xlsx)': '下载 Excel (.xlsx)', 'Download CSV': '下载 CSV', 'Menyiapkan file…': '正在准备文件…', 'Tidak ada pekerjaan di periode ini.': '此期间没有工作。',
+  'Hanya {n} baris pertama dari {t} (batas per file). Persempit periode untuk sisanya.': '只包含 {t} 行中的前 {n} 行（每个文件的上限）。请缩小期间下载其余部分。',
+  '✓ {n} baris diunduh (CSV).': '✓ 已下载 {n} 行（CSV）。', '✓ {n} baris diunduh (Excel).': '✓ 已下载 {n} 行（Excel）。',
+  'Library Excel tidak bisa dimuat (internet / jaringan kantor?). File CSV yang diunduh; bisa dibuka di Excel.': '无法加载 Excel 组件（网络 / 公司网络？）。已改为下载 CSV 文件，可用 Excel 打开。',
+  // KPI bulanan (2.6)
+  'Downtime stop line': '停线时间', '{n} pekerjaan stop line': '{n} 项停线工作', 'jam': '小时', '✓ Tercapai': '✓ 达标', '✗ {x} belum tercapai': '✗ {x} 未达标',
+  'target ≥ {v} {u}': '目标 ≥ {v} {u}', 'target ≤ {v} {u}': '目标 ≤ {v} {u}', 'KPI bulan ini · {m}': '本月 KPI · {m}',
+  'Semua line. MTBF = (jam operasi − downtime) ÷ jumlah kerusakan. Angka bisa berubah sampai bulan ditutup admin.': '所有产线。MTBF =（运行时间 − 停机时间）÷ 故障次数。管理员关账前数字可能变化。',
+  'tanpa kerusakan': '无故障', 'Kerusakan': '故障次数', 'Downtime': '停机时间', 'jam operasi {h}': '运行时间 {h}',
+  '{n}× rusak · downtime {d} jam · jam operasi {h}': '故障 {n} 次 · 停机 {d} 小时 · 运行 {h} 小时',
+  // Availability per proses (2.6.9)
+  'Availability per proses': '各工序可用率', 'Rata-rata {v}': '平均 {v}', '(tanpa proses)': '（无工序）',
+  '(Running hour − downtime) ÷ running hour × 100. Running hour = hari operasi × jam per hari, dihitung sekali per proses.':
+    '（运行时间 − 停机时间）÷ 运行时间 × 100。运行时间 = 运行天数 × 每日小时数，每个工序只计一次。',
+  '{n}× rusak · downtime {d} jam · running hour {h} jam': '故障 {n} 次 · 停机 {d} 小时 · 运行 {h} 小时',
+  'downtime lebih besar dari running hour (cek pending lama)': '停机时间大于运行时间（请检查长期挂起的工作）',
+  // Spreadsheet baru / kosong (2.6.9)
+  'Belum ada line di aplikasi. Minta admin mengisi tab Lines dan mencetak QR.': '应用中还没有产线。请管理员填写 Lines 标签页并打印二维码。',
+  'Mulai dari spreadsheet kosong': '从空白表格开始', 'Belum ada line dan sparepart.': '还没有产线和备件。', 'Belum ada line.': '还没有产线。',
+  'Belum ada sparepart.': '还没有备件。',
+  'Belum ada sparepart di katalog (tab Sparepart): teknisi mengetik part manual.': '备件目录中还没有备件（Sparepart 标签页）：技术员需手动输入备件。',
+  'Isi tab di Google Sheet berurutan. Baris abu-abu "CONTOH" menunjukkan cara mengisi dan diabaikan aplikasi — timpa (Aktif = Ya) atau hapus.':
+    '请按顺序填写 Google 表格中的标签页。灰色的 "CONTOH"（示例）行说明填写方法，应用会忽略它们——可直接覆盖（Aktif = Ya）或删除。',
+  'Factory: ID & nama factory.': 'Factory：工厂编号和名称。', 'Projects: baterai per factory (+ target MTTR / MTBF bila ada).': 'Projects：各工厂的电池项目（如有，填写 MTTR / MTBF 目标）。',
+  'Lines: satu baris = satu line / mesin ber-QR; isi Proses (Modul Line / Pack Line / Pre-Assy).': 'Lines：一行 = 一条带二维码的产线 / 设备；填写工序（Modul Line / Pack Line / Pre-Assy）。',
+  'Sparepart: paste daftar part (kode part di kolom Model).': 'Sparepart：粘贴备件清单（备件编码写在 Model 列）。',
+  'Users: email, nama, Peran (Teknisi / Admin).': 'Users：邮箱、姓名、角色（Teknisi / Admin）。',
+  'Config: jam & hari operasi, target, tanggal libur.': 'Config：运行时间和天数、目标、节假日。',
+  'Menu MTTR → Cetak QR, tempel di line.': '菜单 MTTR → 打印二维码，贴在产线上。',
+  'Uji 1 pekerjaan dari HP, lalu menu MTTR → Hapus data testing.': '用手机测试 1 项工作，然后菜单 MTTR → 删除测试数据。',
+  'Server sedang sibuk (banyak teknisi menekan bersamaan). Dicoba lagi otomatis…': '服务器繁忙（多名技术员同时操作）。正在自动重试…',
+  '{m} sudah ditutup {d} oleh {n}.': '{m} 已于 {d} 由 {n} 关账。', 'otomatis': '系统自动',
+  'Ditutup otomatis tanggal {d} bila tidak ada review.': '若无待审核项，将于 {d} 日自动关账。',
+  '{n} cancel setelah >30 menit kerja (cek alasannya di Riwayat)': '{n} 项在工作 30 分钟以上后取消（请在历史中查看原因）',
+  '{n} dari {m} pekerjaan selesai = input manual': '{m} 项已完成工作中有 {n} 项为手动录入',
+  'Input manual': '手动录入', 'Tab dimatikan': '标签页已停用', 'Tutup ulang': '重新关账', '{m} belum ditutup.': '{m} 尚未关账。',
+  '{n} pekerjaan bulan itu masih menunggu review': '该月仍有 {n} 项工作待审核', 'sebaiknya direview dulu.': '建议先审核。', 'Tutup bulan {m}': '关账 {m}',
+  'Angka KPI {m} dikunci: edit data lama sesudah ini tidak mengubahnya lagi. Tab KPI di Google Sheet ikut diperbarui.': '{m} 的 KPI 数字将被锁定：之后修改旧数据不再影响。Google 表格中的 KPI 标签页也会更新。',
+  'Sudah pernah ditutup: angka lama diganti angka sekarang, dan keduanya dicatat di Log.': '已关账过：旧数字将被当前数字替换，两者都记录在 Log 中。',
+  'Tutup bulan': '关账', '{m} ditutup.': '{m} 已关账。', '{n} pekerjaan masih menunggu review: tutup ulang setelah direview.': '{n} 项工作仍待审核：审核后请重新关账。',
+  '{d} total': '合计 {d}', '{n}× rusak': '故障 {n} 次', 'rata-rata {m} mnt': '平均 {m} 分钟', 'Cari nama…': '搜索姓名…',
+  'Yang sering muncul sebaiknya dijadikan pilihan tetap di sheet <b>Pilihan</b> supaya teknisi cukup tap.':
+    '经常出现的内容建议加入 <b>Pilihan</b> 表作为固定选项，技术员只需点选。',
+  'Status project': '项目状态', 'Fase belum diisi': '未填写阶段', 'Belum ada data di periode ini.': '此期间暂无数据。',
+  'Laporan format Excel': 'Excel 格式报表', 'Perbarui Laporan, Rekap & TPM': '更新 Laporan、Rekap 和 TPM', 'Perbarui Laporan, Rekap, TPM & KPI': '更新 Laporan、Rekap、TPM 和 KPI',
+  '✓ {s} diperbarui.': '✓ {s} 已更新。', 'KPI gagal: {e}': 'KPI 失败：{e}',
+  'Tab <b>TPM &lt;project&gt;</b> (format Excel manager, 中文 + English) diperbarui tiap malam dan saat tombol ini ditekan.':
+    '<b>TPM &lt;项目&gt;</b> 页（经理的 Excel 格式，中文 + English）每晚及点此按钮时更新。',
+  '✓ TPM: {s}.': '✓ TPM：{s}。', 'TPM gagal: {e}': 'TPM 失败：{e}',
+  '{n} teks belum diterjemahkan (kuota Google); tekan lagi nanti.': '{n} 条文字尚未翻译（Google 配额）；请稍后再点。',
+  'Tab <b>Laporan {y}</b> & <b>Rekap</b> di Google Sheet diperbarui langsung setiap aksi. Tekan tombol ini setelah mengedit sheet Maintenance atau Format Laporan secara manual.':
+    'Google Sheet 的 <b>Laporan {y}</b> 和 <b>Rekap</b> 页在每次操作后实时更新。手动编辑 Maintenance 或 Format Laporan 表后，请点此按钮。',
+  'Buka Google Sheet': '打开 Google Sheet', 'Perlu dicek di Google Sheet ({n})': '需要在 Google Sheet 中检查（{n}）',
+  '✓ {l} ({n} baris) & {r} diperbarui.': '✓ {l}（{n} 行）和 {r} 已更新。',
+  'QR Line': '产线二维码',
+  'Satu QR per baris sheet <b>Lines</b> (satu unit kerja). QR mesin lama tetap bisa dipakai: membuka line-nya.':
+    '<b>Lines</b> 表每行一个二维码（一个工作单元）。旧的设备二维码仍可使用：会打开对应产线。',
+  'Line dari sheet <b>Lines</b>, mesin dari sheet <b>Mesin</b>. QR mesin langsung memilih mesinnya saat di-scan (1 tap lebih cepat).':
+    '产线来自 <b>Lines</b> 表，设备来自 <b>Mesin</b> 表。扫描设备二维码会直接选中该设备（少点一次）。',
+  'URL saat ini /dev (hanya untuk editor). Buka dari URL deployment /exec sebelum mencetak QR.': '当前网址是 /dev（仅供编辑者）。打印二维码前请从部署网址 /exec 打开。',
+
+  // ---------- saran & panduan ----------
+  'Kirim saran': '发送建议', 'Apa yang perlu ditambah atau diperbaiki di aplikasi? Boleh pakai bahasa apa saja.': '应用需要增加或改进什么？可以用任何语言填写。',
+  'Tulis saran…': '填写建议…', 'Saran saya ({n})': '我的建议（{n}）', 'Semua saran ({n})': '全部建议（{n}）',
+  'Semua saran teknisi': '技术员的全部建议', 'Belum ada saran.': '暂无建议。', 'Terjemahan: {x}': '译文：{x}',
+  'Tanggapan untuk teknisi (opsional)': '给技术员的回复（选填）', 'Simpan tanggapan': '保存回复',
+  'Fitur aplikasi': '应用功能', 'Pilihan / isian baru': '新增选项 / 填写项', 'Mesin / Line': '设备 / 产线',
+  'Baru': '新', 'Dibaca': '已读', 'Direncanakan': '已计划', 'Ditolak': '未采纳',
+  '{a} · versi {v}': '{a} · 版本 {v}', 'Versi {v}': '版本 {v}', 'Untuk teknisi': '技术员', 'Untuk admin': '管理员',
+  'Catatan lokal (dari admin)': '本地说明（管理员）', 'Rencana update': '更新计划',
+  'Punya ide? Kirim lewat <b>💡 Saran</b> di Beranda.': '有想法？请在首页点 <b>💡 建议</b> 发送。',
+  'Sedang dikerjakan': '开发中', 'Dipertimbangkan': '考虑中',
+
+  // ---------- pesan error server yang tetap (yang lain diterjemahkan otomatis) ----------
+  'Maintenance ini sedang dipegang teknisi lain.': '此维修正由其他技术员负责。', 'Maintenance tidak ditemukan.': '未找到该维修记录。',
+  'Server sedang sibuk, coba lagi beberapa detik.': '服务器繁忙，请几秒后重试。',
+  'Tanggal tenggat tidak boleh di masa lalu.': '期限不能早于现在。', 'Tanggal tenggat tidak valid.': '期限日期无效。',
+  'Tenggat wajib dipilih.': '必须选择期限。', 'Baterai wajib dipilih.': '必须选择电池项目。',
+  'Catatan review wajib diisi untuk Abandoned.': '“已放弃”必须填写审核备注。',
+  'Hanya teknisi yang memegang (atau Admin) yang boleh cancel.': '只有负责的技术员（或管理员）可以取消。',
+  'Sparepart tidak ditemukan di katalog (mungkin baru diubah admin). Muat ulang aplikasi lalu pilih lagi.': '目录中找不到该备件（可能刚被管理员修改）。请重新加载应用后再选。',
+  'Sparepart manual: nama sparepart wajib diisi.': '手动备件：必须填写备件名称。', 'Stop line harus "Ya" atau "Tidak".': '停线必须为“是”或“否”。',
+  'Record ini tidak ada di antrian review.': '此记录不在审核队列中。', 'Anda tidak berwenang mereview record ini.': '您无权审核此记录。',
+  'Saran tidak ditemukan.': '未找到该建议。',
+
+  // ---------- detail log (teks server berpola, lihat logHtml di App.html) ----------
+  '> {h} jam tanpa konfirmasi ({s})': '{h} 小时未确认（{s}）', 'Konfirmasi QR {l}': '已扫码确认 {l}', 'Status {s}': '状态：{s}',
+  ' (oleh Admin)': '（由管理员操作）', 'Peringatan tidak dijawab': '提醒未回复'
+};
+</script>

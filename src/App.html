@@ -2,11 +2,40 @@
 (function () {
   'use strict';
 
+  var QR_FRESH_MS = 15 * 60 * 1000;  // entri via QR dianggap "sedang di mesin" selama 15 menit
+  var FILTER_KEY = 'mttr21.filter';
+  var SEEN_KEY = 'mttr.versiDilihat';   // badge "Versi baru" muncul sekali setelah update
+  var NO_PART = 'Tidak ada pergantian';
+  var OTHER = 'Lainnya';
+  var EVENT_LABEL = {
+    'start': 'Mulai', 'pause': 'Pause', 'resume': 'Lanjut kerja', 'pending': 'Pending', 'lanjut': 'Pending dilanjutkan',
+    'complete': 'Selesai', 'cancel': 'Cancel', 'peringatan': 'Peringatan', 'masih lanjut': 'Konfirmasi masih lanjut',
+    'abandoned': 'Abandoned', 'review': 'Review', 'input manual': 'Input manual', 'tab dimatikan': 'Tab dimatikan', 'tutup bulan': 'Tutup bulan'
+  };
+
+  function emptyFilter() { return { factory: '', proses: '', baterai: '', line: '' }; }
+  function loadFilter() {
+    try { var f = JSON.parse(localStorage.getItem(FILTER_KEY) || '{}'); return { factory: f.factory || '', proses: f.proses || '', baterai: f.baterai || '', line: f.line || '' }; }
+    catch (e) { return emptyFilter(); }
+  }
+  function saveFilter() {
+    try { localStorage.setItem(FILTER_KEY, JSON.stringify(state.filter)); } catch (e) { /* mode privat: abaikan */ }
+  }
+
   var state = {
     boot: null,
-    offsetMs: 0,          // serverNow - deviceNow; timer layar mengikuti jam server
+    offsetMs: 0,            // serverNow - deviceNow: timer layar mengikuti jam server
+    tab: 'home',
     lineView: null,
-    tab: 'home'
+    qr: INITIAL_LINE_ID ? { line: INITIAL_LINE_ID.toUpperCase(), at: Date.now() } : null,
+    filter: loadFilter(),   // dipakai bersama Beranda, Pending, Review, Riwayat, Dashboard
+    q: { pending: '', review: '', history: '' },
+    pendingFilter: 'ALL',
+    history: { status: '', tipe: '', scope: 'mine', data: null },
+    dash: { periode: 30, mode: 'ringkasan' },
+    stat: { by: 'line', measure: 'frek', p: { kind: 'bulan' } },   // Dashboard → Statistik (2.6)
+    dl: { kind: 'bulan' },                                         // Riwayat → Download (2.6)
+    sheetClose: null
   };
 
   // ---------- util ----------
@@ -20,382 +49,2194 @@
     var args = Array.prototype.slice.call(arguments, 1);
     return new Promise(function (resolve, reject) {
       var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(function (e) {
-        reject(new Error((e && e.message) || String(e)));
+        var msg = (e && e.message) || String(e);
+        // Halaman sudah lolos cek akses (doGet), jadi ditolak sekarang = Google memakai akun lain (multi-akun).
+        var denied = /ACCESS_DENIED: email (\S+)/.exec(msg);
+        if (cekAkunOn() && (AUTH_ERR.test(msg) || (denied && (!state.boot || denied[1] !== state.boot.user.email)))) accountProblem(denied ? denied[1] : '');
+        reject(new Error(msg));
       });
       r[fn].apply(r, args);
     });
   }
+
+  // ---------- Bug Google: browser login beberapa akun → google.script.run memakai akun utama browser ----------
+  var AUTH_ERR = /PERMISSION_DENIED|authoriz|HTTP 40[13]/i;
+  /** Admin bisa mematikan pemeriksaan lewat Config → CEK_AKUN = Tidak. */
+  function cekAkunOn() { return !state.boot || state.boot.cekAkun !== false; }
+  function accountProblem(other) {
+    if ($('acct')) return;
+    var mine = state.boot && state.boot.user ? state.boot.user.email : '';
+    var d = document.createElement('div');
+    d.id = 'acct';
+    d.className = 'acct-bg';
+    d.innerHTML = '<div class="card acct">' + (other && mine
+      ? '<h2>' + t('Akun Google tidak cocok') + '</h2><p class="small">' + t('Aplikasi dibuka sebagai {a}, tetapi Google mengirim tombol sebagai {b} (akun utama di browser ini). Ini bug Google saat satu browser login dengan beberapa akun. Aplikasi dihentikan supaya data tidak tercatat atas nama yang salah.',
+        { a: '<b>' + esc(mine) + '</b>', b: '<b>' + esc(other) + '</b>' }) + '</p>'
+      // Tanpa info akun: bisa juga sesi login habis / sinyal → muat ulang dulu.
+      : '<h2>' + t('Tidak terhubung ke akun Google') + '</h2><p class="small">' + t('Google menolak permintaan dari browser ini{u}. Tekan <b>Muat ulang</b> dulu (mungkin sesi login habis). Kalau masih muncul, biasanya karena browser login dengan beberapa akun Google:',
+        { u: mine ? t(' untuk {e}', { e: '<b>' + esc(mine) + '</b>' }) : '' }) + '</p>') +
+      '<ol class="small"><li>' + t('<b>Cepat:</b> buka link aplikasi di tab <b>Incognito / Private</b>, login hanya dengan akun kerja.') + '</li>' +
+      '<li>' + t('<b>Permanen di HP:</b> pakai satu browser khusus kerja (mis. Firefox, Edge, Samsung Internet) yang hanya login akun kerja, lalu ⋮ → <b>Tambahkan ke layar utama</b>.') + '</li>' +
+      '<li>' + t('<b>Permanen di PC:</b> buat <b>profil Chrome</b> khusus akun kerja, atau keluar dari semua akun lalu login akun kerja <b>paling dulu</b> (akun pertama = akun utama).') + '</li></ol>' +
+      '<button class="btn" id="acct-reload">' + t('Muat ulang') + '</button></div>';
+    document.body.appendChild(d);
+    $('acct-reload').onclick = function () { location.reload(); };
+  }
+  /** Bandingkan akun halaman (dari doGet) dengan akun yang dipakai Google untuk tombol. */
+  function checkAccount() {
+    if (!cekAkunOn()) return;
+    call('apiWhoAmI').then(function (email) {
+      if (email && state.boot && email !== state.boot.user.email) accountProblem(email);
+    }).catch(function () { /* penolakan sudah ditangani di call() */ });
+  }
+  function cleanErr(e) { return String((e && e.message) || e).replace(/^(Error|Exception):\s*/, ''); }
   function syncClock(iso) { if (iso) state.offsetMs = new Date(iso).getTime() - Date.now(); }
   function serverNow() { return Date.now() + state.offsetMs; }
-  function fmtElapsed(ms) {
-    if (ms < 0) ms = 0;
-    var s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-    s = s % 60;
-    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  function two(n) { return (n < 10 ? '0' : '') + n; }
+  function hms(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    return two(Math.floor(s / 3600)) + ':' + two(Math.floor(s % 3600 / 60)) + ':' + two(s % 60);
   }
-  function flash(msg, kind) {
-    $('flash').innerHTML = msg ? '<div class="alert ' + (kind || 'err') + '">' + esc(msg) + '</div>' : '';
-    if (msg) window.scrollTo(0, 0);
+  function dur(ms) {
+    var m = Math.max(0, Math.floor(ms / 60000)), zh = LANG === 'zh';
+    if (m < 60) return m + (zh ? '分' : 'm');
+    var h = Math.floor(m / 60);
+    if (h < 24) return h + (zh ? '时 ' : 'j ') + (m % 60) + (zh ? '分' : 'm');
+    return Math.floor(h / 24) + (zh ? '天 ' : ' hari ') + (h % 24) + (zh ? '时' : 'j');
   }
+  function ago(iso) {
+    var ms = serverNow() - new Date(iso).getTime();
+    if (ms < 60000) return t('baru saja');
+    return t('{d} lalu', { d: dur(ms) });
+  }
+  function fmtShort(iso) {
+    if (!iso) return '-';
+    var d = new Date(new Date(iso).getTime() + 7 * 3600000); // WIB, tanpa DST
+    return two(d.getUTCDate()) + '/' + two(d.getUTCMonth() + 1) + ' ' + two(d.getUTCHours()) + ':' + two(d.getUTCMinutes());
+  }
+  function mnt(v) { return v == null ? '–' : Math.round(v) + ''; }
+  /** Angka jam KPI: 1 desimal di bawah 100 (koma untuk Bahasa Indonesia), bulat di atasnya. */
+  function jam(v) {
+    if (v == null) return '–';
+    var s = v >= 100 ? String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : (Math.round(v * 10) / 10).toFixed(1);
+    return LANG === 'zh' ? s : s.replace(/[.,]/g, function (c) { return c === '.' ? ',' : '.'; });   // id: 4.416 · 1,5
+  }
+  // ---------- periode (Statistik & Download): hari ini / tanggal / bulan / tahun / rentang, tanggal WIB ----------
+  var BULAN_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+  function todayKey() { var d = new Date(serverNow() + 7 * 3600000); return d.getUTCFullYear() + '-' + two(d.getUTCMonth() + 1) + '-' + two(d.getUTCDate()); }
+  /** @param {{kind:string, date?, month?, year?, from?, to?}} p @return {{from:string, to:string}} 'yyyy-mm-dd', inklusif */
+  function periodRange(p) {
+    var today = todayKey(), ok = function (v, re) { return re.test(v || '') ? v : ''; };
+    if (p.kind === 'tanggal') { var d = ok(p.date, /^\d{4}-\d\d-\d\d$/) || today; return { from: d, to: d }; }
+    if (p.kind === 'bulan') {
+      var m = ok(p.month, /^\d{4}-\d\d$/) || today.slice(0, 7);
+      return { from: m + '-01', to: m + '-' + two(new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5)), 0)).getUTCDate()) };
+    }
+    if (p.kind === 'tahun') { var y = ok(String(p.year || ''), /^\d{4}$/) || today.slice(0, 4); return { from: y + '-01-01', to: y + '-12-31' }; }
+    if (p.kind === 'rentang') {
+      var a = ok(p.from, /^\d{4}-\d\d-\d\d$/) || today, b = ok(p.to, /^\d{4}-\d\d-\d\d$/) || today;
+      return a <= b ? { from: a, to: b } : { from: b, to: a };
+    }
+    return { from: today, to: today };
+  }
+  function periodText(p) {
+    var r = periodRange(p), dm = function (k) { return k.slice(8) + '/' + k.slice(5, 7) + '/' + k.slice(0, 4); };
+    if (p.kind === 'bulan') return monthLabel(r.from.slice(0, 7), BULAN_ID[Number(r.from.slice(5, 7)) - 1] + ' ' + r.from.slice(0, 4));
+    if (p.kind === 'tahun') return r.from.slice(0, 4);
+    return r.from === r.to ? dm(r.from) : dm(r.from) + ' – ' + dm(r.to);
+  }
+  /** Pilihan periode di dalam `box`; p diubah langsung, onChange() setiap kali berubah. */
+  function bindPeriod(box, prefix, p, onChange) {
+    var draw = function () {
+      var today = todayKey(), y = Number(today.slice(0, 4)), r = periodRange(p), input = '';
+      if (p.kind === 'tanggal') input = '<input type="date" data-p="date" value="' + esc(r.from) + '" max="' + today + '">';
+      if (p.kind === 'bulan') input = '<input type="month" data-p="month" value="' + esc(r.from.slice(0, 7)) + '" max="' + today.slice(0, 7) + '" placeholder="yyyy-mm">';
+      if (p.kind === 'tahun') input = '<select data-p="year">' + [y, y - 1, y - 2].map(function (v) { return '<option' + (String(v) === r.from.slice(0, 4) ? ' selected' : '') + '>' + v + '</option>'; }).join('') + '</select>';
+      if (p.kind === 'rentang') input = '<div class="row"><input type="date" data-p="from" value="' + esc(r.from) + '" max="' + today + '"><span class="muted">–</span>' +
+        '<input type="date" data-p="to" value="' + esc(r.to) + '" max="' + today + '"></div>';
+      box.innerHTML = '<div class="scroll-x">' + chips(prefix + '-kind', [{ value: 'hari', label: 'Hari ini' }, { value: 'tanggal', label: 'Tanggal' }, { value: 'bulan', label: 'Bulan' },
+        { value: 'tahun', label: 'Tahun' }, { value: 'rentang', label: 'Rentang' }], { selected: p.kind || 'hari' }) + '</div>' + (input ? '<div style="margin-top:8px">' + input + '</div>' : '');
+      bindChips(box, function (n, v) { p.kind = v; draw(); onChange(); });
+      [].forEach.call(box.querySelectorAll('[data-p]'), function (el) {
+        el.onchange = function () { p[el.getAttribute('data-p')] = el.value; onChange(); };
+      });
+    };
+    draw();
+  }
+
+  /** "2026-09" → "September 2026" / "2026年9月" */
+  function monthLabel(key, idLabel) {
+    var m = /^(\d{4})-(\d{2})$/.exec(key || '');
+    return m && LANG === 'zh' ? m[1] + '年' + Number(m[2]) + '月' : (idLabel || key);
+  }
+  function initials(name) {
+    return String(name || '?').split(/[\s@.]+/).filter(String).slice(0, 2).map(function (p) { return p[0]; }).join('').toUpperCase() || '?';
+  }
+  function pill(st) { return '<span class="pill st-' + esc(st) + '">' + esc(st) + '</span>'; }
+  function tipeTag(t) { return t && t !== 'Corrective' ? ' <span class="tag-lite">' + esc(t) + '</span>' : ''; }
+  function isAdmin() { return state.boot && state.boot.user.role === 'Admin'; }
+  function me() { return state.boot.user; }
+  function M() { return state.boot.master; }
   function busy(btn, on, label) {
     if (!btn) return;
-    if (on) { btn.dataset.label = btn.textContent; btn.textContent = label || 'Memproses…'; btn.disabled = true; }
-    else { btn.textContent = btn.dataset.label || btn.textContent; btn.disabled = false; }
-  }
-  function pill(status) { return '<span class="pill st-' + esc(status) + '">' + esc(status) + '</span>'; }
-  function cleanErr(e) { return String(e.message || e).replace(/^Error:\s*/, '').replace(/^Exception:\s*/, ''); }
-  function isReviewer() { var r = state.boot && state.boot.user.role; return r === 'Supervisor' || r === 'Admin'; }
-
-  // ---------- timer (indikator visual saja, bukan sumber data) ----------
-  setInterval(function () {
-    var els = document.querySelectorAll('.js-elapsed');
-    var warnMs = state.boot ? state.boot.abandonHours * 3600 * 1000 * 0.9 : Infinity;
-    for (var i = 0; i < els.length; i++) {
-      var ms = serverNow() - new Date(els[i].getAttribute('data-start')).getTime();
-      els[i].textContent = fmtElapsed(ms);
-      var w = document.getElementById(els[i].getAttribute('data-warn') || '');
-      if (w) w.classList.toggle('hidden', ms < warnMs);
+    clearTimeout(btn._slow);
+    if (on) {
+      btn.dataset.label = btn.innerHTML; btn.innerHTML = label || t('Memproses…'); btn.disabled = true;
+      // 2.6.4: sinyal lambat → teknisi tahu masih diproses (bukan macet) dan tidak menutup aplikasi
+      btn._slow = setTimeout(function () { if (btn.disabled) btn.innerHTML = t('Masih memproses… jangan tutup aplikasi'); }, 8000);
     }
-  }, 1000);
+    else if (btn.dataset.label) { btn.innerHTML = btn.dataset.label; btn.disabled = false; }
+  }
+  var toastTimer;
+  function toast(msg, kind) {
+    clearTimeout(toastTimer);
+    $('toast-root').innerHTML = '<div class="toast ' + (kind || '') + '">' + esc(msg) + '</div>';
+    toastTimer = setTimeout(function () { $('toast-root').innerHTML = ''; }, kind === 'err' ? 6000 : 3000);
+    // Pesan error dari server berbahasa Indonesia → untuk user 中文 diterjemahkan (Google Translate, di-cache).
+    if (kind === 'err' && LANG === 'zh' && needsTr(msg) && !I18N_DICT[msg]) {
+      translateTexts([msg]).then(function (o) {
+        var el = $('toast-root').querySelector('.toast');
+        if (el && el.textContent === msg) el.textContent = o[0];
+      }).catch(function () { /* tetap tampil bahasa Indonesia */ });
+    }
+  }
+  function freshQr(line) {
+    return state.qr && state.qr.line === String(line).toUpperCase() && Date.now() - state.qr.at < QR_FRESH_MS;
+  }
+  function who(name) { return name === 'Sistem' ? t('Sistem') : name; }
+  function lineTitle(r) { return esc(r.line) + (r.mesin ? ' · ' + esc(L(r.mesin)) : (r.lineName ? ' · ' + esc(L(r.lineName)) : '')); }
 
-  // ---------- tabs ----------
+  // ---------- bahasa: id / 中文 (kamus & penerjemah tampilan di I18n.html) ----------
+  var LANG_KEY = 'mttr.bahasa';
+  function savedLang() { try { return localStorage.getItem(LANG_KEY) || ''; } catch (e) { return ''; } }
+  /** Label tampilan untuk nilai dari Google Sheet (pilihan, mesin, line). Nilai yang disimpan tidak berubah. */
+  function L(v) {
+    if (LANG !== 'zh' || !v) return v;
+    var m = /^Lainnya: ([\s\S]*)$/.exec(String(v));
+    return m ? t('Lainnya') + ': ' + m[1] : (I18N_DICT[v] || v);
+  }
+  function lbl(d) { return LANG === 'zh' && d.labelZh ? d.labelZh : d.label; }
+  /** Nilai pilihan; "Lainnya: teks bebas" → label + teks yang bisa diterjemahkan (tombol 翻译). */
+  function valHtml(v) {
+    var m = /^Lainnya: ([\s\S]*)$/.exec(String(v || ''));
+    return m ? esc(t('Lainnya')) + ': <span data-tr>' + esc(m[1]) + '</span>' : esc(L(v));
+  }
+  /**
+   * Detail log dari server (teks Indonesia berpola) → label baku lewat kamus, teks bebas tetap asli di [data-tr] (tombol 翻译).
+   * Mulai: "Corrective, Line L01, mesin X, baterai Y, stop line Ya, …"; lainnya: "Label: nilai · Tenggat … · …".
+   */
+  function logHtml(event, s) {
+    s = String(s || '');
+    if (!s) return '';
+    var byAdmin = / \(oleh Admin\)$/.test(s), sep = event === 'start' ? ', ' : ' · ';
+    if (byAdmin) s = s.replace(/ \(oleh Admin\)$/, '');
+    var val = function (v) { return LANG === 'zh' && (I18N_DICT[v] || /^Lainnya: /.test(v)) ? esc(L(v)) : '<span data-tr>' + esc(v) + '</span>'; };
+    var seg = function (x) {
+      var m;
+      if ((m = /^Line (.+)$/.exec(x))) return esc(t('Line')) + ' ' + esc(m[1]);
+      if ((m = /^mesin (.+)$/.exec(x))) return esc(t('Mesin')) + ' ' + val(m[1]);
+      if ((m = /^baterai (.+)$/.exec(x))) return esc(t('Baterai')) + ' ' + esc(m[1]);
+      if ((m = /^stop line (.+)$/.exec(x))) return esc(t('Stop line')) + ' ' + esc(t(m[1]));
+      if ((m = /^Tenggat (.+)$/.exec(x))) return esc(t('Tenggat {w}', { w: m[1] }));
+      if ((m = /^> (\d+) jam tanpa konfirmasi \((.+)\)$/.exec(x))) return esc(t('> {h} jam tanpa konfirmasi ({s})', { h: m[1], s: t(m[2]) }));
+      if ((m = /^Konfirmasi QR (.+)$/.exec(x))) return esc(t('Konfirmasi QR {l}', { l: m[1] }));
+      if ((m = /^Status (\w+)$/.exec(x))) return esc(t('Status {s}', { s: t(m[1]) }));
+      if (I18N_DICT[x] != null) return esc(t(x));
+      if ((m = /^([^:]{1,80}): ([\s\S]*)$/.exec(x))) return esc(t(m[1])) + (LANG === 'zh' ? '：' : ': ') + val(m[2]);
+      return val(x);
+    };
+    return s.split(sep).map(seg).join(LANG === 'zh' && sep === ', ' ? '，' : sep) + (byAdmin ? esc(t(' (oleh Admin)')) : '');
+  }
+  function masterDict(m) {
+    var d = {};
+    Object.keys(m.trZh || {}).forEach(function (k) { d[k] = m.trZh[k]; });
+    Object.keys(m.forms || {}).forEach(function (f) { m.forms[f].forEach(function (x) { if (x.labelZh) d[x.label] = x.labelZh; }); });
+    return d;
+  }
+  function applyLang(lang) {
+    i18nSet(lang, state.boot ? masterDict(M()) : {});
+    document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'id';
+    var st = document.querySelectorAll('[data-i18n]');
+    for (var i = 0; i < st.length; i++) st[i].textContent = t(st[i].getAttribute('data-i18n'));
+  }
+  function setLang(lang) {
+    try { localStorage.setItem(LANG_KEY, lang); } catch (e) { /* mode privat: hanya sesi ini */ }
+    applyLang(lang);
+    closeSheet();
+    if (state.lineView && state.tab === 'home') { setView('line'); renderLine(); } else showTab(state.tab);
+  }
+  function langBtn() { return '<button class="helpbtn lang" id="btn-lang" aria-label="Bahasa / 语言">' + (LANG === 'zh' ? 'ID' : '中') + '</button>'; }
+
+  // Tombol 翻译 / Terjemahkan untuk teks bebas ([data-tr]): teks Indonesia → 中文 untuk user zh, teks 中文 → Indonesia.
+  var trCache = {};
+  function needsTr(s) { s = String(s || '').trim(); return !!s && (LANG === 'zh' ? !/[\u3400-\u9fff]/.test(s) : /[\u3400-\u9fff]/.test(s)); }
+  function translateTexts(texts) {
+    var lang = LANG, need = [];
+    texts.forEach(function (s) { if (trCache[lang + '|' + s] == null && need.indexOf(s) === -1) need.push(s); });
+    var chunks = [];
+    for (var i = 0; i < need.length; i += 50) chunks.push(need.slice(i, i + 50));   // apiTranslate: maks 50 teks per panggilan
+    var p = Promise.all(chunks.map(function (c) {
+      return call('apiTranslate', c, lang).then(function (out) { c.forEach(function (s, j) { trCache[lang + '|' + s] = out[j]; }); });
+    }));
+    return p.then(function () { return texts.map(function (s) { return trCache[lang + '|' + s]; }); });
+  }
+  function trButton(root) {
+    if (!root) return;
+    var els = Array.prototype.filter.call(root.querySelectorAll('[data-tr]'), function (e) { return needsTr(e.textContent); });
+    if (!els.length) return;
+    var b = document.createElement('button'), shown = false, label = t('🌐 Terjemahkan');
+    b.type = 'button'; b.className = 'link small trbtn'; b.textContent = label;
+    root.appendChild(b);
+    b.onclick = function (ev) {
+      ev.stopPropagation();
+      if (shown) { els.forEach(function (e) { e.textContent = e.getAttribute('data-orig'); }); shown = false; b.textContent = label; return; }
+      var texts = els.map(function (e) { if (!e.hasAttribute('data-orig')) e.setAttribute('data-orig', e.textContent); return e.getAttribute('data-orig'); });
+      busy(b, true, t('Menerjemahkan…'));
+      translateTexts(texts).then(function (out) {
+        busy(b, false);
+        els.forEach(function (e, i) { e.textContent = out[i]; });
+        shown = true;
+        b.textContent = t('Tampilkan teks asli');
+      }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+    };
+  }
+
+  // ---------- live timers (tampilan saja; data dari server) ----------
+  function liveMs(el) {
+    var ms = parseFloat(el.getAttribute('data-base') || '0') * 60000;
+    if (el.getAttribute('data-run') === '1') ms += serverNow() - new Date(el.getAttribute('data-since')).getTime();
+    return ms;
+  }
+  function timerAttrs(baseMin, sinceIso, running) {
+    return ' data-base="' + esc(baseMin) + '" data-since="' + esc(sinceIso) + '" data-run="' + (running ? 1 : 0) + '"';
+  }
+  function tick() {
+    var i, els = document.querySelectorAll('.js-hms');
+    for (i = 0; i < els.length; i++) els[i].textContent = hms(liveMs(els[i]));
+    els = document.querySelectorAll('.js-dur');
+    for (i = 0; i < els.length; i++) els[i].textContent = dur(liveMs(els[i]));
+    els = document.querySelectorAll('.js-ago');
+    for (i = 0; i < els.length; i++) els[i].textContent = ago(els[i].getAttribute('data-iso'));
+  }
+  setInterval(tick, 1000);
+
+  // ---------- navigation ----------
   $('tabs').addEventListener('click', function (ev) {
     var b = ev.target.closest('button[data-tab]');
     if (b) showTab(b.getAttribute('data-tab'));
   });
-  function showTab(tab) {
-    state.tab = tab;
-    flash('');
-    ['home', 'history', 'review', 'qr'].forEach(function (t) {
-      $('view-' + t).classList.toggle('hidden', t !== tab);
+
+  function setView(id) {
+    ['home', 'line', 'history', 'review', 'pending', 'dashboard', 'qr', 'guide', 'saran'].forEach(function (v) {
+      $('view-' + v).classList.toggle('hidden', v !== id);
     });
-    var btns = document.querySelectorAll('nav.tabs button');
-    for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i].getAttribute('data-tab') === tab);
-    if (tab === 'history') renderHistoryShell();
-    if (tab === 'review') loadReview();
-    if (tab === 'qr') loadQr();
     window.scrollTo(0, 0);
   }
-
-  // ---------- boot ----------
-  function boot(lineId) {
-    return call('apiBootstrap', lineId || '').then(function (b) {
-      state.boot = b;
-      syncClock(b.serverNowIso);
-      state.lineView = b.lineView;
-      $('who').innerHTML = esc(b.user.name) + '<br>' + esc(b.user.role);
-      $('tab-review').classList.toggle('hidden', !isReviewer());
-      $('tab-qr').classList.toggle('hidden', b.user.role !== 'Admin');
-      $('review-badge').innerHTML = b.abandonedCount ? '<span class="badge">' + b.abandonedCount + '</span>' : '';
-      renderHome();
-    });
+  function markTab(tab) {
+    var btns = document.querySelectorAll('nav.tabs button');
+    for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i].getAttribute('data-tab') === tab);
   }
 
-  boot(INITIAL_LINE_ID).catch(function (e) {
-    $('view-home').innerHTML = '<div class="card center"><h1>Gagal memuat</h1><p>' + esc(cleanErr(e)) + '</p>' +
-      '<button class="btn secondary" onclick="location.reload()">Coba lagi</button></div>';
-  });
+  function showTab(tab) {
+    closeSheet();
+    state.tab = tab;
+    markTab(tab);
+    if (tab === 'home') { state.lineView = null; setView('home'); renderHome(); refresh(); }
+    if (tab === 'history') { setView('history'); loadHistory(); }
+    if (tab === 'review') { setView('review'); loadReview(); }
+    if (tab === 'pending') { setView('pending'); loadPending(); }
+    if (tab === 'dashboard') { setView('dashboard'); loadDashboard(); }
+  }
+  function reloadTab() {
+    if (state.tab === 'home') { refresh(true); return; }
+    showTab(state.tab);
+  }
+
+  function setBadges(c) {
+    $('badge-pending').innerHTML = c.pending ? '<span class="badge">' + c.pending + '</span>' : '';
+    $('badge-review').innerHTML = c.review ? '<span class="badge">' + c.review + '</span>' : '';
+  }
+
+  // ---------- master: factory → baterai → line ----------
+  function factoryName(id) {
+    var f = M().factories.filter(function (x) { return x.id === id; })[0];
+    return f ? f.name : id;
+  }
+  function batteriesFor(factory) {
+    var out = [];
+    M().projects.forEach(function (p) {
+      if ((!factory || p.factory === factory) && out.indexOf(p.battery) === -1) out.push(p.battery);
+    });
+    return out;
+  }
+  function linesFor(f, q) {
+    q = String(q || '').trim().toLowerCase();
+    return M().lines.filter(function (l) {
+      if (f.factory && l.factory !== f.factory) return false;
+      if (f.proses && l.proses !== f.proses) return false;
+      if (f.baterai && l.batteries.indexOf(f.baterai) === -1) return false;
+      if (f.line && l.id !== f.line) return false;
+      if (q && [l.id, l.name, L(l.name), l.proses, l.area, factoryName(l.factory)].join(' ').toLowerCase().indexOf(q) === -1) return false;
+      return true;
+    });
+  }
+  /** Daftar Proses (grup di atas Line, kolom Proses di sheet Lines). */
+  function prosesFor(factory) {
+    var out = [];
+    M().lines.forEach(function (l) { if (l.proses && (!factory || l.factory === factory) && out.indexOf(l.proses) === -1) out.push(l.proses); });
+    return out.sort();
+  }
+  /** Pilihan "Line" di filter. */
+  function lineChoices(f) {
+    return linesFor({ factory: f.factory, proses: f.proses, baterai: f.baterai }).map(function (l) {
+      return { value: l.id, label: l.id + (l.name ? ' · ' + L(l.name) : '') };
+    });
+  }
+  function serverFilter(view) {
+    var f = state.filter;
+    return { factory: f.factory, proses: f.proses, baterai: f.baterai, line: f.line, q: view ? state.q[view] || '' : '' };
+  }
+
+  // ---------- filter bar (Beranda, Pending, Review, Riwayat, Dashboard) ----------
+  function filterSummary() {
+    var f = state.filter, parts = [];
+    if (f.factory) parts.push(factoryName(f.factory));
+    if (f.proses) parts.push(f.proses);
+    if (f.baterai) parts.push(f.baterai);
+    if (f.line) parts.push(f.line);
+    return parts;
+  }
+  function filterBar(view, dark) {
+    var parts = filterSummary();
+    return '<div class="filterbar' + (dark ? ' on-dark' : '') + '">' +
+      (view ? '<input type="search" class="search" data-search="' + view + '" placeholder="Cari line, ID, masalah…" value="' + esc(state.q[view] || '') + '">' : '') +
+      '<button class="fbtn' + (parts.length ? ' on' : '') + '" data-open-filter>' +
+      '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>' +
+      '<span>' + (parts.length ? esc(parts.join(' · ')) : 'Filter') + '</span></button></div>';
+  }
+  var searchTimer;
+  function bindFilterBar(root, onChange) {
+    var b = root.querySelector('[data-open-filter]');
+    if (b) b.onclick = function () { openFilterSheet(onChange); };
+    var s = root.querySelector('[data-search]');
+    if (s) s.oninput = function () {
+      var v = this.value, view = this.getAttribute('data-search');
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () { state.q[view] = v; onChange(true); }, 350);
+    };
+  }
+  function openFilterSheet(onApply) {
+    var draft = { factory: state.filter.factory, proses: state.filter.proses, baterai: state.filter.baterai, line: state.filter.line };
+    var s = openSheet('<h2>Filter</h2><p class="small muted">Berlaku di Beranda, Pending, Review, Riwayat & Dashboard. Tersimpan di HP ini.</p><div id="f-body" class="stack"></div>' +
+      '<div class="btn-row two" style="margin-top:16px"><button class="btn ghost" id="f-reset">Reset</button><button class="btn" id="f-apply">Terapkan</button></div>');
+    function draw() {
+      var bats = batteriesFor(draft.factory);
+      if (draft.baterai && bats.indexOf(draft.baterai) === -1) draft.baterai = '';
+      var pros = prosesFor(draft.factory);
+      if (draft.proses && pros.indexOf(draft.proses) === -1) draft.proses = '';
+      var lines = lineChoices(draft);
+      if (draft.line && !lines.some(function (l) { return l.value === draft.line; })) draft.line = '';
+      $('f-body').innerHTML =
+        '<div><label class="lbl">Factory</label>' + chips('factory', [{ value: '', label: 'Semua' }].concat(M().factories.map(function (f) {
+          return { value: f.id, label: f.name + (f.lokasi ? ' · ' + f.lokasi : '') };
+        })), { selected: draft.factory }) + '</div>' +
+        (pros.length ? '<div><label class="lbl">Proses</label>' + chips('proses', [{ value: '', label: 'Semua' }].concat(pros), { selected: draft.proses }) + '</div>' : '') +
+        '<div><label class="lbl">Baterai / project</label>' + chips('baterai', [{ value: '', label: 'Semua' }].concat(bats), { selected: draft.baterai }) + '</div>' +
+        '<div><label class="lbl">Line</label><select id="f-line"><option value="">Semua line</option>' + lines.map(function (l) {
+          return '<option value="' + esc(l.value) + '"' + (l.value === draft.line ? ' selected' : '') + '>' + esc(l.label) + '</option>';
+        }).join('') + '</select></div>';
+      bindChips($('f-body'), function (name, val) { draft[name] = val; if (name === 'factory' || name === 'proses') { draft.line = ''; } draw(); });
+      $('f-line').onchange = function () { draft.line = this.value; };
+    }
+    draw();
+    var apply = function () { state.filter = draft; saveFilter(); closeSheet(); onApply(); };
+    // Reset langsung berlaku (sebelumnya harus Terapkan juga; ditutup tanpa Terapkan = filter lama tetap aktif).
+    $('f-reset').onclick = function () { draft = emptyFilter(); apply(); };
+    $('f-apply').onclick = apply;
+    return s;
+  }
+
+  // ---------- boot & refresh ----------
+  function boot() {
+    draftSweep();
+    var hasFilter = !!(state.filter.factory || state.filter.proses || state.filter.baterai || state.filter.line);
+    // Data awal sudah ditanam di halaman oleh server (doGet) → langsung tampil tanpa menunggu server lagi.
+    i18nObserve(document.body);   // teks tetap yang masuk ke layar diterjemahkan otomatis (bila bahasa 中文)
+    if (window.BOOT) {
+      try { applyBoot(window.BOOT); } catch (e) { bootError(e); return; }
+      checkAccount();
+      if (hasFilter) refresh(true); // statistik Beranda dihitung ulang sesuai filter tersimpan
+      return;
+    }
+    call('apiBootstrap', INITIAL_LINE_ID || '', INITIAL_MESIN_ID || '', serverFilter()).then(applyBoot).catch(bootError);
+  }
+
+  function bootError(e) {
+    $('view-home').innerHTML = '<div class="card center" style="margin-top:40px"><h2>Gagal memuat</h2><p class="muted">' + esc(cleanErr(e)) +
+      '</p><button class="btn" onclick="location.reload()">Coba lagi</button></div>';
+  }
+
+  function applyBoot(b) {
+    state.boot = b;
+    applyLang(savedLang() || b.user.lang || 'id');
+    // 2.6: review = keputusan admin (Cancelled, Abandoned); teknisi tidak punya tab Review.
+    var rvTab = document.querySelector('nav.tabs button[data-tab="review"]');
+    if (rvTab) rvTab.classList.toggle('hidden', !isAdmin());
+    syncClock(b.serverNowIso);
+    setBadges(b.counts);
+    // filter tersimpan yang sudah tidak valid (factory/line dihapus dari sheet) dibersihkan
+    if (state.filter.factory && !M().factories.some(function (f) { return f.id === state.filter.factory; })) state.filter = emptyFilter();
+    if (state.filter.proses && prosesFor('').indexOf(state.filter.proses) === -1) state.filter.proses = '';
+    if (b.lineView) {
+      if (b.lineView.line && !state.qr) state.qr = { line: b.lineView.line.id, at: Date.now() };
+      state.lineView = b.lineView; setView('line'); renderLine();
+    } else {
+      renderHome();
+      if (INITIAL_MESIN_ID) toast(t('QR mesin {m} tidak cocok dengan satu line. Pilih line-nya.', { m: INITIAL_MESIN_ID }), 'err');
+    }
+  }
+
+  var refreshing = false;
+  function refresh(force) {
+    if (!state.boot || refreshing) return Promise.resolve();
+    refreshing = true;
+    return call('apiRefresh', serverFilter(), M().version).then(function (r) {
+      syncClock(r.serverNowIso);
+      if (r.updated) showUpdateBanner(r.updated, r.appUrl);
+      var b = state.boot;
+      var changed = force || JSON.stringify(b.myOpen) !== JSON.stringify(r.myOpen) || JSON.stringify(b.recent) !== JSON.stringify(r.recent) ||
+        JSON.stringify(b.stats) !== JSON.stringify(r.stats);
+      b.myOpen = r.myOpen; b.counts = r.counts; b.stats = r.stats; b.recent = r.recent;
+      setBadges(r.counts);
+      if (changed && state.tab === 'home' && !state.lineView && !state.sheetClose) renderHome();
+    }).catch(function () { /* diam: refresh latar belakang */ }).then(function () { refreshing = false; });
+  }
+  setInterval(function () { if (!document.hidden) refresh(); }, 60000);
+
+  /** Admin baru deploy versi baru: halaman lama tetap jalan, tapi sebaiknya dimuat ulang setelah isian yang terbuka disimpan. */
+  function showUpdateBanner(version, url) {
+    if ($('upd')) return;
+    var d = document.createElement('div');
+    d.id = 'upd';
+    d.className = 'updbar';
+    d.innerHTML = '<span class="grow">' + t('Versi baru ({v}) sudah terpasang. Simpan isian yang sedang dibuka, lalu muat ulang.', { v: esc(version) }) + '</span>' +
+      (url ? '<a class="btn" href="' + esc(url) + '" target="_top">' + t('Muat ulang') + '</a>' : '<b>' + t('Tutup & buka lagi aplikasinya.') + '</b>');
+    document.body.appendChild(d);
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
 
   // ---------- HOME ----------
+  // ---------- versi & panduan ----------
+  function isNewVersion() {
+    try { return localStorage.getItem(SEEN_KEY) !== M().version; } catch (e) { return false; }
+  }
+  function markSeen() {
+    try { localStorage.setItem(SEEN_KEY, M().version); } catch (e) { /* mode privat: abaikan */ }
+  }
+  function helpBtn() {
+    return '<button class="helpbtn" data-help aria-label="Panduan">?' + (isNewVersion() ? '<span class="dot"></span>' : '') + '</button>';
+  }
+  function bindHelp(root) {
+    var hs = root.querySelectorAll('[data-help]');
+    for (var i = 0; i < hs.length; i++) hs[i].onclick = openGuide;
+  }
+
+  /**
+   * 2.6.9: spreadsheet baru diserahkan kosong (tanpa line / sparepart). Teknisi: tahu kenapa belum bisa scan.
+   * Admin: urutan mengisi dari kosong (baris CONTOH di tiap tab = cara mengisi, diabaikan aplikasi).
+   */
+  function emptyCard() {
+    var m = M(), noLine = !(m.lines || []).length, noPart = !(m.spareparts || []).length;
+    if (!noLine) return isAdmin() && noPart ? '<p class="tiny muted" style="margin:0 4px 12px">' + esc(t('Belum ada sparepart di katalog (tab Sparepart): teknisi mengetik part manual.')) + '</p>' : '';
+    if (!isAdmin()) return '<div class="alert warn">' + esc(t('Belum ada line di aplikasi. Minta admin mengisi tab Lines dan mencetak QR.')) + '</div>';
+    var steps = ['Factory: ID & nama factory.', 'Projects: baterai per factory (+ target MTTR / MTBF bila ada).',
+      'Lines: satu baris = satu line / mesin ber-QR; isi Proses (Modul Line / Pack Line / Pre-Assy).',
+      'Sparepart: paste daftar part (kode part di kolom Model).', 'Users: email, nama, Peran (Teknisi / Admin).',
+      'Config: jam & hari operasi, target, tanggal libur.', 'Menu MTTR → Cetak QR, tempel di line.',
+      'Uji 1 pekerjaan dari HP, lalu menu MTTR → Hapus data testing.'];
+    return '<div class="card"><div class="caps">' + esc(t('Mulai dari spreadsheet kosong')) + '</div>' +
+      '<p class="small" style="margin:6px 0">' + esc(noLine && noPart ? t('Belum ada line dan sparepart.') : (noLine ? t('Belum ada line.') : t('Belum ada sparepart.'))) + ' ' +
+      esc(t('Isi tab di Google Sheet berurutan. Baris abu-abu "CONTOH" menunjukkan cara mengisi dan diabaikan aplikasi — timpa (Aktif = Ya) atau hapus.')) + '</p>' +
+      '<ol class="small" style="margin:0;padding-left:20px">' + steps.map(function (x) { return '<li>' + esc(t(x)) + '</li>'; }).join('') + '</ol></div>';
+  }
+
   function renderHome() {
-    if (state.lineView) return renderLine(state.lineView);
-    var b = state.boot;
-    var opts = b.lines.map(function (l) {
-      return '<option value="' + esc(l.lineId) + '">' + esc(l.lineId + ' — ' + l.lineName) + '</option>';
-    }).join('');
-    var mine = b.myActive.length ? b.myActive.map(function (r) {
-      return '<li><button class="link" data-open-line="' + esc(r.lineId) + '">' + esc(r.lineId) + ' ' + esc(r.lineName) + '</button>' +
-        '<div class="small muted">Mulai ' + esc(r.startText) + ' · <span class="js-elapsed" data-start="' + esc(r.startIso) + '"></span></div></li>';
-    }).join('') : '<li class="muted">Tidak ada.</li>';
-
-    $('view-home').innerHTML =
-      '<div class="card center"><h1>Scan QR di mesin</h1>' +
-      '<p class="muted">Buka kamera HP, arahkan ke QR code yang ditempel di line. Halaman line akan terbuka otomatis.</p></div>' +
-      '<div class="card"><h2>Maintenance aktif saya</h2><ul class="list">' + mine + '</ul></div>' +
-      '<div class="card stack"><h2>Pilih line manual</h2>' +
-      '<p class="small muted">Hanya jika QR rusak / tidak terbaca.</p>' +
-      '<select id="manual-line"><option value="">— pilih line —</option>' + opts + '</select>' +
-      '<button class="btn secondary" id="btn-open-line">Buka line</button></div>';
-
-    $('btn-open-line').onclick = function () {
-      var v = $('manual-line').value;
-      if (v) openLine(v, this);
-    };
-  }
-
-  document.addEventListener('click', function (ev) {
-    var a = ev.target.closest('[data-open-line]');
-    if (a) { showTab('home'); openLine(a.getAttribute('data-open-line'), a); }
-  });
-
-  function openLine(lineId, btn) {
-    busy(btn, true, 'Membuka…');
-    call('apiGetLine', lineId).then(function (v) {
-      state.lineView = v; syncClock(v.serverNowIso); flash(''); renderLine(v);
-    }).catch(function (e) { busy(btn, false); flash(cleanErr(e)); });
-  }
-
-  function goHome() {
-    state.lineView = null;
-    $('view-home').innerHTML = '<div class="loading">Memuat…</div>';
-    boot('').catch(function (e) { flash(cleanErr(e)); });
-  }
-
-  function lineCard(l) {
-    return '<div class="card"><div class="small muted">LINE</div><h1>' + esc(l.lineId) + ' · ' + esc(l.lineName) + '</h1>' +
-      '<dl class="kv"><dt>Mesin</dt><dd>' + esc(l.machine || '-') + '</dd>' +
-      '<dt>Dept</dt><dd>' + esc(l.department || '-') + '</dd>' +
-      '<dt>Lokasi</dt><dd>' + esc(l.location || '-') + '</dd></dl></div>';
-  }
-
-  function renderLine(v) {
-    var back = '<button class="btn secondary no-print" id="btn-home">← Kembali ke beranda</button>';
-    if (!v.found) {
-      $('view-home').innerHTML = '<div class="card center"><h1>Line tidak ditemukan</h1><p>Line ID <b>' + esc(v.lineId) +
-        '</b> tidak terdaftar. QR mungkin salah atau line sudah dihapus. Hubungi Admin.</p></div>' + back;
-      $('btn-home').onclick = goHome;
-      return;
+    var b = state.boot, u = b.user, warn = b.myOpen && b.myOpen.warnedIso;
+    var html = '<div class="hello"><div><div class="appname">' + esc(M().appName) + '</div><div class="hi">' + t('Halo, {n},', { n: esc(u.name.split(' ')[0]) }) + '</div><h1>' +
+      (b.myOpen ? 'Semangat kerjanya!' : 'Selamat bekerja!') + '</h1></div><div class="row">' + langBtn() + helpBtn() +
+      '<div class="avatar">' + esc(initials(u.name)) + (warn || b.counts.review ? '<span class="dot"></span>' : '') + '</div></div></div>';
+    if (isNewVersion()) {
+      html += '<button class="newver" data-help>' + t('<b>Versi {v}</b> · ada yang baru. Lihat panduan singkat ›', { v: esc(M().version) }) + '</button>';
     }
-    var l = v.line, a = v.active, html = lineCard(l);
 
-    if (!l.active) {
-      html += '<div class="alert warn">Line ini berstatus nonaktif. Maintenance tidak bisa dimulai.</div>';
-    } else if (!a) {
-      html += '<div class="card center"><p class="muted">Tidak ada maintenance berjalan di line ini.</p>' +
-        '<button class="btn big" id="btn-start">▶ START MAINTENANCE</button>' +
-        '<p class="small muted">Waktu mulai dicatat oleh server saat tombol ditekan.</p></div>';
+    if (b.myOpen) {
+      html += workCard(b.myOpen);
     } else {
-      var mine = a.userEmail.toLowerCase() === state.boot.user.email;
-      html += '<div class="card center">' + pill(a.status) +
-        '<div class="timer js-elapsed" data-start="' + esc(a.startIso) + '" data-warn="abandon-warn"></div>' +
-        '<div class="small muted">Mulai ' + esc(a.startText) + ' WIB · ' + (mine ? 'oleh Anda' : 'oleh ' + esc(a.userName)) + '</div>' +
-        '<div class="small muted">ID ' + esc(a.id) + '</div>' +
-        '<div id="abandon-warn" class="alert warn hidden">Mendekati batas ' + esc(state.boot.abandonHours) +
-        ' jam. Jika lewat, record otomatis jadi ABANDONED dan harus direview Supervisor/Admin.</div></div>';
-      if (!v.canAct) {
-        html += '<div class="alert warn">Line ini sedang dikerjakan oleh <b>' + esc(a.userName) +
-          '</b>. Hanya satu maintenance aktif per line.</div>';
-      } else {
-        if (!mine) html += '<div class="alert warn">Anda menutup maintenance milik ' + esc(a.userName) + ' sebagai ' + esc(state.boot.user.role) + '.</div>';
-        html += completeForm() + cancelForm();
-      }
+      html += '<div class="card dark"><div class="caps">Mulai kerja</div><h2 style="margin:6px 0 14px">Scan QR di line / mesin</h2>' +
+        '<button class="btn xl" id="btn-scan">' +
+        '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="vertical-align:-5px;margin-right:8px"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16"/></svg>SCAN QR</button>' +
+        '<button class="btn ghost" id="btn-find-line" style="margin-top:10px">Cari line (jika QR rusak)</button></div>';
     }
-    html += back;
+    html += emptyCard();
+    html += '<button class="saranbar" id="btn-saran"><span class="grow">' + (isAdmin() ? t('💡 Saran dari teknisi') : t('💡 Punya saran untuk aplikasi? Kirim ke admin')) + '</span>' +
+      (isAdmin() && b.counts.saran ? '<span class="badge">' + b.counts.saran + '</span>' : '') + ' ›</button>';
+    html += filterBar(null) + weekCard(b.stats) + feedCard(b.recent);
     $('view-home').innerHTML = html;
-    $('btn-home').onclick = goHome;
+    $('btn-lang').onclick = function () { setLang(LANG === 'zh' ? 'id' : 'zh'); };
+    $('btn-saran').onclick = openSaran;
 
-    if ($('btn-start')) $('btn-start').onclick = function () { doStart(l.lineId, this); };
-    if ($('form-complete')) $('form-complete').onsubmit = function (ev) { ev.preventDefault(); doComplete(a.id, this); };
-    if ($('form-cancel')) {
-      $('btn-show-cancel').onclick = function () { $('form-cancel').classList.remove('hidden'); this.classList.add('hidden'); };
-      $('form-cancel').onsubmit = function (ev) { ev.preventDefault(); doCancel(a.id, this); };
+    if ($('btn-scan')) $('btn-scan').onclick = scanAny;
+    if ($('btn-find-line')) $('btn-find-line').onclick = linePicker;
+    bindHelp($('view-home'));
+    bindWork(b.myOpen, $('view-home'));
+    bindFilterBar($('view-home'), function () { refresh(true); });
+    var lh = $('link-history');
+    if (lh) lh.onclick = function () { showTab('history'); };
+    var ld = $('link-dash');
+    if (ld) ld.onclick = function () { showTab('dashboard'); };
+    tick();
+  }
+
+  function weekCard(st) {
+    var max = Math.max(1, Math.max.apply(null, st.days.map(function (d) { return d.count; })));
+    var total = st.days.reduce(function (s, d) { return s + d.count; }, 0);
+    return '<div class="card"><div class="caps">' + t('Maintenance selesai 7 hari ({n})', { n: total }) + '</div>' +
+      '<div class="bars">' + st.days.map(function (d) {
+        return '<div class="bar" title="' + esc(t('{d}: {n} selesai', { d: t(d.label), n: d.count })) + '"><span class="n">' + (d.count || '') + '</span><div class="track"><div class="fill" style="height:' +
+          Math.round(d.count / max * 100) + '%"></div></div><span class="lbl">' + esc(d.label) + '</span></div>';
+      }).join('') + '</div>' +
+      '<div class="kpis"><div class="kpi"><span class="tiny muted">MTTR 7 hari (Corrective)</span><b>' +
+      (st.mttrMin == null ? '–' : esc(Math.round(st.mttrMin)) + '<span class="small"> mnt</span>') + '</b></div>' +
+      '<div class="kpi"><span class="tiny muted">Dihitung ke MTTR</span><b>' + st.mttrN + '<span class="small"> / ' + total + '</span></b></div></div>' +
+      '<p class="small row between" style="margin:14px 0 0"><button class="link" id="link-history">Lihat riwayat ›</button><button class="link" id="link-dash">Dashboard ›</button></p></div>';
+  }
+
+  function feedCard(list) {
+    return '<div class="card" data-trbox><div class="caps">Aktivitas terbaru</div>' + (list.length ? '<ul class="feed">' + list.map(function (e) {
+      return '<li><div class="avatar sm">' + esc(initials(e.userName)) + '</div><div class="grow">' +
+        '<div class="row between small"><span class="muted">' + esc(who(e.userName)) + '</span><span class="muted js-ago" data-iso="' + esc(e.whenIso) + '">' + esc(ago(e.whenIso)) + '</span></div>' +
+        '<div class="title">' + esc((e.line ? e.line + (e.mesin ? ' · ' + L(e.mesin) : '') + ' · ' : '') + t(EVENT_LABEL[e.event] || e.event)) + '</div>' +
+        '<div class="small muted clamp">' + (e.detail ? logHtml(e.event, e.detail) : esc(e.id)) + '</div></div></li>';
+    }).join('') + '</ul>' : '<div class="empty small">Belum ada aktivitas.</div>') + '</div>';
+  }
+
+  // ---------- cari line (jika QR tidak berfungsi) ----------
+  function linePicker() {
+    var draft = { factory: state.filter.factory, baterai: state.filter.baterai, q: '' };
+    openSheet('<h2>Cari line</h2><input type="search" id="lp-q" class="search" placeholder="Ketik line, nama, proses…" style="margin:10px 0">' +
+      '<div id="lp-f"></div><div id="lp-list" style="margin-top:12px"></div>');
+    function drawFilters() {
+      var bats = batteriesFor(draft.factory);
+      if (draft.baterai && bats.indexOf(draft.baterai) === -1) draft.baterai = '';
+      $('lp-f').innerHTML = chips('factory', [{ value: '', label: 'Semua factory' }].concat(M().factories.map(function (f) { return { value: f.id, label: f.name }; })), { selected: draft.factory }) +
+        '<div style="height:8px"></div>' + chips('baterai', [{ value: '', label: 'Semua baterai' }].concat(bats), { selected: draft.baterai });
+      bindChips($('lp-f'), function (n, v) { draft[n] = v; drawFilters(); drawList(); });
+    }
+    function drawList() {
+      var list = linesFor({ factory: draft.factory, baterai: draft.baterai }, draft.q).slice(0, 150);
+      $('lp-list').innerHTML = list.length ? list.map(function (l) {
+        return '<button class="item" data-pick="' + esc(l.id) + '"><div class="row between"><span class="t">' + esc(l.id) + (l.name ? ' · ' + esc(L(l.name)) : '') + '</span>' +
+          '</div><div class="small muted">' + esc(factoryName(l.factory) || '-') +
+          (l.proses ? ' · ' + esc(L(l.proses)) : '') + (l.area ? ' · ' + esc(l.area) : '') + ' · ' + esc(l.batteries.join(', ')) + '</div></button>';
+      }).join('') : '<div class="empty">Tidak ada line yang cocok.</div>';
+      var bs = $('lp-list').querySelectorAll('[data-pick]');
+      for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { var id = this.getAttribute('data-pick'); closeSheet(); openLine(id, null); };
+    }
+    $('lp-q').oninput = function () { draft.q = this.value; drawList(); };
+    drawFilters(); drawList();
+  }
+
+  // ---------- kartu pekerjaan aktif ----------
+  function workCard(r) {
+    var paused = r.status === 'Pause';
+    var html = '<div class="card dark work"><div class="top"><div>' + pill(r.status) + (r.tipe ? ' <span class="pill">' + esc(r.tipe) + '</span>' : '') +
+      '<h2>' + lineTitle(r) + '</h2>' +
+      '<div class="small muted">' + esc(r.id) + ' · ' + t('Baterai {b}', { b: esc(r.battery) }) + '</div></div></div>';
+    if (r.warnedIso) {
+      html += '<div class="alert warn" style="margin:16px 0 0">' + t('<b>Sudah lebih dari {h} jam.</b> Masih dikerjakan? Jika tidak dijawab sampai {a} jam, status jadi Abandoned.',
+        { h: esc(state.boot.limits.warnHours), a: esc(state.boot.limits.abandonHours) }) +
+        '<div class="btn-row" style="margin-top:12px"><button class="btn ok" data-act="confirm">Masih lanjut</button>' +
+        '<button class="btn navy" data-act="pending">Pending</button><button class="btn danger-ghost" data-act="cancel">Cancel</button></div></div>';
+    }
+    if (paused) {
+      html += '<div class="timer paused js-hms"' + timerAttrs(r.pauseMin, r.sinceIso, true) + '>' + hms(0) + '</div>' +
+        '<div class="sub-timers muted"><span>Waktu pause</span><span>Aktif <b class="js-dur"' + timerAttrs(r.activeMin, r.sinceIso, false) + '></b></span></div>' +
+        '<button class="btn xl" data-act="resume">▶ RESUME</button>' +
+        '<div class="btn-row two" style="margin-top:10px"><button class="btn ghost" data-act="pending">Pending</button>' +
+        '<button class="btn ghost" data-act="cancel">Cancel</button></div>';
+    } else {
+      html += '<div class="timer js-hms"' + timerAttrs(r.activeMin, r.sinceIso, true) + '>' + hms(0) + '</div>' +
+        '<div class="sub-timers muted"><span>Waktu aktif' + (r.tipe === 'Preventive' ? '' : ' (MTTR)') + '</span>' + (r.pauseMin ? '<span>Pause <b class="js-dur"' + timerAttrs(r.pauseMin, r.sinceIso, false) + '></b></span>' : '') + '</div>' +
+        '<button class="btn xl ok" data-act="complete">✔ SELESAI</button>' +
+        '<div class="btn-row" style="margin-top:10px"><button class="btn ghost" data-act="pause">Pause</button>' +
+        '<button class="btn ghost" data-act="pending">Pending</button><button class="btn ghost" data-act="cancel">Cancel</button></div>';
+    }
+    if (r.dikerjakan) {
+      html += '<details style="margin-top:14px" data-trbox><summary class="small muted">Pekerjaan sebelumnya</summary>' +
+        '<div class="small" style="white-space:pre-line;margin-top:8px" data-tr>' + esc(r.dikerjakan) + '</div></details>';
+    }
+    return html + '</div>';
+  }
+
+  function bindWork(r, root) {
+    var boxes = root.querySelectorAll('[data-trbox]');
+    for (var k = 0; k < boxes.length; k++) trButton(boxes[k]);
+    if (!r) return;
+    var btns = root.querySelectorAll('[data-act]');
+    for (var i = 0; i < btns.length; i++) {
+      (function (b) {
+        b.onclick = function () {
+          var a = b.getAttribute('data-act');
+          if (a === 'resume') act(b, 'apiResume', [r.id], 'Lanjut kerja. Timer aktif berjalan.');
+          if (a === 'confirm') act(b, 'apiConfirmStillWorking', [r.id], 'Tercatat: masih dikerjakan.');
+          if (a === 'pause') pauseSheet(r);
+          if (a === 'pending') pendingSheet(r);
+          if (a === 'complete') completeSheet(r);
+          if (a === 'cancel') cancelSheet(r);
+        };
+      })(btns[i]);
     }
   }
 
-  function completeForm() {
-    return '<form class="card stack" id="form-complete" autocomplete="off"><h2>Selesaikan maintenance</h2>' +
-      '<div><label for="f-problem">Problem *</label><textarea id="f-problem" name="problem" required placeholder="Gejala / kerusakan yang ditemukan"></textarea></div>' +
-      '<div><label for="f-action">Action Taken *</label><textarea id="f-action" name="actionTaken" required placeholder="Tindakan perbaikan yang dilakukan"></textarea></div>' +
-      '<div><label for="f-part">Part Replaced</label><input id="f-part" name="partReplaced" placeholder="Kosongkan jika tidak ada"></div>' +
-      '<div><label>Testing Result *</label><div class="seg">' +
-      '<label><input type="radio" name="testingResult" value="OK" required><span>OK</span></label>' +
-      '<label><input type="radio" name="testingResult" value="NG"><span>NG</span></label></div>' +
-      '<p class="small muted">NG tetap disimpan sebagai COMPLETED. Jika mesin masih bermasalah, START maintenance baru.</p></div>' +
-      '<button class="btn" type="submit">✔ COMPLETE</button></form>';
+  // ---------- 2.6.4: ketuk ulang tanpa dobel & isian tidak hilang ----------
+  var RID_KEY = 'mttr-rid', RID_MS = 10 * 60000, DRAFT_PREFIX = 'mttr-draft:', DRAFT_MS = 24 * 3600000;
+  function ridMap() { try { return JSON.parse(localStorage.getItem(RID_KEY) || '{}') || {}; } catch (e) { return {}; } }
+  function ridSave(m) { try { localStorage.setItem(RID_KEY, JSON.stringify(m)); } catch (e) { /* mode privat: tanpa perlindungan dobel */ } }
+  /** ID permintaan per (aksi | pekerjaan / line): tetap sama sampai sukses (≤ 10 menit) → server tidak mengulang aksi yang sudah tersimpan. */
+  function ridFor(key) {
+    var m = ridMap(), now = Date.now();
+    Object.keys(m).forEach(function (k) { if (!m[k] || now - m[k].at > RID_MS) delete m[k]; });
+    if (!m[key]) m[key] = { rid: now.toString(36) + Math.random().toString(36).slice(2, 12), at: now };
+    ridSave(m);
+    return m[key].rid;
+  }
+  /** Aksi sukses: semua ID permintaan untuk pekerjaan / line itu dibuang (aksi berikutnya = permintaan baru). */
+  function ridDone(target) {
+    var m = ridMap();
+    Object.keys(m).forEach(function (k) { if (k.slice(k.indexOf('|') + 1) === String(target)) delete m[k]; });
+    ridSave(m);
+  }
+  function isNetErr(e) { return /NetworkError|HTTP 0|failed to fetch|network|connection|timed? ?out|offline/i.test(cleanErr(e)); }
+  function draftLoad(k) {
+    try { var d = JSON.parse(localStorage.getItem(DRAFT_PREFIX + k) || 'null'); return d && Date.now() - d.at < DRAFT_MS ? d : null; } catch (e) { return null; }
+  }
+  function draftSave(k, d) { try { d.at = Date.now(); localStorage.setItem(DRAFT_PREFIX + k, JSON.stringify(d)); } catch (e) { /* penuh / mode privat */ } }
+  function draftDrop(k) { try { localStorage.removeItem(DRAFT_PREFIX + k); } catch (e) { /* abaikan */ } }
+  function draftSweep() {   // draf > 24 jam (pekerjaan sudah selesai di HP lain, dll.) dibuang
+    try {
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf(DRAFT_PREFIX) === 0 && !draftLoad(k.slice(DRAFT_PREFIX.length))) localStorage.removeItem(k);
+      }
+    } catch (e) { /* abaikan */ }
+  }
+  /** Simpan isian sheet setiap ada perubahan (ketik / tap); get() mengumpulkan isian, k = jenis form + ID pekerjaan. */
+  function draftWatch(s, k, get) {
+    var tm;
+    var save = function () { clearTimeout(tm); tm = setTimeout(function () { if (document.body.contains(s)) draftSave(k, get()); }, 300); };
+    s.addEventListener('input', save); s.addEventListener('change', save); s.addEventListener('click', save);
+  }
+  /** Isi form dari draf: pilihan (chip / daftar), teks, "Lainnya", detail opsional yang dibuka. */
+  function restoreForm(root, d) {
+    var wraps = root.querySelectorAll('[data-field]'), n = 0;
+    for (var i = 0; i < wraps.length; i++) {
+      var w = wraps[i], f = w.getAttribute('data-field'), v = (d.values || {})[f];
+      if (v == null || v === '') continue;
+      var inp = w.querySelector('[data-input]'), oth = w.querySelector('[data-other]'), opener = w.querySelector('[data-open-detail]');
+      if (w.querySelector('[data-chips="f"]')) setChip(w, 'f', v);
+      else if (inp) inp.value = v;
+      if (opener && inp) { opener.classList.add('opened'); opener.disabled = true; inp.classList.remove('hidden'); }
+      if (oth) { oth.classList.toggle('hidden', v !== OTHER); if (d.other && d.other[f] != null) oth.value = d.other[f]; }
+      n++;
+    }
+    return n;
   }
 
-  function cancelForm() {
-    return '<button class="btn danger no-print" id="btn-show-cancel" type="button">Batalkan maintenance…</button>' +
-      '<form class="card stack hidden" id="form-cancel"><h2>Batalkan maintenance</h2>' +
-      '<p class="small muted">Gunakan jika START tidak sengaja / salah line. Record tidak dihitung sebagai durasi repair.</p>' +
-      '<div><label for="f-reason">Alasan *</label><textarea id="f-reason" required></textarea></div>' +
-      '<button class="btn danger" type="submit">Konfirmasi cancel</button></form>';
-  }
-
-  function doStart(lineId, btn) {
-    busy(btn, true, 'Memulai…');
-    call('apiStart', lineId).then(function (v) {
-      state.lineView = v; syncClock(v.serverNowIso); renderLine(v);
-      flash('Maintenance dimulai. Start Time tercatat di server.', 'ok');
+  /**
+   * Semua aksi kerja mengembalikan lineView terbaru. 2.6.4: lewat apiAct dengan ID permintaan → sinyal putus lalu ketuk lagi
+   * tidak membuat dobel; draftKey = draf form yang dibuang setelah tersimpan.
+   */
+  function act(btn, fn, args, okMsg, draftKey) {
+    busy(btn, true);
+    // 2.6.9: "Server sedang sibuk" (banyak tombol bersamaan / pembaruan malam) → dicoba lagi otomatis sekali, rid sama (tidak dobel)
+    var go = function (retried) {
+      return call('apiAct', fn, args, ridFor(fn + '|' + args[0])).catch(function (e) {
+        if (retried || !/sedang sibuk/i.test(cleanErr(e))) throw e;
+        toast(t('Server sedang sibuk (banyak teknisi menekan bersamaan). Dicoba lagi otomatis…'));
+        return new Promise(function (res) { setTimeout(res, 5000); }).then(function () { return go(true); });
+      });
+    };
+    return go(false).then(function (v) {
+      ridDone(args[0]);
+      if (v.open) ridDone(v.open.id);
+      if (draftKey) draftDrop(draftKey);
+      closeSheet();
+      syncClock(v.serverNowIso);
+      var mine = state.boot.myOpen;
+      if (v.openIsMine) state.boot.myOpen = v.open;
+      else if (mine && v.line && mine.line === v.line.id) state.boot.myOpen = null;
+      if (state.lineView) { state.lineView = v; renderLine(); } else renderHome();
+      toast(v.ulang ? t('Sudah tersimpan sebelumnya (sinyal sempat putus). Tidak dicatat dua kali.') : okMsg, 'ok');
+      refresh();
+      return v;
     }).catch(function (e) {
-      busy(btn, false); flash(cleanErr(e));
-      openLine(lineId); // refresh: mungkin ME lain baru saja START
+      busy(btn, false);
+      toast(isNetErr(e) ? t('Sinyal terputus. Isian masih di layar — ketuk lagi saat ada sinyal; tidak akan tercatat dua kali.') : cleanErr(e), 'err');
+      throw e;
     });
   }
 
-  function doComplete(id, form) {
-    var tr = form.querySelector('input[name=testingResult]:checked');
-    var payload = {
-      problem: form.problem.value, actionTaken: form.actionTaken.value,
-      partReplaced: form.partReplaced.value, testingResult: tr ? tr.value : ''
-    };
-    if (!confirm('Selesaikan maintenance sekarang? Finish Time dicatat saat ini dan tidak bisa diubah.')) return;
-    var btn = form.querySelector('button[type=submit]');
-    busy(btn, true, 'Menyimpan…');
-    call('apiComplete', id, payload).then(function (v) {
-      state.lineView = v; renderLine(v);
-      flash('Maintenance COMPLETED (Testing ' + payload.testingResult + ').', 'ok');
-    }).catch(function (e) { busy(btn, false); flash(cleanErr(e)); });
+  // ---------- bottom sheet ----------
+  function openSheet(html, onClose) {
+    closeSheet();
+    $('sheet-root').innerHTML = '<div class="sheet-bg" id="sheet-bg"><div class="sheet" id="sheet"><div class="grab"></div>' + html + '</div></div>';
+    $('sheet-bg').addEventListener('click', function (ev) { if (ev.target.id === 'sheet-bg') closeSheet(); });
+    state.sheetClose = onClose || function () {};
+    return $('sheet');
   }
-
-  function doCancel(id, form) {
-    var btn = form.querySelector('button[type=submit]');
-    busy(btn, true, 'Membatalkan…');
-    call('apiCancel', id, $('f-reason').value).then(function (v) {
-      state.lineView = v; renderLine(v); flash('Maintenance dibatalkan.', 'ok');
-    }).catch(function (e) { busy(btn, false); flash(cleanErr(e)); });
+  function closeSheet() {
+    if (!state.sheetClose) return;
+    var fn = state.sheetClose;
+    state.sheetClose = null;
+    try { fn(); } catch (e) { /* abaikan */ }
+    $('sheet-root').innerHTML = '';
   }
-
-  // ---------- HISTORY ----------
-  var historyData = null;
-
-  function renderHistoryShell() {
-    if ($('hist-form')) return;
-    var lineOpts = state.boot.lines.map(function (l) { return '<option value="' + esc(l.lineId) + '">' + esc(l.lineId) + '</option>'; }).join('');
-    $('view-history').innerHTML =
-      '<form class="card stack no-print" id="hist-form"><h2>Riwayat maintenance</h2>' +
-      (isReviewer() ? '' : '<p class="small muted">Menampilkan record Anda sendiri.</p>') +
-      '<div class="grid-filters">' +
-      '<div><label>Status</label><select name="status"><option value="">Semua</option><option>IN_PROGRESS</option><option>COMPLETED</option><option>CANCELLED</option><option>ABANDONED</option></select></div>' +
-      '<div><label>Line</label><select name="lineId"><option value="">Semua</option>' + lineOpts + '</select></div>' +
-      '<div><label>Dari</label><input type="date" name="from"></div>' +
-      '<div><label>Sampai</label><input type="date" name="to"></div></div>' +
-      '<button class="btn" type="submit">Tampilkan</button></form>' +
-      '<div id="hist-result"></div>';
-    $('hist-form').onsubmit = function (ev) { ev.preventDefault(); loadHistory(this); };
-    loadHistory($('hist-form'));
+  function chips(name, values, opts) {
+    opts = opts || {};
+    return '<div class="chips' + (opts.big ? ' big' : '') + '" data-chips="' + esc(name) + '">' + values.map(function (v) {
+      var val = typeof v === 'string' ? v : v.value, label = typeof v === 'string' ? v : v.label;
+      var dis = typeof v === 'object' && v.disabled;
+      return '<button type="button" class="chip' + (opts.selected === val ? ' on' : '') + (dis ? ' busy' : '') + '" data-val="' + esc(val) + '"' + (dis ? ' disabled' : '') + '>' +
+        esc(label) + (typeof v === 'object' && v.sub ? '<span class="sub">' + esc(v.sub) + '</span>' : '') + '</button>';
+    }).join('') + '</div>';
   }
-
-  function loadHistory(form) {
-    var btn = form.querySelector('button[type=submit]');
-    busy(btn, true, 'Memuat…');
-    var f = { status: form.status.value, lineId: form.lineId.value, from: form.from.value, to: form.to.value };
-    call('apiListRecords', f).then(function (res) {
-      busy(btn, false);
-      historyData = res.records;
-      var rows = res.records.map(function (r) {
-        return '<tr><td>' + esc(r.id) + '</td><td>' + esc(r.lineId) + '</td><td>' + esc(r.userEmail) + '</td>' +
-          '<td>' + esc(r.startText) + '</td><td>' + esc(r.finishText) + '</td><td>' + pill(r.status) + '</td>' +
-          '<td>' + (r.durationMin == null ? '' : esc(r.durationMin)) + '</td><td>' + esc(r.testingResult) + '</td>' +
-          '<td class="wrap-cell">' + esc(r.problem) + '</td><td class="wrap-cell">' + esc(r.actionTaken) + '</td>' +
-          '<td>' + esc(r.partReplaced) + '</td><td class="wrap-cell">' + esc(r.note) + '</td></tr>';
-      }).join('');
-      $('hist-result').innerHTML = '<div class="card">' +
-        '<div class="row no-print" style="align-items:center"><div class="small muted">' + res.total + ' record' +
-        (res.truncated ? ' (ditampilkan 1000 terbaru — persempit filter)' : '') + '</div>' +
-        '<button class="btn secondary" id="btn-csv" type="button">Download CSV</button></div>' +
-        (res.spreadsheetUrl ? '<p class="small"><a href="' + esc(res.spreadsheetUrl) + '" target="_blank">Buka Google Sheet (data mentah lengkap)</a></p>' : '') +
-        '<div class="table-wrap"><table><thead><tr><th>ID</th><th>Line</th><th>ME</th><th>Start</th><th>Finish</th><th>Status</th>' +
-        '<th>Durasi (mnt)</th><th>Test</th><th>Problem</th><th>Action</th><th>Part</th><th>Note</th></tr></thead><tbody>' +
-        (rows || '<tr><td colspan="12" class="muted">Tidak ada data.</td></tr>') + '</tbody></table></div></div>';
-      $('btn-csv').onclick = downloadCsv;
-    }).catch(function (e) { busy(btn, false); flash(cleanErr(e)); });
-  }
-
-  function downloadCsv() {
-    if (!historyData) return;
-    var cols = [['id', 'Maintenance ID'], ['lineId', 'Line ID'], ['lineName', 'Line Name'], ['userEmail', 'User Email'],
-      ['startText', 'Start Time'], ['finishText', 'Finish Time'], ['status', 'Status'], ['problem', 'Problem'],
-      ['actionTaken', 'Action Taken'], ['partReplaced', 'Part Replaced'], ['testingResult', 'Testing Result'],
-      ['durationMin', 'Duration (min)'], ['closedBy', 'Closed By'], ['note', 'Note'], ['reviewedBy', 'Reviewed By'], ['reviewedAtText', 'Reviewed At']];
-    function cell(v) {
-      v = v == null ? '' : String(v);
-      if (/^[=+\-@]/.test(v)) v = "'" + v;          // cegah formula injection saat dibuka di Excel
-      return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  function bindChips(root, onChange) {
+    var groups = root.querySelectorAll('[data-chips]');
+    for (var i = 0; i < groups.length; i++) {
+      (function (g) {
+        if (g.dataset.bound) return;
+        g.dataset.bound = '1';
+        g.addEventListener('click', function (ev) {
+          var c = ev.target.closest('.chip');
+          if (!c || c.disabled) return;
+          var all = g.querySelectorAll('.chip');
+          for (var j = 0; j < all.length; j++) all[j].classList.toggle('on', all[j] === c);
+          var wrap = g.closest('[data-field]');
+          if (wrap) toggleOther(wrap, c.getAttribute('data-val'));
+          if (onChange) onChange(g.getAttribute('data-chips'), c.getAttribute('data-val'));
+        });
+      })(groups[i]);
     }
-    var lines = [cols.map(function (c) { return c[1]; }).join(',')].concat(historyData.map(function (r) {
-      return cols.map(function (c) { return cell(r[c[0]]); }).join(',');
-    }));
-    var blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'maintenance-' + new Date(serverNow()).toISOString().slice(0, 10) + '.csv';
-    document.body.appendChild(a); a.click(); a.remove();
+  }
+  function chipVal(root, name) {
+    var c = root.querySelector('[data-chips="' + name + '"] .chip.on');
+    return c ? c.getAttribute('data-val') : '';
   }
 
-  // ---------- REVIEW (ABANDONED) ----------
-  function loadReview() {
-    $('view-review').innerHTML = '<div class="loading">Memuat antrian review…</div>';
-    call('apiListAbandoned').then(renderReview).catch(function (e) { flash(cleanErr(e)); });
+  // ---------- form engine (definisi dari sheet "Form") ----------
+  function fieldHtml(d) {
+    if (d.type === 'teks' && !d.required && /^Detail /.test(d.field)) {
+      // Detail opsional di bawah pilihan: tertutup dulu supaya form tetap pendek.
+      return '<div data-field="' + esc(d.field) + '" data-type="teks" class="detail-field"><button type="button" class="link small" data-open-detail><span class="plus">+ </span>' +
+        '<span>' + esc(lbl(d)) + '</span> <span class="muted">(opsional)</span></button><input type="text" data-input class="hidden" maxlength="300" placeholder="' + esc(lbl(d)) + '…"></div>';
+    }
+    var label = '<label class="lbl"><span>' + esc(lbl(d)) + '</span>' + (d.required ? ' *' : ' <span class="muted">(opsional)</span>') + '</label>';
+    var body;
+    if (d.type === 'pilihan') {
+      body = d.options.length <= 8 ? chips('f', d.options) :
+        '<select data-input><option value="">Pilih…</option>' + d.options.map(function (o) { return '<option value="' + esc(o) + '">' + esc(L(o)) + '</option>'; }).join('') + '</select>';
+      if (d.other) body += '<input type="text" data-other class="hidden" style="margin-top:8px" placeholder="' + esc(t('Tulis {x}…', { x: lbl(d).toLowerCase() })) + '">';
+    } else if (d.type === 'angka') {
+      body = '<input type="number" data-input inputmode="decimal">';
+    } else {
+      body = '<textarea data-input></textarea>';
+    }
+    return '<div data-field="' + esc(d.field) + '" data-type="' + esc(d.type) + '">' + label + body + '</div>';
+  }
+  function toggleOther(wrap, val) {
+    var o = wrap.querySelector('[data-other]');
+    if (!o) return;
+    o.classList.toggle('hidden', val !== OTHER);
+    if (val === OTHER) o.focus();
+  }
+  /** Render semua field sebuah form; field sistem memakai renderer khusus. */
+  function formHtml(form, sys) {
+    return M().forms[form].map(function (d) {
+      if (d.type === 'sistem') return sys && sys[d.field] ? sys[d.field](d) : '';
+      return fieldHtml(d);
+    }).join('');
+  }
+  function bindForm(root) {
+    bindChips(root);
+    var sels = root.querySelectorAll('[data-field] select[data-input]');
+    for (var i = 0; i < sels.length; i++) sels[i].onchange = function () { toggleOther(this.closest('[data-field]'), this.value); };
+    var ds = root.querySelectorAll('[data-open-detail]');
+    for (var j = 0; j < ds.length; j++) ds[j].onclick = function () {
+      var inp = this.parentNode.querySelector('[data-input]');
+      this.classList.add('opened'); this.disabled = true;   // tetap tampil sebagai label
+      inp.classList.remove('hidden'); inp.focus();
+    };
+  }
+  function setChip(root, name, val) {
+    var all = root.querySelectorAll('[data-chips="' + name + '"] .chip');
+    for (var i = 0; i < all.length; i++) all[i].classList.toggle('on', all[i].getAttribute('data-val') === val);
+  }
+  function collectForm(root) {
+    var out = { values: {}, other: {} };
+    var wraps = root.querySelectorAll('[data-field]');
+    for (var i = 0; i < wraps.length; i++) {
+      var w = wraps[i], f = w.getAttribute('data-field');
+      var chip = w.querySelector('.chip.on'), inp = w.querySelector('[data-input]'), oth = w.querySelector('[data-other]');
+      out.values[f] = chip ? chip.getAttribute('data-val') : (inp ? inp.value : '');
+      if (oth && out.values[f] === OTHER) out.other[f] = oth.value;
+    }
+    return out;
   }
 
-  function toLocalInput(iso) {
-    // Format datetime-local dalam WIB (UTC+7, tanpa DST).
-    var d = new Date(new Date(iso).getTime() + 7 * 3600 * 1000);
-    return d.toISOString().slice(0, 16);
-  }
-
-  function renderReview(list) {
-    $('review-badge').innerHTML = list.length ? '<span class="badge">' + list.length + '</span>' : '';
-    if (!list.length) {
-      $('view-review').innerHTML = '<div class="card center"><h2>Antrian review kosong</h2><p class="muted">Tidak ada maintenance ABANDONED yang perlu diputuskan.</p></div>';
+  function pauseSheet(r) {
+    var defs = M().forms.Pause;
+    var quick = defs.length === 1 && defs[0].type === 'pilihan' && defs[0].options.length <= 8;
+    if (quick) {
+      var d = defs[0];
+      var vals = d.options.slice();
+      if (!d.required) vals.push({ value: '', label: 'Tanpa alasan' });
+      var s = openSheet('<h2>Pause</h2><p class="small muted">' + t('Pilih {x} — langsung tersimpan. Timer aktif berhenti, timer pause berjalan.', { x: esc(lbl(d).toLowerCase()) }) + '</p>' +
+        '<div data-field="' + esc(d.field) + '">' + chips('f', vals, { big: true }) +
+        (d.other ? '<input type="text" data-other class="hidden" style="margin-top:10px" placeholder="Tulis alasan…">' +
+          '<button class="btn hidden" id="pz-save" style="margin-top:10px">Pause</button>' : '') + '</div>');
+      bindChips(s, function (n, val) {
+        if (val === OTHER) { $('pz-save').classList.remove('hidden'); return; }
+        var c = s.querySelector('.chip.on');
+        act(c, 'apiPause', [r.id, { values: (function () { var o = {}; o[d.field] = val; return o; })() }], 'Pause. Tap RESUME saat kembali.').catch(function () {});
+      });
+      if ($('pz-save')) $('pz-save').onclick = function () { act(this, 'apiPause', [r.id, collectForm(s)], 'Pause. Tap RESUME saat kembali.').catch(function () {}); };
       return;
     }
-    var nowLocal = toLocalInput(new Date(serverNow()).toISOString());
-    $('view-review').innerHTML = '<div class="alert warn">Finish Time yang Anda isi di sini adalah keputusan manusia, bukan timestamp server. ' +
-      'Record akan ditandai Reviewed By + Note supaya bisa dipisahkan saat analisis.</div>' +
-      list.map(function (r, i) {
-        return '<form class="card stack" data-review="' + esc(r.id) + '">' +
-          '<div>' + pill(r.status) + ' <b>' + esc(r.lineId) + ' ' + esc(r.lineName) + '</b></div>' +
-          '<dl class="kv small"><dt>ID</dt><dd>' + esc(r.id) + '</dd><dt>ME</dt><dd>' + esc(r.userName) + '</dd>' +
-          '<dt>Start</dt><dd>' + esc(r.startText) + ' WIB</dd><dt>Catatan</dt><dd>' + esc(r.note) + '</dd></dl>' +
-          '<div class="seg"><label><input type="radio" name="decision" value="COMPLETE" checked><span>Isi Finish</span></label>' +
-          '<label><input type="radio" name="decision" value="CANCEL"><span>Cancel</span></label></div>' +
-          '<div class="js-complete stack">' +
-          '<div><label>Finish Time (WIB) *</label><input type="datetime-local" name="finishTime" min="' + esc(toLocalInput(r.startIso)) + '" max="' + nowLocal + '"></div>' +
-          '<div><label>Problem</label><textarea name="problem"></textarea></div>' +
-          '<div><label>Action Taken</label><textarea name="actionTaken"></textarea></div>' +
-          '<div><label>Part Replaced</label><input name="partReplaced"></div>' +
-          '<div><label>Testing Result</label><select name="testingResult"><option value="">—</option><option>OK</option><option>NG</option></select></div></div>' +
-          '<div><label>Catatan review * (dasar keputusan)</label><textarea name="note" required placeholder="mis. konfirmasi ME via telepon, selesai ±14:30"></textarea></div>' +
-          '<button class="btn" type="submit">Simpan keputusan</button></form>';
-      }).join('');
+    var s2 = openSheet('<h2>Pause</h2><div class="stack">' + formHtml('Pause') + '<button class="btn" id="pz-save">Pause</button></div>');
+    bindForm(s2);
+    $('pz-save').onclick = function () { act(this, 'apiPause', [r.id, collectForm(s2)], 'Pause. Tap RESUME saat kembali.').catch(function () {}); };
+  }
 
-    var forms = document.querySelectorAll('form[data-review]');
-    for (var i = 0; i < forms.length; i++) {
-      (function (f) {
-        f.addEventListener('change', function () {
-          f.querySelector('.js-complete').classList.toggle('hidden', f.decision.value !== 'COMPLETE');
+  function tenggatHtml(d) {
+    return '<div data-sys="tenggat"><label class="lbl"><span>' + esc(lbl(d)) + '</span> *</label>' + chips('tenggat', [
+      { value: 'HARI_INI', label: 'Hari ini' }, { value: 'SHIFT', label: 'Shift berikutnya' },
+      { value: 'BESOK', label: 'Besok' }, { value: 'TANGGAL', label: 'Pilih tanggal' }]) +
+      '<input type="date" id="p-date" class="hidden" style="margin-top:8px"></div>';
+  }
+
+  function pendingSheet(r) {
+    var s = openSheet('<h2>Pending</h2><p class="small muted">Satu form. Pekerjaan ini akan muncul di tab Pending untuk semua teknisi.</p>' +
+      '<div class="stack">' + formHtml('Pending', { 'Tenggat': tenggatHtml }) + '<button class="btn navy" id="p-save">Simpan pending</button></div>');
+    bindChips(s.querySelector('[data-sys="tenggat"]'), function (name, val) { $('p-date').classList.toggle('hidden', val !== 'TANGGAL'); });
+    bindForm(s);
+    var dk = 'pending:' + r.id, get = function () {
+      var input = collectForm(s);
+      input.tenggat = chipVal(s, 'tenggat');
+      input.tanggal = $('p-date').value;
+      return input;
+    };
+    var old = draftLoad(dk);
+    if (old && restoreForm(s, old) + (old.tenggat ? 1 : 0)) {
+      if (old.tenggat) { setChip(s, 'tenggat', old.tenggat); $('p-date').classList.toggle('hidden', old.tenggat !== 'TANGGAL'); $('p-date').value = old.tanggal || ''; }
+      toast(t('Isian sebelumnya dipulihkan.'), 'ok');
+    }
+    draftWatch(s, dk, get);
+    $('p-save').onclick = function () {
+      act(this, 'apiPending', [r.id, get()], 'Tersimpan sebagai Pending.', dk).then(function () {
+        if (!state.lineView) showTab('pending');
+      }).catch(function () {});
+    };
+  }
+
+  // ---------- Selesai: pilih sparepart (katalog Jenis → Nama → Model, cari, manual) ----------
+  function partLabel(p) { return p.nama + (p.model ? ' ' + p.model : ''); }
+
+  function completeSheet(r) {
+    var cat = M().spareparts || [];
+    var jenisCat = [];
+    (M().jenisKerusakan || []).concat(cat.map(function (p) { return p.jenis; })).forEach(function (j) {
+      if (j && jenisCat.indexOf(j) === -1 && cat.some(function (p) { return p.jenis === j; })) jenisCat.push(j);
+    });
+    var jenisManual = (M().jenisKerusakan || []).slice();
+    jenisCat.forEach(function (j) { if (jenisManual.indexOf(j) === -1) jenisManual.push(j); });
+    var pk = { parts: [], jenis: jenisCat[0] || '', jenisTouched: false, nama: '', q: '' };
+
+    var s = openSheet('<h2>Selesai</h2><p class="small muted">' + esc(r.line) + (r.mesin ? ' · ' + esc(L(r.mesin)) : '') + ' · ' + t('waktu selesai dicatat server saat disimpan.') + '</p><div class="stack">' +
+      formHtml('Selesai', { 'Part': function (d) {
+        return '<div data-sys="part"><label class="lbl"><span>' + esc(lbl(d)) + '</span> *</label>' +
+          chips('part', [{ value: 'NONE', label: NO_PART }, { value: 'SOME', label: 'Ada part' }], { big: true }) +
+          '<div id="pk" class="picker hidden"><div id="pk-used"></div>' +
+          (cat.length ? '<input type="search" id="pk-q" class="search" placeholder="Cari sparepart (nama / model)…" style="margin-top:12px"><div id="pk-browse"></div>'
+            : '<p class="small muted">Katalog sparepart belum diisi admin. Pakai tambah manual.</p>') +
+          '<button type="button" class="link" id="pk-manual-open" style="margin-top:12px">+ Tidak ada di daftar? Tambah manual</button>' +
+          '<div id="pk-manual" class="manual hidden"><label class="lbl">Jenis sparepart *</label>' + chips('mjenis', jenisManual) +
+          '<input type="text" id="pk-m-nama" maxlength="120" placeholder="Nama sparepart * (mis. Bearing)" style="margin-top:10px">' +
+          '<input type="text" id="pk-m-model" maxlength="120" placeholder="Model / tipe (opsional)" style="margin-top:8px">' +
+          '<div class="row" style="margin-top:8px"><input type="number" id="pk-m-qty" min="1" max="999" value="1" inputmode="numeric" style="width:90px">' +
+          '<button type="button" class="btn navy" id="pk-m-add">Tambah ke daftar</button></div>' +
+          '<p class="tiny muted" style="margin:6px 0 0">Sering dipakai? Minta admin memasukkannya ke sheet Sparepart.</p></div></div></div>';
+      }, 'PIC tambahan': function (d) {
+        // 2.6: teknisi lain yang ikut mengerjakan → tap nama (boleh lebih dari satu); ikut dihitung per teknisi.
+        var people = (M().people || []).filter(function (p) { return p.email !== state.boot.user.email; });
+        if (!people.length) return '';
+        return '<div data-sys="pic"><label class="lbl"><span>' + esc(lbl(d)) + '</span> <span class="muted">(opsional)</span></label>' +
+          (people.length > 8 ? '<input type="search" id="pic-q" class="search" placeholder="Cari nama…" style="margin-bottom:8px">' : '') +
+          '<div class="chips" id="pic-list">' + people.map(function (p) {
+            return '<button type="button" class="chip" data-pic="' + esc(p.email) + '">' + esc(p.name) + '</button>';
+          }).join('') + '</div></div>';
+      } }) +
+      '<button class="btn ok" id="c-save">Simpan & selesai</button></div>');
+    var picMax = state.boot.limits.picMax || 15, partMax = state.boot.limits.partMax || 20;
+    if ($('pic-list')) $('pic-list').onclick = function (ev) {
+      var c = ev.target.closest('[data-pic]');
+      if (!c) return;
+      if (!c.classList.contains('on') && $('pic-list').querySelectorAll('[data-pic].on').length >= picMax) {
+        toast(t('PIC tambahan maksimal {n} orang.', { n: picMax }), 'err'); return;
+      }
+      c.classList.toggle('on');
+    };
+    if ($('pic-q')) $('pic-q').oninput = function () {
+      var q = this.value.trim().toLowerCase(), cs = $('pic-list').querySelectorAll('[data-pic]');
+      for (var i = 0; i < cs.length; i++) cs[i].classList.toggle('hidden', !!q && cs[i].textContent.toLowerCase().indexOf(q) === -1 && !cs[i].classList.contains('on'));
+    };
+
+    function partFull() {
+      if (pk.parts.length < partMax) return false;
+      toast(t('Sparepart maksimal {n} jenis per pekerjaan.', { n: partMax }), 'err');
+      return true;
+    }
+    function addPart(item) {
+      var ex = pk.parts.filter(function (p) { return !p.manual && p.id === item.id; })[0];
+      if (!ex && partFull()) return;
+      if (ex) ex.qty = Math.min(999, ex.qty + 1);
+      else pk.parts.push({ id: item.id, jenis: item.jenis, nama: item.nama, model: item.model, satuan: item.satuan, qty: 1 });
+      toast(t('Ditambahkan: {p}', { p: partLabel(item) + (ex ? ' (×' + ex.qty + ')' : '') }), 'ok');
+      drawUsed(); drawBrowse();
+    }
+    function drawUsed() {
+      $('pk-used').innerHTML = pk.parts.length ? '<div class="caps" style="margin-top:12px">' + t('Part dipakai ({n})', { n: pk.parts.length }) + '</div>' + pk.parts.map(function (p, i) {
+        return '<div class="used"><div class="grow"><b>' + esc(p.nama) + '</b>' + (p.model ? ' <span class="small">' + esc(p.model) + '</span>' : '') +
+          '<div class="tiny muted">' + esc([L(p.jenis), p.manual ? t('manual') : '', p.satuan].filter(String).join(' · ')) + '</div></div>' +
+          '<div class="qty"><button type="button" data-dec="' + i + '" aria-label="Kurangi">−</button><input type="number" min="1" max="999" inputmode="numeric" data-qty="' + i + '" value="' + p.qty + '">' +
+          '<button type="button" data-inc="' + i + '" aria-label="Tambah">+</button></div><button type="button" class="rm" data-rm="' + i + '" aria-label="Hapus">×</button></div>';
+      }).join('') : '<p class="small muted" style="margin:12px 0 0">Belum ada part. Cari, atau pilih jenis → nama → model di bawah.</p>';
+      var root = $('pk-used');
+      var each = function (sel, fn) { var els = root.querySelectorAll(sel); for (var k = 0; k < els.length; k++) fn(els[k]); };
+      each('[data-dec]', function (b) { b.onclick = function () { var p = pk.parts[+b.getAttribute('data-dec')]; p.qty = Math.max(1, p.qty - 1); drawUsed(); }; });
+      each('[data-inc]', function (b) { b.onclick = function () { var p = pk.parts[+b.getAttribute('data-inc')]; p.qty = Math.min(999, p.qty + 1); drawUsed(); }; });
+      each('[data-qty]', function (inp) { inp.onchange = function () { var v = Math.floor(Number(inp.value)); pk.parts[+inp.getAttribute('data-qty')].qty = v >= 1 && v <= 999 ? v : 1; drawUsed(); }; });
+      each('[data-rm]', function (b) { b.onclick = function () { pk.parts.splice(+b.getAttribute('data-rm'), 1); drawUsed(); drawBrowse(); }; });
+    }
+    function usedQty(id) { var p = pk.parts.filter(function (x) { return !x.manual && x.id === id; })[0]; return p ? p.qty : 0; }
+    function itemBtn(p, showJenis) {
+      var q = usedQty(p.id);
+      return '<button type="button" class="pitem' + (q ? ' on' : '') + '" data-add="' + esc(p.id) + '"><span class="grow"><b>' + esc(showJenis ? p.nama : (p.model || p.nama)) + '</b>' +
+        (showJenis && p.model ? ' ' + esc(p.model) : '') + '<span class="tiny muted"> ' + esc([showJenis ? L(p.jenis) : '', p.satuan].filter(String).join(' · ')) + '</span></span>' +
+        '<span class="add">' + (q ? '✓ ×' + q : '+') + '</span></button>';
+    }
+    function drawBrowse() {
+      var box = $('pk-browse');
+      if (!box) return;
+      // Posisi scroll kolom dipertahankan saat digambar ulang (tap nama / tambah part tidak melompat ke atas).
+      var keep = {};
+      ['pk-names', 'pk-models', 'pk-hits'].forEach(function (id) { if ($(id)) keep[id] = $(id).scrollTop; });
+      var html = '';
+      if (pk.q) {
+        var words = pk.q.toLowerCase().split(/\s+/).filter(String);
+        var hits = cat.filter(function (p) {
+          var hay = (p.nama + ' ' + p.model + ' ' + p.jenis).toLowerCase();
+          return words.every(function (w) { return hay.indexOf(w) !== -1; });
+        }).slice(0, 50);
+        html = hits.length ? '<div class="plist scroll-y" id="pk-hits">' + hits.map(function (p) { return itemBtn(p, true); }).join('') + '</div>'
+          : '<p class="small muted" style="margin:10px 0 0">' + t('Tidak ditemukan di katalog. Pakai <b>Tambah manual</b> di bawah.') + '</p>';
+      } else {
+        var names = [];
+        cat.forEach(function (p) { if (p.jenis === pk.jenis && names.indexOf(p.nama) === -1) names.push(p.nama); });
+        var models = cat.filter(function (p) { return p.jenis === pk.jenis && p.nama === pk.nama; });
+        // Jenis = satu baris geser; Nama & Model = dua kolom tinggi tetap, masing-masing scroll sendiri.
+        html = '<div class="scroll-x" style="margin-top:12px">' + chips('pjenis', jenisCat, { selected: pk.jenis }) + '</div>' +
+          '<div class="cascade"><div class="cascade-head"><span>' + t('Nama sparepart ({n})', { n: names.length }) + '</span><span>' + t('Model') + (pk.nama ? ' · ' + esc(pk.nama) : '') + '</span></div>' +
+          '<div class="cascade-body"><div class="ccol" id="pk-names">' + names.map(function (n) {
+            var c = cat.filter(function (p) { return p.jenis === pk.jenis && p.nama === n; });
+            var q = c.reduce(function (sum, p) { return sum + usedQty(p.id); }, 0);
+            return '<button type="button" class="nitem' + (n === pk.nama ? ' on' : '') + '" data-nama="' + esc(n) + '"><span class="grow">' + esc(n) + '</span>' +
+              (q ? '<span class="tiny used-n">✓' + q + '</span>' : (c.length > 1 ? '<span class="tiny muted">' + t('{n} model', { n: c.length }) + '</span>' : '')) + '</button>';
+          }).join('') + '</div>' +
+          '<div class="ccol models" id="pk-models">' + (pk.nama ? models.map(function (p) { return itemBtn(p, false); }).join('')
+            : '<p class="tiny muted" style="margin:0;padding:12px">← Pilih nama sparepart</p>') + '</div></div></div>';
+      }
+      box.innerHTML = html;
+      Object.keys(keep).forEach(function (id) { if ($(id)) $(id).scrollTop = keep[id]; });
+      bindChips(box, function (n, val) {
+        if (n === 'pjenis') { pk.jenis = val; pk.jenisTouched = true; pk.nama = ''; drawBrowse(); if ($('pk-names')) $('pk-names').scrollTop = 0; }
+      });
+      var ns = box.querySelectorAll('[data-nama]');
+      for (var j = 0; j < ns.length; j++) ns[j].onclick = function () {
+        pk.nama = this.getAttribute('data-nama');
+        drawBrowse();
+        if ($('pk-models')) $('pk-models').scrollTop = 0;
+      };
+      var adds = box.querySelectorAll('[data-add]');
+      for (var k = 0; k < adds.length; k++) adds[k].onclick = function () {
+        var id = this.getAttribute('data-add');
+        addPart(cat.filter(function (p) { return p.id === id; })[0]);
+      };
+    }
+
+    bindChips(s.querySelector('[data-sys="part"]'), function (name, val) {
+      if (name === 'part') { $('pk').classList.toggle('hidden', val !== 'SOME'); if (val === 'SOME') { drawUsed(); drawBrowse(); } }
+    });
+    bindForm(s);
+    // Jenis kerusakan dipilih → filter Jenis sparepart ikut (kecuali teknisi sudah memilih jenis sendiri).
+    var jk = s.querySelector('[data-field="Jenis kerusakan"]');
+    function syncJenis() {
+      if (!jk || pk.jenisTouched) return;
+      var c = jk.querySelector('.chip.on'), sel = jk.querySelector('select');
+      var v = c ? c.getAttribute('data-val') : (sel ? sel.value : '');
+      if (v && jenisCat.indexOf(v) !== -1 && v !== pk.jenis) { pk.jenis = v; pk.nama = ''; drawBrowse(); }
+    }
+    if (jk) { jk.addEventListener('click', syncJenis); jk.addEventListener('change', syncJenis); }
+    if ($('pk-q')) $('pk-q').oninput = function () { pk.q = this.value.trim(); drawBrowse(); };
+    $('pk-manual-open').onclick = function () {
+      this.classList.add('hidden');
+      $('pk-manual').classList.remove('hidden');
+      if (pk.q && !$('pk-m-nama').value) $('pk-m-nama').value = pk.q;
+      var jcur = jk && jk.querySelector('.chip.on');
+      if (jcur && jenisManual.indexOf(jcur.getAttribute('data-val')) !== -1) setChip($('pk-manual'), 'mjenis', jcur.getAttribute('data-val'));
+      $('pk-m-nama').focus();
+    };
+    $('pk-m-add').onclick = function () {
+      var jenis = chipVal($('pk-manual'), 'mjenis'), nama = $('pk-m-nama').value.trim(), model = $('pk-m-model').value.trim();
+      var qty = Math.floor(Number($('pk-m-qty').value));
+      if (!jenis) { toast('Pilih jenis sparepart.', 'err'); return; }
+      if (!nama) { toast('Isi nama sparepart.', 'err'); $('pk-m-nama').focus(); return; }
+      if (!(qty >= 1 && qty <= 999)) { toast('Jumlah harus 1–999.', 'err'); return; }
+      if (partFull()) return;
+      pk.parts.push({ manual: true, jenis: jenis, nama: nama, model: model, qty: qty });
+      $('pk-m-nama').value = ''; $('pk-m-model').value = ''; $('pk-m-qty').value = 1;
+      toast(t('Ditambahkan (manual): {p}', { p: nama }), 'ok');
+      drawUsed();
+    };
+    // 2.6.4: isian Selesai (pilihan, teks, part, PIC) disimpan di HP setiap berubah → HP me-reload / sinyal putus tidak menghapusnya
+    var dk = 'selesai:' + r.id;
+    var picsOn = function () { return [].map.call(s.querySelectorAll('#pic-list [data-pic].on'), function (c) { return c.getAttribute('data-pic'); }); };
+    var old = draftLoad(dk);
+    if (old) {
+      var n = restoreForm(s, old);
+      if (old.mode) {
+        setChip(s.querySelector('[data-sys="part"]'), 'part', old.mode);
+        $('pk').classList.toggle('hidden', old.mode !== 'SOME');
+        var known = {};
+        cat.forEach(function (p) { known[p.id] = p; });
+        pk.parts = (old.parts || []).filter(function (p) { return p.manual || known[p.id]; }).slice(0, partMax);   // katalog bisa berubah
+        if (old.mode === 'SOME') { drawUsed(); drawBrowse(); }
+        n++;
+      }
+      (old.pics || []).forEach(function (e) { var c = s.querySelector('#pic-list [data-pic="' + e.replace(/"/g, '') + '"]'); if (c) { c.classList.add('on'); n++; } });
+      if (n) toast(t('Isian sebelumnya dipulihkan.'), 'ok');
+    }
+    draftWatch(s, dk, function () { var d = collectForm(s); d.mode = chipVal(s, 'part'); d.parts = pk.parts; d.pics = picsOn(); return d; });
+    $('c-save').onclick = function () {
+      var mode = chipVal(s, 'part');
+      if (!mode) { toast(t('Sparepart: pilih "{a}" atau "{b}".', { a: t(NO_PART), b: t('Ada part') }), 'err'); return; }
+      if (mode === 'SOME' && !pk.parts.length) { toast(t('Tambahkan minimal satu part, atau pilih "{a}".', { a: t(NO_PART) }), 'err'); return; }
+      var input = collectForm(s);
+      input.tanpaPart = mode === 'NONE';
+      input.pics = picsOn();
+      input.parts = mode === 'NONE' ? [] : pk.parts.map(function (p) {
+        return p.manual ? { manual: true, jenis: p.jenis, nama: p.nama, model: p.model, qty: p.qty } : { id: p.id, qty: p.qty };
+      });
+      act(this, 'apiComplete', [r.id, input], 'Maintenance selesai. Terima kasih!', dk).catch(function () {});
+    };
+  }
+
+  function cancelSheet(r) {
+    var s = openSheet('<h2>Cancel maintenance</h2><p class="small muted">Tidak dihitung ke MTTR. Alasan tercatat di Riwayat.</p><div class="stack">' +
+      formHtml('Cancel') + '<button class="btn danger-ghost" id="x-save">Konfirmasi cancel</button></div>');
+    bindForm(s);
+    var dk = 'cancel:' + r.id, old = draftLoad(dk);
+    if (old && restoreForm(s, old)) toast(t('Isian sebelumnya dipulihkan.'), 'ok');
+    draftWatch(s, dk, function () { return collectForm(s); });
+    $('x-save').onclick = function () {
+      act(this, 'apiCancel', [r.id, collectForm(s)], 'Maintenance dibatalkan.', dk).catch(function () {});
+    };
+  }
+
+  // ---------- HALAMAN LINE ----------
+  function openLine(lineId, btn, mesinId) {
+    busy(btn, true, t('Membuka…'));
+    call('apiGetLine', lineId, mesinId || '').then(function (v) {
+      busy(btn, false);
+      syncClock(v.serverNowIso);
+      state.lineView = v;
+      setView('line');
+      renderLine();
+    }).catch(function (e) { busy(btn, false); toast(cleanErr(e), 'err'); });
+  }
+
+  function stopDefault(tipe) {
+    var list = (state.boot.stopLineDefault || []).map(function (t) { return String(t).toLowerCase(); });
+    return list.indexOf(String(tipe || '').toLowerCase()) !== -1 ? 'Ya' : 'Tidak';
+  }
+
+  function startCardHtml(v) {
+    var l = v.line, defs = M().forms.Mulai, html = '';
+    var tipeDef = defs.filter(function (d) { return d.field === 'Tipe'; })[0];
+    defs.forEach(function (d) {
+      if (d.field === 'Tipe') {
+        // Satu tipe aktif (2.6: Preventive dihapus) → tidak ditanyakan, server memakai tipe itu.
+        if (d.options.length > 1) html += '<div><label class="lbl">' + esc(lbl(d)) + '</label>' + chips('tipe', d.options, { big: true, selected: d.options[0] }) + '</div>';
+      } else if (d.field === 'Stop line') {
+        html += '<div data-sys="stop"><label class="lbl">' + esc(lbl(d)) + '</label>' + chips('stop', [{ value: 'Ya', label: 'Ya, line berhenti' }, { value: 'Tidak', label: 'Tidak' }],
+          { big: true, selected: stopDefault(tipeDef && tipeDef.options[0]) }) + '</div>';
+      } else if (d.field === 'Baterai') {
+        if (l.batteries.length > 1) html += '<div><label class="lbl">' + esc(lbl(d)) + '</label>' + chips('battery', l.batteries, { big: true, selected: v.lastBattery }) + '</div>';
+        else html += '<p class="small muted" style="margin:0"><span>' + esc(lbl(d)) + '</span>: <b>' + esc(l.batteries[0] || '-') + '</b></p>';
+      } else if (d.type !== 'sistem') {
+        html += fieldHtml(d);
+      }
+    });
+    return html;
+  }
+
+  function renderLine() {
+    var v = state.lineView;
+    var html = '<button class="back no-print" id="btn-back">← Beranda</button>';
+    if (!v.found) {
+      $('view-line').innerHTML = html + '<div class="card center"><h2>Line tidak ditemukan</h2><p class="muted">' +
+        t('Line <b>{l}</b> tidak terdaftar. QR mungkin salah atau line sudah dihapus. Hubungi Admin.', { l: esc(v.lineId) }) + '</p><button class="btn ghost" id="btn-find2">Cari line</button></div>';
+      $('btn-back').onclick = function () { showTab('home'); };
+      $('btn-find2').onclick = linePicker;
+      return;
+    }
+    var l = v.line;
+    html += '<div class="hello" style="margin-top:0"><div><div class="hi">' + esc([l.factoryName, L(l.proses), l.area].filter(String).join(' · ') || t('Line')) + '</div><h1>' + esc(l.id) +
+      (l.name ? ' · ' + esc(L(l.name)) : '') + '</h1></div></div>';
+
+    if (!l.active) {
+      html += '<div class="alert warn">Line ini nonaktif. Maintenance tidak bisa dimulai.</div>';
+    } else {
+      if (v.open && v.openIsMine) html += workCard(v.open);
+      if (v.others.length) {
+        html += '<div class="card"><div class="caps">Sedang dikerjakan di line ini</div>' + v.others.map(function (o) {
+          return '<div class="row" style="margin-top:12px"><div class="avatar sm">' + esc(initials(o.techLastName)) + '</div><div class="grow"><b>' + esc(o.mesin ? L(o.mesin) : o.techLastName) + '</b>' +
+            '<div class="small muted">' + esc(t('{n} · sejak {w} · {id}', { n: o.techLastName, w: fmtShort(o.startIso), id: o.id })) + '</div></div>' + pill(o.status) +
+            (isAdmin() ? '<button class="link" data-admin-cancel="' + esc(o.id) + '" style="margin-left:8px">Cancel</button>' : '') + '</div>';
+        }).join('') + '</div>';
+      }
+      if (!(v.open && v.openIsMine)) {
+        if (v.myOpenElsewhere) {
+          html += '<div class="alert warn">' + t('Anda masih punya pekerjaan <b>{s}</b> di {l}. Selesaikan, pending, atau cancel dulu.', { s: esc(t(v.myOpenElsewhere.status)), l: esc(v.myOpenElsewhere.line) }) +
+            ' <button class="link" id="btn-go-mine">Buka ›</button></div>';
+        }
+        v.pendings.forEach(function (p, i) {
+          html += '<div class="darkpage" style="margin:0 0 16px" data-trbox>' + pendingCardInner(p) +
+            '<div class="btn-row two" style="margin-top:12px"><button class="btn" data-continue="' + i + '"' + (v.myOpenElsewhere ? ' disabled' : '') + '>▶ Lanjutkan</button>' +
+            '<button class="btn ghost" data-detail="' + esc(p.id) + '">Detail</button></div></div>';
         });
-        f.onsubmit = function (ev) {
-          ev.preventDefault();
-          var p = {
-            decision: f.decision.value, finishTime: f.finishTime.value, problem: f.problem.value,
-            actionTaken: f.actionTaken.value, partReplaced: f.partReplaced.value,
-            testingResult: f.testingResult.value, note: f.note.value
-          };
-          var btn = f.querySelector('button[type=submit]');
-          busy(btn, true, 'Menyimpan…');
-          call('apiResolveAbandoned', f.getAttribute('data-review'), p).then(function (rest) {
-            renderReview(rest); flash('Keputusan review tersimpan.', 'ok');
-          }).catch(function (e) { busy(btn, false); flash(cleanErr(e)); });
+        if (v.lineLocked) {
+          html += '<div class="alert warn">Line ini sedang dikerjakan. Tunggu selesai atau koordinasi dengan PIC di atas.</div>';
+        } else {
+          html += '<div class="card stack" id="start-card"><div class="caps">' + (v.pendings.length ? 'Atau mulai maintenance baru' : 'Mulai maintenance') + '</div>' +
+            startCardHtml(v) +
+            '<button class="btn xl' + (v.pendings.length ? ' navy' : '') + '" id="btn-start"' + (v.myOpenElsewhere ? ' disabled' : '') + '>▶ MULAI</button>' +
+            '<p class="tiny muted center" style="margin:6px 0 0">Waktu mulai & Maintenance ID dibuat server saat tombol ditekan.</p></div>';
+        }
+      }
+    }
+    $('view-line').innerHTML = html;
+    $('btn-back').onclick = function () { showTab('home'); };
+    bindWork(v.open && v.openIsMine ? v.open : null, $('view-line'));
+    var sc = $('start-card');
+    if (sc) {
+      var stopTouched = false;   // tipe diganti → default stop line ikut, kecuali teknisi sudah memilih sendiri
+      bindChips(sc, function (n, val) {
+        if (n === 'stop') stopTouched = true;
+        if (n === 'tipe' && !stopTouched) setChip(sc, 'stop', stopDefault(val));
+      });
+      bindForm(sc);
+    }
+    if ($('btn-start')) $('btn-start').onclick = function () {
+      var p = collectForm(sc);
+      p.tipe = chipVal(sc, 'tipe');
+      p.stopLine = chipVal(sc, 'stop');
+      p.baterai = chipVal(sc, 'battery') || l.batteries[0] || '';
+      act(this, 'apiStart', [l.id, p], 'Maintenance dimulai. Timer berjalan.').catch(function () { openLine(l.id, null); });
+    };
+    if ($('btn-go-mine')) $('btn-go-mine').onclick = function () { openLine(v.myOpenElsewhere.line, this); };
+    var ac = document.querySelectorAll('[data-admin-cancel]');
+    for (var j = 0; j < ac.length; j++) {
+      ac[j].onclick = function () { var id = this.getAttribute('data-admin-cancel'); cancelSheet(v.others.filter(function (o) { return o.id === id; })[0]); };
+    }
+    var cs = document.querySelectorAll('[data-continue]');
+    for (var i = 0; i < cs.length; i++) {
+      (function (b) { b.onclick = function () { continuePending(v.pendings[Number(b.getAttribute('data-continue'))], b); }; })(cs[i]);
+    }
+    bindDetailLinks($('view-line'));
+    var tb = $('view-line').querySelectorAll('.darkpage[data-trbox]');
+    for (var k = 0; k < tb.length; k++) trButton(tb[k]);
+    tick();
+  }
+
+  // ---------- PENDING ----------
+  function pendingCardInner(p) {
+    return '<div class="row between"><span class="k small" style="color:var(--navy-muted)">' + (p.tertunda ? valHtml(p.tertunda) : t('Pending')) + '</span><span class="tag">' + esc(p.battery) + '</span></div>' +
+      '<div style="font-weight:800;font-size:17px;margin:2px 0 6px">' + lineTitle(p) + '</div>' +
+      '<div class="small" style="color:#dfe7f0">' + esc(p.id) + ' · ' + esc(p.techLastName) + ' · ' + t('pending') + ' <b class="js-dur"' + timerAttrs(p.pendingMin, p.sinceIso, true) + '></b></div>' +
+      '<div class="small ' + (p.overdue ? 'over' : '') + '" style="margin-top:4px' + (p.overdue ? '' : ';color:var(--navy-muted)') + '">' + t('Tenggat {w}', { w: esc(fmtShort(p.tenggatIso)) }) +
+      (p.overdue ? ' · ' + t('LEWAT') : '') + '</div>';
+  }
+
+  function loadPending(keepInput) {
+    if (!keepInput) $('view-pending').innerHTML = '<div class="loading">Memuat pending…</div>';
+    call('apiListPending', serverFilter('pending')).then(function (res) {
+      syncClock(res.serverNowIso);
+      state.pendingItems = res.items;
+      renderPending(keepInput);
+    }).catch(function (e) { $('view-pending').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
+  }
+
+  function renderPending(keepInput) {
+    var items = state.pendingItems || [];
+    var f = state.pendingFilter;
+    var groups = [{ key: 'ALL', label: 'Semua', n: items.length }];
+    var bats = [];
+    items.forEach(function (i) { if (bats.indexOf(i.battery) === -1) bats.push(i.battery); });
+    bats.forEach(function (b) { groups.push({ key: 'B:' + b, label: b, n: items.filter(function (i) { return i.battery === b; }).length }); });
+    groups.push({ key: 'OVER', label: 'Lewat', n: items.filter(function (i) { return i.overdue; }).length });
+    if (!groups.some(function (g) { return g.key === f; })) f = state.pendingFilter = 'ALL';
+    var shown = items.filter(function (i) {
+      if (f === 'OVER') return i.overdue;
+      if (f.indexOf('B:') === 0) return i.battery === f.slice(2);
+      return true;
+    });
+    var listHtml = '<div class="circles">' + groups.map(function (g) {
+      return '<button class="circle' + (g.key === f ? ' on' : '') + '" data-filter="' + esc(g.key) + '"><span class="c">' + g.n + '</span><span class="t">' + esc(g.label) + '</span></button>';
+    }).join('') + '</div>' +
+      '<div class="small" style="color:var(--navy-muted)">Urutan: lewat tenggat, lalu paling lama</div>' +
+      (shown.length ? shown.map(function (p) {
+        return '<button class="wo" data-detail="' + esc(p.id) + '">' + pendingCardInner(p) + '</button>';
+      }).join('') : '<div class="empty" style="color:var(--navy-muted)">Tidak ada pekerjaan pending.</div>');
+    if (keepInput && $('pending-list')) {
+      $('pending-list').innerHTML = listHtml;
+    } else {
+      $('view-pending').innerHTML = '<div class="darkpage"><div class="row between"><div><div class="eyebrow">Pekerjaan tertunda</div><h1>Pending</h1></div>' +
+        '<div class="avatar">' + esc(initials(me().name)) + '</div></div>' + filterBar('pending', true) + '<div id="pending-list">' + listHtml + '</div></div>';
+      bindFilterBar($('view-pending'), function (fromSearch) { loadPending(fromSearch); });
+    }
+    var cs = document.querySelectorAll('#view-pending [data-filter]');
+    for (var i = 0; i < cs.length; i++) {
+      cs[i].onclick = function () { state.pendingFilter = this.getAttribute('data-filter'); renderPending(true); };
+    }
+    bindDetailLinks($('pending-list'));
+    tick();
+  }
+
+  // ---------- DETAIL (sheet) ----------
+  function bindDetailLinks(root) {
+    if (!root) return;
+    var ds = root.querySelectorAll('[data-detail]');
+    for (var i = 0; i < ds.length; i++) {
+      ds[i].onclick = function () { openDetail(this.getAttribute('data-detail')); };
+    }
+  }
+
+  function openDetail(id) {
+    var s = openSheet('<div class="loading">Memuat detail…</div>');
+    call('apiGetDetail', id).then(function (d) {
+      if (!state.sheetClose || !document.body.contains(s)) return;
+      syncClock(d.serverNowIso);
+      var r = d.record;
+      var kv = function (k, v, style) { return v ? '<dt>' + esc(k) + '</dt><dd' + (style || '') + '>' + esc(v) + '</dd>' : ''; };
+      var kvh = function (k, html) { return html ? '<dt>' + esc(k) + '</dt><dd>' + html + '</dd>' : ''; };
+      var free = function (v) { return v ? '<span data-tr>' + esc(v) + '</span>' : ''; };
+      var withDetail = function (a, b) { return (a ? valHtml(a) : '') + (a && b ? ' – ' : '') + free(b); };
+      var html = '<div class="row between"><h2>' + lineTitle(r) + '</h2>' + pill(r.status) + '</div>' +
+        '<p class="small muted" style="margin:0 0 14px">' + esc(r.id) + (r.tipe ? ' · ' + esc(L(r.tipe)) : '') + '</p><dl class="kv">' +
+        kv('Factory', r.factoryName) + kv('Proses', r.proses) + kv('Baterai', r.battery) + kv('Mesin', L(r.mesin)) + kv('Stop line', r.stopLine) +
+        kv('Teknisi', r.techFirstName + (r.techLast !== r.techFirst ? ' → ' + r.techLastName : '')) +
+        kv('Mulai', r.startText) + kv('Selesai', r.finishText) +
+        '<dt>Waktu aktif</dt><dd class="js-dur"' + timerAttrs(r.activeMin, r.sinceIso, r.status === 'Aktif') + '></dd>' +
+        '<dt>Pause</dt><dd class="js-dur"' + timerAttrs(r.pauseMin, r.sinceIso, r.status === 'Pause') + '></dd>' +
+        '<dt>Pending</dt><dd class="js-dur"' + timerAttrs(r.pendingMin, r.sinceIso, r.status === 'Pending') + '></dd>' +
+        kvh('Tertunda', r.tertunda ? valHtml(r.tertunda) : '') +
+        (r.tenggatIso ? '<dt>Tenggat</dt><dd' + (r.overdue ? ' style="color:var(--danger)"' : '') + '>' + esc(r.tenggatText) + (r.overdue ? ' · ' + t('LEWAT') : '') + '</dd>' : '') +
+        kv('Jenis kerusakan', L(r.jenisKerusakan)) + kvh('Masalah', withDetail(r.masalah, r.detailMasalah)) +
+        kvh('Penyebab', withDetail(r.penyebab, r.detailPenyebab)) + kvh('Penanganan', withDetail(r.penanganan, r.detailPenanganan)) +
+        kv('Sparepart', r.parts.join('\n')) +
+        r.extra.map(function (e) { return kvh(e.label, free(e.value)); }).join('') +
+        kvh('Alasan cancel', r.cancelReason ? valHtml(r.cancelReason) : '') + kvh('Dikerjakan', free(r.dikerjakan)) + kvh('Catatan', free(r.catatan)) + kv('Masuk MTTR', r.mttr) +
+        (r.reviewedByName ? kvh('Review', esc(r.reviewedByName + ' · ' + r.reviewedText) + (r.reviewNote ? '<br>' + free(r.reviewNote) : '')) : '') +
+        '</dl><div class="caps" style="margin:20px 0 10px">Riwayat kejadian</div><ul class="timeline">' +
+        d.events.map(function (e) {
+          return '<li><b>' + esc(t(EVENT_LABEL[e.event] || e.event)) + '</b> <span class="small muted">· ' + esc(who(e.userName)) + ' · ' + esc(fmtShort(e.whenIso)) + '</span>' +
+            (e.detail ? '<div class="small muted">' + logHtml(e.event, e.detail) + '</div>' : '') + '</li>';
+        }).join('') + '</ul>';
+      if (r.status === 'Pending') {
+        html += '<button class="btn xl" id="d-continue" style="margin-top:8px">▶ Lanjutkan' + (freshQr(r.line) ? '' : ' (scan QR)') + '</button>';
+      }
+      s.innerHTML = '<div class="grab"></div>' + html;
+      trButton(s);
+      tick();
+      if ($('d-continue')) $('d-continue').onclick = function () { continuePending(r, this); };
+    }).catch(function (e) { s.innerHTML = '<div class="grab"></div><div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
+  }
+
+  // ---------- Lanjutkan pending: konfirmasi QR ----------
+  function continuePending(p, btn) {
+    function go(lineId, b) {
+      busy(b, true, t('Melanjutkan…'));
+      return call('apiAct', 'apiContinue', [p.id, lineId], ridFor('apiContinue|' + p.id)).then(function (v) {
+        ridDone(p.id);
+        closeSheet();
+        syncClock(v.serverNowIso);
+        state.qr = { line: String(lineId).toUpperCase(), at: Date.now() };
+        state.boot.myOpen = v.open;
+        state.lineView = v;
+        state.tab = 'home';
+        markTab('home');
+        setView('line');
+        renderLine();
+        toast(v.ulang ? t('Sudah tersimpan sebelumnya (sinyal sempat putus). Tidak dicatat dua kali.') : 'Pending dilanjutkan. Timer aktif berjalan.', 'ok');
+        refresh();
+      }).catch(function (e) {
+        busy(b, false);
+        toast(isNetErr(e) ? t('Sinyal terputus. Isian masih di layar — ketuk lagi saat ada sinyal; tidak akan tercatat dua kali.') : cleanErr(e), 'err');
+      });
+    }
+    if (freshQr(p.line)) return go(state.qr.line, btn);   // masuk lewat scan QR: konfirmasi dilewati
+    openScanner({ expectLine: p.line, onResult: function (line) { go(line, null); } });
+  }
+
+  /** Isi QR: URL web app ?line=..&mesin=.., atau teks Line ID saja. */
+  function parseQr(text) {
+    text = String(text || '').trim();
+    var ok = function (v) { return /^[A-Za-z0-9_.-]{1,50}$/.test(v || '') ? v.toUpperCase() : ''; };
+    var ml = /[?&]line=([^&#]+)/.exec(text), mm = /[?&]mesin=([^&#]+)/.exec(text);
+    if (ml || mm) return { line: ml ? ok(decodeURIComponent(ml[1])) : '', mesin: mm ? ok(decodeURIComponent(mm[1])) : '' };
+    return { line: ok(text), mesin: '' };
+  }
+
+  /** Tombol "Scan QR" di Beranda: QR line atau QR mesin, tanpa keluar dari web app. */
+  function scanAny() {
+    openScanner({ onResult: function (line, mesin) {
+      closeSheet();
+      state.qr = { line: line, at: Date.now() };
+      openLine(line, null, mesin);
+    } });
+  }
+
+  /**
+   * @param {{expectLine?:string, onResult:function(string, string)}} o
+   *   expectLine: QR harus line ini (konfirmasi lanjut pending).
+   */
+  function openScanner(o) {
+    var stream = null, stopped = false, timer = null;
+    var title = o.expectLine ? t('Scan QR line {l}', { l: o.expectLine }) : t('Scan QR line / mesin');
+    var s = openSheet('<h2>' + esc(title) + '</h2>' +
+      '<p class="small muted">' + (o.expectLine ? esc(t('Konfirmasi Anda benar-benar di mesin.')) + ' ' : '') + esc(t('Arahkan kamera ke QR yang ditempel di line/mesin.')) + '</p>' +
+      '<div class="scan-box" id="scan-box"><video id="scan-video" playsinline muted></video><div class="frame"></div></div>' +
+      '<p class="small center" id="scan-status" style="margin-top:12px">Membuka kamera…</p>' +
+      (o.expectLine ? '' : '<button class="btn ghost" id="scan-manual">Cari line manual</button>'), function () {
+        stopped = true;
+        clearTimeout(timer);
+        if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+      });
+    if ($('scan-manual')) $('scan-manual').onclick = function () { closeSheet(); linePicker(); };
+
+    function fallback(reason) {
+      if (stopped) return;
+      $('scan-box').classList.add('hidden');
+      $('scan-status').innerHTML = '<div class="alert warn" style="text-align:left">' + t('<b>Kamera tidak bisa dibuka di dalam aplikasi</b> ({r}).', { r: esc(t(reason)) }) + '<br>' +
+        (o.expectLine
+          ? t('Tutup layar ini, lalu scan QR line <b>{l}</b> dengan aplikasi kamera HP. Halaman line akan terbuka dengan tombol <b>Lanjutkan</b> tanpa scan ulang.', { l: esc(o.expectLine) })
+          : t('Scan QR dengan aplikasi kamera HP (halaman line terbuka otomatis), atau pakai <b>Cari line manual</b>.')) + '</div>';
+    }
+    function found(text) {
+      var q = parseQr(text);
+      if (!q.line && !q.mesin) { $('scan-status').textContent = 'QR tidak dikenali, coba lagi…'; return false; }
+      if (o.expectLine && q.line !== String(o.expectLine).toUpperCase()) { $('scan-status').textContent = t('Ini QR {q}, bukan line {l}.', { q: q.line || q.mesin, l: o.expectLine }); return false; }
+      if (!q.line) { $('scan-status').textContent = 'QR mesin lama tanpa line. Cetak ulang QR dari Dashboard → QR.'; return false; }
+      $('scan-status').textContent = t('QR {q} terbaca ✓', { q: q.line + (q.mesin ? ' · ' + q.mesin : '') });
+      stopped = true;
+      if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+      o.onResult(q.line, q.mesin);
+      return true;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fallback('browser tidak mendukung');
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }).then(function (st) {
+      if (stopped) { st.getTracks().forEach(function (t) { t.stop(); }); return; }
+      stream = st;
+      var video = $('scan-video');
+      video.srcObject = st;
+      video.play();
+      $('scan-status').textContent = 'Mencari QR…';
+      getDecoder().then(function (decode) {
+        var canvas = document.createElement('canvas'), c2d = canvas.getContext('2d');
+        (function loop() {
+          if (stopped) return;
+          if (video.readyState >= 2) {
+            decode(video, canvas, c2d).then(function (text) {
+              if (!(text && found(text))) timer = setTimeout(loop, 250);
+            }).catch(function () { timer = setTimeout(loop, 400); });
+          } else timer = setTimeout(loop, 250);
+        })();
+      }).catch(function () { fallback('decoder QR gagal dimuat'); });
+    }).catch(function (e) { fallback((e && e.name) || 'izin ditolak'); });
+  }
+
+  /** BarcodeDetector (Chrome Android) jika ada, selain itu jsQR dari CDN. */
+  var decoderPromise = null;
+  function getDecoder() {
+    if (decoderPromise) return decoderPromise;
+    if ('BarcodeDetector' in window) {
+      var det = new window.BarcodeDetector({ formats: ['qr_code'] });
+      decoderPromise = Promise.resolve(function (video) {
+        return det.detect(video).then(function (codes) { return codes.length ? codes[0].rawValue : ''; });
+      });
+    } else {
+      decoderPromise = new Promise(function (resolve, reject) {
+        var sc = document.createElement('script');
+        sc.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+        sc.onload = function () {
+          resolve(function (video, canvas, c2d) {
+            var w = video.videoWidth, h = video.videoHeight, scale = Math.min(1, 640 / Math.max(w, h));
+            canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
+            c2d.drawImage(video, 0, 0, canvas.width, canvas.height);
+            var img = c2d.getImageData(0, 0, canvas.width, canvas.height);
+            var code = window.jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+            return Promise.resolve(code ? code.data : '');
+          });
         };
-      })(forms[i]);
+        sc.onerror = function () { decoderPromise = null; reject(new Error('load')); };
+        document.head.appendChild(sc);
+      });
+    }
+    return decoderPromise;
+  }
+
+  // ---------- RIWAYAT ----------
+  function loadHistory() {
+    var h = state.history;
+    var statuses = ['', 'Aktif', 'Pause', 'Pending', 'Completed', 'Cancelled', 'Abandoned'];
+    var tipes = (M().forms.Mulai.filter(function (d) { return d.field === 'Tipe'; })[0] || { options: [] }).options;
+    $('view-history').innerHTML = '<div class="hello"><div><div class="hi">' + (h.scope === 'all' ? 'Semua teknisi' : 'Pekerjaan saya') + '</div><h1>Riwayat</h1></div>' +
+      (isAdmin() ? '<button class="btn ghost" id="h-scope" style="width:auto">' + (h.scope === 'all' ? 'Saya saja' : 'Semua') + '</button>' : '') + '</div>' +
+      filterBar('history') +
+      '<div class="scroll-x">' + chips('status', statuses.map(function (s) { return { value: s, label: s || 'Semua status' }; }), { selected: h.status }) + '</div>' +
+      '<div class="row" style="margin:8px 0 14px"><div class="grow">' + (tipes.length > 1 ? chips('tipe', [{ value: '', label: 'Semua tipe' }].concat(tipes), { selected: h.tipe }) : '') + '</div>' +
+      '<button class="btn ghost" id="h-dl" style="width:auto">⬇ Download</button></div><div id="h-list"><div class="loading">Memuat…</div></div>';
+    bindChips($('view-history'), function (n, val) { h[n] = val; fetchHistory(); });
+    bindFilterBar($('view-history'), function (fromSearch) { if (fromSearch) fetchHistory(); else loadHistory(); });
+    $('h-dl').onclick = openDownload;
+    if ($('h-scope')) $('h-scope').onclick = function () { h.scope = h.scope === 'all' ? 'mine' : 'all'; loadHistory(); };
+    fetchHistory();
+  }
+
+  /** Satu pekerjaan di daftar (Riwayat, Statistik → tap batang). Tap → Detail. */
+  function itemHtml(r, showTech) {
+    return '<button class="item" data-detail="' + esc(r.id) + '"><div class="row between"><span class="small muted">' + esc(r.id) + '</span><span>' + pill(r.status) + tipeTag(r.tipe) + '</span></div>' +
+      '<div class="t">' + lineTitle(r) + ' · ' + esc(r.battery) + '</div>' +
+      '<div class="small muted">' + esc(t('{w} · aktif {d}', { w: fmtShort(r.startIso), d: dur(r.activeMin * 60000) })) +
+      (showTech ? ' · ' + esc(r.techLastName) : '') + '</div>' +
+      (r.masalah ? '<div class="small clamp">' + esc((r.jenisKerusakan ? L(r.jenisKerusakan) + ' · ' : '') + L(r.masalah) + ' → ' + L(r.penanganan) +
+        (r.parts.length && r.part !== NO_PART && r.part !== 'Tidak ada' ? ' · ' + t('{n} part', { n: r.parts.length }) : '')) + '</div>' : '') +
+      (r.tertunda && r.status === 'Pending' ? '<div class="small clamp">' + esc(L(r.tertunda)) + '</div>' : '') + '</button>';
+  }
+
+  function fetchHistory() {
+    var h = state.history;
+    $('h-list').innerHTML = '<div class="loading">Memuat…</div>';
+    var f = serverFilter('history');
+    f.scope = h.scope; f.status = h.status; f.tipe = h.tipe;
+    call('apiHistory', f).then(function (res) {
+      syncClock(res.serverNowIso);
+      h.data = res.items;
+      $('h-list').innerHTML = '<p class="small muted" style="margin:0 4px 10px">' + t('{n} pekerjaan', { n: res.total }) + (res.truncated ? ' ' + t('(ditampilkan {n} terbaru)', { n: res.items.length }) : '') +
+        (res.spreadsheetUrl ? ' · <a href="' + esc(res.spreadsheetUrl) + '" target="_blank" style="color:var(--accent)">Buka Google Sheet</a>' : '') + '</p>' +
+        (res.items.length ? res.items.map(function (r) { return itemHtml(r, h.scope === 'all'); }).join('') : '<div class="empty">Belum ada data.</div>');
+      bindDetailLinks($('h-list'));
+    }).catch(function (e) { $('h-list').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
+  }
+
+  // ---------- Download Riwayat (.xlsx; CSV jika library Excel tidak bisa dimuat) ----------
+  var EXCELJS_SRC = ['https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'];
+  var EXCELJS_SRI = 'sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz';
+  var excelLoad = null;
+  /** ExcelJS dimuat hanya saat Download (±1 MB), dicoba dari dua CDN; integritas file dicek (SRI). */
+  function loadExcelJs() {
+    if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+    if (excelLoad) return excelLoad;
+    excelLoad = EXCELJS_SRC.reduce(function (p, src) {
+      return p.catch(function () {
+        return new Promise(function (ok, fail) {
+          var el = document.createElement('script');
+          el.src = src; el.integrity = EXCELJS_SRI; el.crossOrigin = 'anonymous'; el.async = true;
+          var timer = setTimeout(function () { el.remove(); fail(new Error('timeout')); }, 20000);
+          el.onload = function () { clearTimeout(timer); window.ExcelJS ? ok(window.ExcelJS) : fail(new Error('ExcelJS kosong')); };
+          el.onerror = function () { clearTimeout(timer); el.remove(); fail(new Error('gagal memuat ' + src)); };
+          document.head.appendChild(el);
+        });
+      });
+    }, Promise.reject(new Error('mulai')));
+    excelLoad.catch(function () { excelLoad = null; });   // dicoba lagi lain kali (mis. sinyal kembali)
+    return excelLoad;
+  }
+
+  function openDownload() {
+    var h = state.history;
+    var s = openSheet('<h2>' + esc(t('Download riwayat')) + '</h2><p class="small muted">' +
+      esc(t('Kolom sama dengan tab Laporan (format Excel). Filter, status & pilihan "{s}" di Riwayat ikut. Cancelled hanya jika status Cancelled dipilih.',
+        { s: h.scope === 'all' ? t('Semua teknisi') : t('Pekerjaan saya') })) + '</p>' +
+      '<label class="lbl">' + esc(t('Pekerjaan yang dimulai')) + '</label><div id="dl-period"></div>' +
+      '<div class="stack" style="margin-top:14px"><button class="btn" id="dl-xlsx">' + esc(t('Download Excel (.xlsx)')) + '</button>' +
+      '<button class="btn ghost" id="dl-csv">' + esc(t('Download CSV')) + '</button><div id="dl-out"></div></div>');
+    bindPeriod(s.querySelector('#dl-period'), 'dl', state.dl, function () {});
+    var go = function (kind, btn) {
+      var f = serverFilter('history'), rg = periodRange(state.dl);
+      f.scope = h.scope; f.status = h.status; f.tipe = h.tipe; f.from = rg.from; f.to = rg.to;
+      busy(btn, true, t('Menyiapkan file…'));
+      s.querySelector('#dl-out').innerHTML = '';
+      call('apiExport', f).then(function (res) {
+        if (!res.rows.length) { busy(btn, false); s.querySelector('#dl-out').innerHTML = '<div class="alert warn">' + esc(t('Tidak ada pekerjaan di periode ini.')) + '</div>'; return; }
+        var name = 'mttr-riwayat-' + res.from + (res.to !== res.from ? '_' + res.to : '');
+        var note = res.truncated ? t('Hanya {n} baris pertama dari {t} (batas per file). Persempit periode untuk sisanya.', { n: res.rows.length, t: res.total }) : '';
+        var done = function (msg) { busy(btn, false); s.querySelector('#dl-out').innerHTML = '<div class="alert ' + (note ? 'warn' : 'ok') + '">' + esc(msg + (note ? ' ' + note : '')) + '</div>'; };
+        if (kind === 'csv') { saveBlob(csvOf(res), name + '.csv'); done(t('✓ {n} baris diunduh (CSV).', { n: res.rows.length })); return; }
+        loadExcelJs().then(function (X) { return xlsxOf(X, res); }).then(function (blob) {
+          saveBlob(blob, name + '.xlsx');
+          done(t('✓ {n} baris diunduh (Excel).', { n: res.rows.length }));
+        }).catch(function (e) {
+          console.warn('ExcelJS: ' + e);
+          saveBlob(csvOf(res), name + '.csv');
+          done(t('Library Excel tidak bisa dimuat (internet / jaringan kantor?). File CSV yang diunduh; bisa dibuka di Excel.'));
+        });
+      }).catch(function (e) { busy(btn, false); toast(cleanErr(e), 'err'); });
+    };
+    s.querySelector('#dl-xlsx').onclick = function () { go('xlsx', this); };
+    s.querySelector('#dl-csv').onclick = function () { go('csv', this); };
+  }
+
+  function saveBlob(blob, name) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 60000);
+  }
+  /** {d: ISO} → tanggal WIB (Excel tidak punya zona waktu: jam dinding WIB ditulis apa adanya). */
+  function wib(v) { return new Date(new Date(v.d).getTime() + 7 * 3600000); }
+  function csvOf(res) {
+    var cell = function (v, src) {
+      if (v && typeof v === 'object' && v.d) { var d = wib(v); v = two(d.getUTCDate()) + '/' + two(d.getUTCMonth() + 1) + '/' + d.getUTCFullYear() + (src === 'Tanggal' ? '' : ' ' + two(d.getUTCHours()) + ':' + two(d.getUTCMinutes())); }
+      v = v == null ? '' : String(v);
+      if (/^[=+\-@]/.test(v)) v = "'" + v;   // cegah formula injection saat dibuka di Excel
+      return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    };
+    var out = [res.columns.map(function (c) { return cell(c.name); }).join(',')].concat(res.rows.map(function (r) {
+      return r.map(function (v, i) { return cell(v, res.columns[i].source); }).join(',');
+    }));
+    return new Blob(['\ufeff' + out.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  }
+  function xlsxOf(X, res) {
+    var wb = new X.Workbook(), ws = wb.addWorksheet('Riwayat'), n = res.columns.length;
+    wb.creator = res.appName;
+    ws.addRow([res.title || res.appName]);
+    ws.mergeCells(1, 1, 1, Math.max(1, n));
+    ws.getRow(1).font = { bold: true, size: 13 };
+    // 2.6.2: tanpa warna teks / isian eksplisit. Font bawaan ExcelJS berwarna tema hitam → di Google Sheets HP mode gelap
+    // hitam di atas hitam, file tampak kosong. Font tanpa warna ikut tema (terang / gelap).
+    var plain = { name: 'Calibri', size: 11 };
+    var head = ws.addRow(res.columns.map(function (c) { return c.name; }));
+    head.font = { name: 'Calibri', size: 11, bold: true };
+    head.alignment = { wrapText: true, vertical: 'top' };
+    head.eachCell(function (c) { c.border = { bottom: { style: 'medium' } }; });
+    // judul dua bahasa ("序号\nNO") = 2 baris: tinggi baris mengikuti, tidak terpotong
+    head.height = 15 * Math.max.apply(null, res.columns.map(function (c) { return String(c.name).split('\n').length; })) + 3;
+    var width = res.columns.map(function (c) { return Math.min(40, Math.max(8, Math.max.apply(null, String(c.name).split('\n').map(function (x) { return x.length + 2; })))); });
+    var rows = [];
+    res.rows.forEach(function (r) {
+      var row = ws.addRow(r.map(function (v) { return v && typeof v === 'object' && v.d ? wib(v) : v; }));
+      r.forEach(function (v, i) {
+        var c = row.getCell(i + 1);
+        if (v && typeof v === 'object' && v.d) c.numFmt = res.columns[i].source === 'Tanggal' ? 'dd/mm/yyyy' : 'dd/mm/yyyy hh:mm';
+        var lines = String(v && v.d ? '00/00/0000 00:00' : v).split('\n');   // sparepart ke bawah: satu baris per part
+        width[i] = Math.min(50, Math.max(width[i], Math.max.apply(null, lines.map(function (x) { return x.length + 2; }))));
+      });
+      row.font = plain;
+      row.alignment = { wrapText: true, vertical: 'top' };
+      rows.push([row, r]);
+    });
+    ws.columns.forEach(function (col, i) { col.width = width[i]; });
+    // tinggi baris = baris teks terpanjang setelah dibungkus lebar kolom (Google Sheets tidak menyesuaikan sendiri)
+    rows.forEach(function (x) {
+      var lines = 1;
+      x[1].forEach(function (v, i) {
+        if (v == null || (typeof v === 'object' && v.d)) return;
+        var k = String(v).split('\n').reduce(function (a, s) { return a + Math.max(1, Math.ceil(s.replace(/[^\x00-\xff]/g, 'xx').length / Math.max(1, width[i] - 1))); }, 0);
+        if (k > lines) lines = k;
+      });
+      if (lines > 1) x[0].height = 15 * Math.min(lines, 25);   // 2.6.4: s/d 20 sparepart per pekerjaan
+    });
+    ws.views = [{ state: 'frozen', ySplit: 2 }];
+    ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: n } };
+    return wb.xlsx.writeBuffer().then(function (buf) {
+      return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    });
+  }
+
+  // ---------- REVIEW ----------
+  function loadReview(keepInput) {
+    if (!keepInput) $('view-review').innerHTML = '<div class="loading">Memuat review…</div>';
+    call('apiListReview', serverFilter('review')).then(function (r) { renderReview(r, keepInput); }).catch(function (e) {
+      $('view-review').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>';
+    });
+  }
+
+  function renderReview(res, keepInput) {
+    syncClock(res.serverNowIso);
+    var html = '';
+    if (res.warnings.length) {
+      html += '<div class="caps" style="margin:0 4px 8px">' + t('Peringatan > {h} jam (menunggu jawaban teknisi)', { h: esc(state.boot.limits.warnHours) }) + '</div>' +
+        res.warnings.map(function (r) {
+          return '<div class="item" style="cursor:default;border-left:5px solid var(--warn)"><div class="row between"><span class="t">' + lineTitle(r) + ' · ' + esc(r.techLastName) + '</span>' + pill(r.status) + '</div>' +
+            '<div class="small muted">' + esc(t('{id} · diperingatkan {w} · Abandoned otomatis jika tidak dijawab', { id: r.id, w: fmtShort(r.warnedIso) })) + '</div></div>';
+        }).join('');
+    }
+    if (!res.items.length && !res.warnings.length) {
+      html += '<div class="card center"><h2>Semua beres</h2><p class="muted">' + (filterSummary().length || state.q.review ? 'Tidak ada item yang perlu direview untuk filter ini.' : 'Tidak ada item yang perlu direview.') + '</p></div>';
+    }
+    html += res.items.map(function (r) {
+      var info = '';
+      if (r.status === 'Pending') info = valHtml(r.tertunda) + ' · ' + t('tenggat {w}', { w: esc(fmtShort(r.tenggatIso)) }) + (r.overdue ? ' <b style="color:var(--danger)">' + t('LEWAT') + '</b>' : '');
+      if (r.status === 'Cancelled') info = t('Alasan: {a}', { a: valHtml(r.cancelReason) });
+      if (r.status === 'Abandoned') info = esc(t('Tercatat aktif {a}, pause {p} · Abandoned {w}', { a: dur(r.activeMin * 60000), p: dur(r.pauseMin * 60000), w: fmtShort(r.sinceIso) }));
+      var form = '';
+      if (!r.canDecide) {
+        form = '<p class="small muted" style="margin:10px 0 0">Menunggu review Admin.</p>';
+      } else if (r.status === 'Pending') {
+        form = '<input type="text" data-f="note" placeholder="Catatan (opsional)" style="margin-top:12px">' +
+          '<button class="btn ghost" data-review="CEK" style="margin-top:8px">Tandai sudah dicek</button>';
+      } else if (r.status === 'Cancelled') {
+        form = '<input type="text" data-f="note" placeholder="Catatan (opsional)" style="margin-top:12px">' +
+          '<button class="btn ghost" data-review="SETUJU" style="margin-top:8px">Setujui cancel</button>';
+      } else if (r.status === 'Abandoned') {
+        form = '<label class="lbl" style="margin-top:12px">Menit aktif sebenarnya (jika dihitung)</label>' +
+          '<input type="number" data-f="min" min="1" value="' + esc(Math.max(1, Math.round(r.activeMin))) + '">' +
+          '<label class="lbl" style="margin-top:10px">Catatan review * (dasar keputusan)</label>' +
+          '<textarea data-f="note" placeholder="mis. konfirmasi teknisi via telepon, selesai ±14:30"></textarea>' +
+          '<div class="btn-row two" style="margin-top:10px"><button class="btn ok" data-review="HITUNG">Hitung</button>' +
+          '<button class="btn danger-ghost" data-review="KELUARKAN">Keluarkan</button></div>';
+      }
+      return '<div class="card" data-id="' + esc(r.id) + '"><div class="row between"><span>' + pill(r.status) + tipeTag(r.tipe) + '</span><button class="link" data-detail="' + esc(r.id) + '">Detail ›</button></div>' +
+        '<h2 style="margin:8px 0 2px;font-size:18px">' + lineTitle(r) + ' · ' + esc(r.battery) + '</h2>' +
+        '<div class="small muted">' + esc(r.id) + ' · ' + esc(r.factoryName) + ' · ' + esc(r.techFirstName) + (r.techLast !== r.techFirst ? ' → ' + esc(r.techLastName) : '') + '</div>' +
+        '<div class="small" style="margin-top:6px">' + info + '</div>' + form + '</div>';
+    }).join('');
+    if (keepInput && $('review-list')) {
+      $('review-list').innerHTML = html;
+    } else {
+      $('view-review').innerHTML = '<div class="hello"><div><div class="hi">' + (isAdmin() ? 'Semua item' : 'Item milik saya') + '</div><h1>Review</h1></div></div>' +
+        filterBar('review') + '<div id="review-list">' + html + '</div>';
+      bindFilterBar($('view-review'), function (fromSearch) { loadReview(fromSearch); });
+    }
+    bindDetailLinks($('review-list'));
+    var bs = document.querySelectorAll('#review-list [data-review]');
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].onclick = function () {
+        var b = this, card = b.closest('[data-id]');
+        var note = card.querySelector('[data-f="note"]'), min = card.querySelector('[data-f="min"]');
+        busy(b, true, t('Menyimpan…'));
+        call('apiReview', card.getAttribute('data-id'), {
+          action: b.getAttribute('data-review'), note: note ? note.value : '', activeMin: min ? Number(min.value) : null
+        }, serverFilter('review')).then(function (r) { renderReview(r, true); toast('Keputusan review tersimpan.', 'ok'); refresh(); })
+          .catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+      };
+    }
+  }
+
+  // ---------- DASHBOARD ----------
+  function loadDashboard() {
+    var head = '<div class="hello"><div><div class="hi">MTTR, MTBF & kesehatan line</div><h1>Dashboard</h1></div><div class="row">' +
+      (isAdmin() ? '<button class="btn ghost" id="d-qr" style="width:auto">QR</button>' : '') + helpBtn() + '</div></div>' +
+      filterBar(null) +
+      '<div style="margin:-2px 0 12px">' + chips('mode', [{ value: 'ringkasan', label: 'Ringkasan' }, { value: 'statistik', label: 'Statistik' }], { selected: state.dash.mode }) + '</div>' +
+      (state.dash.mode === 'statistik' ? '<div id="d-stat-ctl"></div>'
+        : '<div style="margin:-2px 0 14px">' + chips('periode', [{ value: '7', label: '7 hari' }, { value: '30', label: '30 hari' }, { value: '90', label: '90 hari' }, { value: 'ytd', label: 'Tahun ini' }],
+          { selected: String(state.dash.periode) }) + '</div>') + '<div id="d-body"><div class="loading">Menghitung…</div></div>';
+    $('view-dashboard').innerHTML = head;
+    bindFilterBar($('view-dashboard'), loadDashboard);
+    bindChips($('view-dashboard'), function (n, v) {
+      if (n === 'mode') { state.dash.mode = v; loadDashboard(); return; }
+      state.dash.periode = v === 'ytd' ? v : Number(v); fetchDashboard();
+    });
+    if ($('d-qr')) $('d-qr').onclick = function () { setView('qr'); loadQr(); };
+    bindHelp($('view-dashboard'));
+    if (state.dash.mode === 'statistik') loadStats(); else fetchDashboard();
+  }
+
+  // ---------- Statistik (2.6): lihat per …, Pareto, MTTR / downtime / MTBF, sparepart; tap batang → daftar pekerjaan ----------
+  var STAT_BY = [['line', 'Line'], ['proses', 'Proses'], ['project', 'Project'], ['teknisi', 'Teknisi'], ['jenis', 'Jenis kerusakan'], ['discipline', 'Discipline'],
+    ['masalah', 'Masalah'], ['sparepart', 'Sparepart'], ['hari', 'Hari'], ['bulan', 'Bulan']];
+  var STAT_MTBF = ['line', 'proses', 'project'];
+  function loadStats() {
+    var st = state.stat;
+    if (st.by === 'sparepart') st.measure = 'frek';
+    if (st.measure === 'mtbf' && STAT_MTBF.indexOf(st.by) === -1) st.measure = 'frek';
+    var spare = st.by === 'sparepart';
+    $('d-stat-ctl').innerHTML = '<div class="card flat stack" style="margin-bottom:14px">' +
+      '<div><label class="lbl">' + esc(t('Periode (kerusakan yang selesai)')) + '</label><div id="s-period"></div></div>' +
+      '<div><label class="lbl">' + esc(t('Lihat per')) + '</label><select id="s-by">' + STAT_BY.map(function (b) {
+        return '<option value="' + b[0] + '"' + (b[0] === st.by ? ' selected' : '') + '>' + esc(t(b[1])) + '</option>';
+      }).join('') + '</select></div>' +
+      '<div><label class="lbl">' + esc(t('Ukuran')) + '</label><div class="scroll-x" id="s-measure">' + chips('s-measure', [
+        { value: 'frek', label: spare ? 'Jumlah dipakai' : 'Jumlah' }, { value: 'mttr', label: 'MTTR', disabled: spare },
+        { value: 'downtime', label: 'Downtime', disabled: spare }, { value: 'mtbf', label: 'MTBF', disabled: STAT_MTBF.indexOf(st.by) === -1 }], { selected: st.measure }) + '</div></div></div>';
+    bindPeriod($('s-period'), 'sp', st.p, fetchStats);
+    $('s-by').onchange = function () { st.by = this.value; loadStats(); };
+    bindChips($('s-measure'), function (n, v) { st.measure = v; fetchStats(); });
+    fetchStats();
+  }
+
+  function statFilter() {
+    var st = state.stat, f = serverFilter(), r = periodRange(st.p);
+    f.from = r.from; f.to = r.to; f.by = st.by; f.measure = st.measure;
+    return f;
+  }
+  function fetchStats() {
+    var body = $('d-body');
+    if (body.firstChild && !body.querySelector('.loading')) body.style.opacity = '.45';   // muat ulang: tampilan lama tetap, tanpa lompat
+    call('apiStats', statFilter()).then(renderStats)
+      .catch(function (e) { body.style.opacity = ''; body.innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
+  }
+
+  function statValue(res, v) {
+    if (v == null) return '–';
+    if (res.measure === 'mttr') return mnt(v) + ' ' + t('mnt');
+    if (res.measure === 'downtime' || res.measure === 'mtbf') return jam(v) + ' ' + t('jam');
+    return String(v) + (res.by === 'sparepart' ? '' : '×');
+  }
+  function renderStats(res) {
+    syncClock(res.serverNowIso);
+    var body = $('d-body'), st = state.stat;
+    body.style.opacity = '';
+    var byLabel = t((STAT_BY.filter(function (b) { return b[0] === res.by; })[0] || ['', res.by])[1]);
+    var mLabel = { frek: res.by === 'sparepart' ? t('Jumlah dipakai') : t('Jumlah kerusakan'), mttr: 'MTTR', downtime: t('Downtime'), mtbf: 'MTBF' }[res.measure];
+    var k = res.total, time = res.by === 'hari' || res.by === 'bulan';
+    var html = '<div class="card"><div class="caps">' + esc(t('{m} per {b}', { m: mLabel, b: byLabel.toLowerCase() })) + '</div>' +
+      '<p class="small" style="margin:6px 0 0">' + esc(periodText(st.p)) + ' · ' + esc(t('{n} kerusakan · MTTR {m} mnt · downtime {d} jam', { n: k.n, m: mnt(k.mttr), d: jam(k.downtime) })) +
+      (k.mtbf != null ? ' · MTBF ' + esc(jam(k.mtbf)) + ' ' + esc(t('jam')) : '') + '</p>';
+    var note = res.pareto ? t('Biru = kelompok yang menyumbang ±80% total (Pareto). Mulai perbaikan dari atas.')
+      : { mttr: t('Rata-rata waktu aktif perbaikan per kerusakan.'), mtbf: t('Rata-rata jam operasi antar kerusakan. Paling atas = MTBF terendah (paling sering rusak).') }[res.measure] || '';
+    if (res.by === 'sparepart') note = t('Jumlah dipakai, dari sheet Pemakaian Sparepart. Biru = ±80% pemakaian.');
+    if (note && !time) html += '<p class="tiny muted" style="margin:4px 0 0">' + (res.pareto ? '<span class="swatch vital"></span> ' : '') + esc(note) + '</p>';
+    var vals = res.groups.map(function (g) { return g.value || 0; }), max = Math.max.apply(null, vals.concat([0])) || 1;
+    if (!res.groups.length || (time && !k.n)) {
+      html += '<div class="empty small">' + esc(t('Belum ada kerusakan selesai di periode ini.')) + '</div>';
+    } else if (time) {
+      var n = res.groups.length, lastI = n - 1, maxI = vals.indexOf(Math.max.apply(null, vals)), step = Math.ceil(n / 8);
+      html += '<div class="scroll-x"><div class="cols" id="s-cols" style="grid-template-columns:repeat(' + n + ',minmax(10px,1fr));min-width:' + Math.max(0, n * 13) + 'px">' +
+        res.groups.map(function (g, i) {
+          var lbl = res.by === 'hari' ? g.key.slice(8) : (LANG === 'zh' ? Number(g.key.slice(5)) + '月' : BULAN_ID[Number(g.key.slice(5)) - 1].slice(0, 3));
+          return '<button type="button" class="col" data-k="' + esc(g.key) + '" title="' + esc(g.label + ': ' + statValue(res, g.value) + ' · ' + t('{n}× rusak', { n: g.n })) + '">' +
+            '<span class="n">' + ((i === maxI || i === lastI) && g.value ? esc(res.measure === 'frek' ? String(g.value) : (res.measure === 'mttr' ? mnt(g.value) : jam(g.value))) : '') + '</span>' +
+            '<span class="ctrack"><span class="cfill viz" style="height:' + Math.round((g.value || 0) / max * 100) + '%"></span></span>' +
+            '<span class="lbl">' + (i % step === 0 || i === lastI ? esc(lbl) : '') + '</span></button>';
+        }).join('') + '</div></div><p class="small muted" id="s-cap" style="margin:8px 0 0">' + esc(t('Tap batang untuk melihat daftar pekerjaannya.')) + '</p>';
+    } else {
+      var prev = 0;
+      html += '<div class="rank">' + res.groups.map(function (g) {
+        var vital = res.pareto && prev < 80;
+        prev = g.cum || 0;
+        var sub = res.by === 'sparepart' ? t('{n} pekerjaan', { n: g.n })
+          : res.measure === 'mtbf' ? t('{n}× rusak · jam operasi {h}', { n: g.n, h: jam(g.jamOperasi) })
+          : (res.measure === 'frek' ? '' : t('{n}× rusak', { n: g.n }) + ' · ') + (res.measure === 'mttr' ? t('downtime {d} jam', { d: jam(g.downtime) }) : 'MTTR ' + mnt(g.mttr) + ' ' + t('mnt'));
+        if (res.pareto) sub = t('kumulatif {p}%', { p: String(g.cum).replace('.', LANG === 'zh' ? '.' : ',') }) + (sub ? ' · ' + sub : '');
+        var name = keyLabel(g.label);
+        return '<button type="button" class="stat-row" data-k="' + esc(g.key) + '" title="' + esc(name + ': ' + statValue(res, g.value) + ' · ' + sub) + '">' +
+          '<div class="row between small"><span class="grow clamp1">' + esc(name) + '</span><b>' + esc(statValue(res, g.value)) + '</b></div>' +
+          '<div class="htrack"><div class="hfill ' + (res.pareto ? (vital ? 'vital' : 'rest') : 'vital') + '" style="width:' + Math.max(2, Math.round((g.value || 0) / max * 100)) + '%"></div></div>' +
+          '<div class="tiny muted">' + esc(sub) + '</div></button>';
+      }).join('') + '</div>' + (res.more ? '<p class="tiny muted" style="margin:8px 0 0">' + esc(t('+{n} kelompok lain tidak ditampilkan. Persempit dengan filter.', { n: res.more })) + '</p>' : '');
+    }
+    (res.warn || []).forEach(function (w) { html += '<p class="tiny" style="color:var(--warn);margin:8px 0 0">' + esc(w) + '</p>'; });
+    body.innerHTML = html + '</div>';
+    [].forEach.call(body.querySelectorAll('[data-k]'), function (el) {
+      el.onclick = function () {
+        var g = res.groups.filter(function (x) { return x.key === el.getAttribute('data-k'); })[0];
+        if (g && g.n) openStatItems(g, res);
+      };
+    });
+  }
+
+  function openStatItems(g, res) {
+    var s = openSheet('<h2>' + esc(keyLabel(g.label)) + '</h2><p class="small muted">' + esc(periodText(state.stat.p) + ' · ' + statValue(res, g.value) +
+      (res.measure === 'frek' && res.by !== 'sparepart' ? '' : ' · ' + t('{n}× rusak', { n: g.n }))) + '</p><div id="si-list"><div class="loading">Memuat…</div></div>');
+    call('apiStatsItems', statFilter(), g.key).then(function (r) {
+      syncClock(r.serverNowIso);
+      var box = s.querySelector('#si-list');
+      box.innerHTML = (r.total > r.items.length ? '<p class="tiny muted">' + esc(t('(ditampilkan {n} terbaru)', { n: r.items.length })) + '</p>' : '') +
+        r.items.map(function (x) { return itemHtml(x, true); }).join('');
+      bindDetailLinks(box);
+    }).catch(function (e) { s.querySelector('#si-list').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
+  }
+
+  function fetchDashboard() {
+    var f = serverFilter();
+    f.periode = state.dash.periode;
+    $('d-body').innerHTML = '<div class="loading">Menghitung…</div>';
+    call('apiDashboard', f).then(renderDashboard).catch(function (e) { $('d-body').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
+  }
+
+  function tile(label, value, unit, sub) {
+    return '<div class="kpi"><span class="tiny muted">' + esc(label) + '</span><b>' + value + (unit ? '<span class="small"> ' + esc(unit) + '</span>' : '') + '</b>' +
+      (sub ? '<span class="tiny muted">' + sub + '</span>' : '') + '</div>';
+  }
+
+  /** Bar horizontal satu warna (satu seri → tanpa legend), nilai di ujung bar. */
+  /** "Stacking · L01", "Masalah → teks bebas": tiap bagian lewat kamus (teks bebas tetap). */
+  function keyLabel(k) { return String(k).split(/( · | → )/).map(function (p, i) { return i % 2 ? p : L(p); }).join(''); }
+  function rankList(title, items, opts) {
+    opts = opts || {};
+    if (!items.length) return '<div class="card"><div class="caps">' + esc(title) + '</div><div class="empty small">Belum ada data di periode ini.</div></div>';
+    // opts.byMinutes: panjang batang & angka kanan = total waktu (daftar "terlama"), selain itu jumlah kejadian.
+    var val = function (i) { return opts.byMinutes ? i.minutes : i.count; };
+    var max = Math.max.apply(null, items.map(val)) || 1;
+    return '<div class="card"><div class="caps">' + esc(title) + '</div>' + (opts.note ? '<p class="tiny muted" style="margin:4px 0 0">' + opts.note + '</p>' : '') +
+      '<div class="rank">' + items.map(function (i) {
+        var sub = opts.sub ? opts.sub(i) : '';
+        var name = keyLabel(i.key) + (i.name ? ' · ' + L(i.name) : ''), right = opts.byMinutes ? dur(i.minutes * 60000) : i.count + '×';
+        return '<div class="rank-row" title="' + esc(name + ': ' + right + (sub ? ' · ' + sub : '')) + '"><div class="row between small"><span class="grow clamp1">' + esc(name) + '</span>' +
+          '<b>' + esc(right) + '</b></div><div class="htrack"><div class="hfill" style="width:' + Math.max(2, Math.round(val(i) / max * 100)) + '%"></div></div>' +
+          (sub ? '<div class="tiny muted">' + esc(sub) + '</div>' : '') + '</div>';
+      }).join('') + '</div></div>';
+  }
+
+  /** Persen 1 desimal (koma untuk Bahasa Indonesia). */
+  function pct(v) {
+    if (v == null) return '–';
+    var s = (Math.round(v * 10) / 10).toFixed(1);
+    return (LANG === 'zh' ? s : s.replace('.', ',')) + ' %';
+  }
+
+  /**
+   * KPI bulan berjalan (2.6): Plant = 4 angka, project = baris dengan target & ✓ / ✗ (teks + warna). Admin: tutup bulan lalu.
+   * 2.6.9: Availability per factory × proses (running hour sekali per proses) + rata-rata semua proses.
+   */
+  function kpiCard(k) {
+    if (!k || !k.rows || !k.rows.length) return '';
+    var lv = function (l) { return k.rows.filter(function (x) { return x.level === l; }); };
+    var plant = lv('Plant')[0] || k.rows[0], proj = lv('Project'), proc = lv('Proses'), mLabel = monthLabel(k.bulan, k.label);
+    var verdict = function (x) {
+      if (!x.tercapai) return '';
+      return x.tercapai === '✓' ? '<span class="status ok">' + esc(t('✓ Tercapai')) + '</span>'
+        : '<span class="status over">' + esc(t('✗ {x} belum tercapai', { x: x.tercapai.replace(/^✗\s*/, '') })) + '</span>';
+    };
+    var tgt = function (v, ge, unit) { return v == null ? '' : ' <span class="muted">(' + esc(t(ge ? 'target ≥ {v} {u}' : 'target ≤ {v} {u}', { v: ge ? jam(v) : mnt(v), u: t(unit) })) + ')</span>'; };
+    var html = '<div class="card"><div class="caps">' + esc(t('KPI bulan ini · {m}', { m: mLabel })) + '</div>' +
+      '<p class="tiny muted" style="margin:4px 0 0">' + esc(t('Semua line. MTBF = (jam operasi − downtime) ÷ jumlah kerusakan. Angka bisa berubah sampai bulan ditutup admin.')) + '</p>' +
+      '<div class="kpis four" style="margin:10px 0 4px">' +
+      tile('MTTR', mnt(plant.mttr), plant.mttr == null ? '' : 'mnt', '') +
+      tile('MTBF', jam(plant.mtbf), plant.mtbf == null ? '' : 'jam', plant.kerusakan ? '' : esc(t('tanpa kerusakan'))) +
+      tile('Kerusakan', plant.kerusakan, '', '') +
+      tile('Downtime', jam(plant.downtime), 'jam', esc(t('jam operasi {h}', { h: jam(plant.jamOperasi) }))) + '</div>';
+    if (proj.length) {
+      html += '<div class="rank">' + proj.map(function (x) {
+        return '<div class="rank-row"><div class="row between"><b>' + esc(x.nama) + '</b>' + verdict(x) + '</div>' +
+          '<div class="small">MTTR <b>' + mnt(x.mttr) + '</b> ' + esc(t('mnt')) + tgt(x.targetMttr, false, 'mnt') +
+          ' · MTBF <b>' + jam(x.mtbf) + '</b> ' + esc(t('jam')) + tgt(x.targetMtbf, true, 'jam') + '</div>' +
+          '<div class="tiny muted">' + esc(t('{n}× rusak · downtime {d} jam · jam operasi {h}', { n: x.kerusakan, d: jam(x.downtime), h: jam(x.jamOperasi) })) + '</div></div>';
+      }).join('') + '</div>';
+    }
+    if (proc.length) {
+      var avg = proc.filter(function (x) { return x.kunci === 'RATA'; })[0], grp = proc.filter(function (x) { return x.kunci !== 'RATA'; });
+      var label = function (x) { var p = String(x.kunci).split('|'); return p[0] + ' · ' + (p[1] ? L(p[1]) : t('(tanpa proses)')); };
+      html += '<div style="margin-top:14px"><div class="row between"><span class="caps">' + esc(t('Availability per proses')) + '</span>' +
+        (avg ? '<b>' + esc(t('Rata-rata {v}', { v: pct(avg.availability) })) + '</b>' : '') + '</div>' +
+        '<p class="tiny muted" style="margin:4px 0 0">' + esc(t('(Running hour − downtime) ÷ running hour × 100. Running hour = hari operasi × jam per hari, dihitung sekali per proses.')) + '</p>' +
+        '<div class="rank">' + grp.map(function (x) {
+          var v = x.availability == null ? 0 : x.availability;
+          return '<div class="rank-row"><div class="row between small"><span class="grow clamp1">' + esc(label(x)) + '</span><b>' + esc(pct(x.availability)) + '</b></div>' +
+            '<div class="htrack"><div class="hfill" style="width:' + Math.max(2, Math.round(v)) + '%"></div></div>' +
+            '<div class="tiny muted">' + esc(t('{n}× rusak · downtime {d} jam · running hour {h} jam', { n: x.kerusakan, d: jam(x.downtime), h: jam(x.jamOperasi) })) +
+            (x.lebih ? ' · <span style="color:var(--warn)">' + esc(t('downtime lebih besar dari running hour (cek pending lama)')) + '</span>' : '') + '</div></div>';
+        }).join('') + '</div></div>';
+    }
+    (k.warn || []).forEach(function (w) { html += '<p class="tiny" style="color:var(--warn);margin:8px 0 0">' + esc(w) + '</p>'; });
+    var au = k.audit;
+    if (au && (au.cancelLong || au.manual)) {
+      html += '<p class="tiny muted" style="margin:8px 0 0">' + [
+        au.cancelLong ? esc(t('{n} cancel setelah >30 menit kerja (cek alasannya di Riwayat)', { n: au.cancelLong })) : '',
+        au.manual ? esc(t('{n} dari {m} pekerjaan selesai = input manual', { n: au.manual, m: au.done })) : ''].filter(String).join(' · ') + '</p>';
+    }
+    var p = k.prev;
+    if (p) {
+      var pl = monthLabel(p.bulan, p.label);
+      html += '<div style="margin-top:12px">' + (p.closedIso
+        ? '<p class="tiny muted" style="margin:0">' + esc(t('{m} sudah ditutup {d} oleh {n}.', { m: pl, d: fmtShort(p.closedIso), n: p.closedBy === 'otomatis' ? t('otomatis') : p.closedBy })) +
+          ' <button type="button" class="link" id="d-close" data-ym="' + esc(p.bulan) + '" data-label="' + esc(pl) + '" data-re="1">' + esc(t('Tutup ulang')) + '</button></p>'
+        : '<div class="alert warn" style="margin-bottom:10px">' + esc(t('{m} belum ditutup.', { m: pl })) +
+          (k.autoDay ? ' ' + esc(t('Ditutup otomatis tanggal {d} bila tidak ada review.', { d: k.autoDay })) : '') +
+          (p.reviews ? ' <b>' + esc(t('{n} pekerjaan bulan itu masih menunggu review', { n: p.reviews })) + '</b> — ' + esc(t('sebaiknya direview dulu.')) : '') + '</div>' +
+          '<button type="button" class="btn navy" id="d-close" data-ym="' + esc(p.bulan) + '" data-label="' + esc(pl) + '">' + esc(t('Tutup bulan {m}', { m: pl })) + '</button>') + '</div>';
+    }
+    return html + '</div>';
+  }
+
+  function closeMonth(btn) {
+    var ym = btn.getAttribute('data-ym'), label = btn.getAttribute('data-label'), re = btn.getAttribute('data-re');
+    var s = openSheet('<h2>' + esc(t('Tutup bulan {m}', { m: label })) + '</h2><p class="small">' +
+      esc(t('Angka KPI {m} dikunci: edit data lama sesudah ini tidak mengubahnya lagi. Tab KPI di Google Sheet ikut diperbarui.', { m: label })) + '</p>' +
+      (re ? '<p class="small muted">' + esc(t('Sudah pernah ditutup: angka lama diganti angka sekarang, dan keduanya dicatat di Log.')) + '</p>' : '') +
+      '<button class="btn navy" id="tb-ok">' + esc(re ? t('Tutup ulang') : t('Tutup bulan')) + '</button>');
+    s.querySelector('#tb-ok').onclick = function () {
+      var b = this;
+      busy(b, true, t('Memproses…'));
+      call('apiTutupBulan', ym).then(function (res) {
+        closeSheet();
+        toast(t('{m} ditutup.', { m: label }) + (res.reviews ? ' ' + t('{n} pekerjaan masih menunggu review: tutup ulang setelah direview.', { n: res.reviews }) : ''), 'ok');
+        fetchDashboard();
+      }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+    };
+  }
+
+  function renderDashboard(d) {
+    syncClock(d.serverNowIso);
+    var k = d.kpi;
+    var html = '<div class="kpis four">' +
+      tile(t('MTTR ({x})', { x: L(d.mttrTypes) }), mnt(k.mttr), k.mttr == null ? '' : 'mnt', esc(t('{n} pekerjaan dihitung', { n: k.mttrN }))) +
+      tile('Corrective selesai', k.corrective, '', esc(t('{d} total aktif', { d: dur(k.activeMin * 60000) }))) +
+      tile('Sedang berjalan', k.openNow, '', esc(t('{n} pending', { n: k.pendingNow })) + (k.overdueNow ? ' · <span style="color:var(--danger);font-weight:800">' + esc(t('{n} lewat tenggat', { n: k.overdueNow })) + '</span>' : '')) +
+      tile('Downtime stop line', jam(k.downtimeMin / 60), 'jam', esc(t('{n} pekerjaan stop line', { n: k.stopN }))) +
+      '</div>';
+    html += kpiCard(d.kpiMonth);
+
+    // Project
+    if (d.projects.length) {
+      html += '<div class="caps" style="margin:4px 4px 8px">Status project</div><div class="proj-grid">' + d.projects.map(function (p) {
+        var health = p.health === 'ok' ? '<span class="status ok">✓ Sesuai target</span>' : (p.health === 'over' ? '<span class="status over">▲ Di atas target</span>' : '');
+        return '<div class="card proj"><div class="row between"><b style="font-size:17px">' + esc(p.battery) + '</b><span class="tag-lite">' + esc(p.fase || 'Fase belum diisi') + '</span></div>' +
+          '<div class="tiny muted">' + esc(p.factoryName || '') + (p.catatan ? ' · ' + esc(p.catatan) : '') + '</div>' +
+          '<div class="row between" style="margin-top:10px"><div><span class="tiny muted">MTTR</span><div><b style="font-size:22px">' + mnt(p.mttr) + '</b><span class="small"> mnt</span></div></div>' +
+          '<div style="text-align:right"><span class="tiny muted">Target</span><div><b>' + (p.target ? esc(t('{n} mnt', { n: p.target })) : '–') + '</b></div></div></div>' +
+          (health ? '<div style="margin-top:6px">' + health + '</div>' : '') +
+          '<div class="tiny muted" style="margin-top:6px">' + esc(t('{a} dihitung · {b} berjalan · {c} pending', { a: p.n, b: p.openNow, c: p.pendingNow }) + (p.overdueNow ? ' · ' + t('{n} lewat', { n: p.overdueNow }) : '')) + '</div></div>';
+      }).join('') + '</div>';
+    }
+
+    // Tren 12 minggu (satu seri: jumlah selesai)
+    var wmax = Math.max(1, Math.max.apply(null, d.weeks.map(function (w) { return w.count; })));
+    var last = d.weeks[d.weeks.length - 1];
+    html += '<div class="card"><div class="caps">Maintenance selesai per minggu (12 minggu)</div>' +
+      '<div class="cols" id="d-cols">' + d.weeks.map(function (w, i) {
+        var isMax = w.count === wmax && w.count > 0, isLast = i === d.weeks.length - 1;
+        return '<button type="button" class="col" data-i="' + i + '" title="' + esc(t('Minggu {w}: {n} selesai · MTTR {m} mnt', { w: w.label, n: w.count, m: mnt(w.mttr) })) + '">' +
+          '<span class="n">' + ((isMax || isLast) && w.count ? w.count : '') + '</span><span class="ctrack"><span class="cfill" style="height:' + Math.round(w.count / wmax * 100) + '%"></span></span>' +
+          '<span class="lbl">' + (i % 3 === 2 || isLast ? esc(w.label) : '') + '</span></button>';
+      }).join('') + '</div><p class="small muted" id="d-cols-cap" style="margin:8px 0 0">' + t('Minggu {w}: <b>{n}</b> selesai · MTTR {m} mnt. Tap batang untuk detail.', { w: esc(last.label), n: last.count, m: mnt(last.mttr) }) + '</p></div>';
+
+    var mttrSub = function (i) { return i.mttr != null ? t('MTTR {m} mnt', { m: Math.round(i.mttr) }) : ''; };
+    var freqSub = function (i) { return t('{d} total', { d: dur(i.minutes * 60000) }) + (i.mttr != null ? ' · ' + mttrSub(i) : ''); };
+    var longSub = function (i) { return t('{n}× rusak', { n: i.count }) + (i.mttr != null ? ' · ' + t('rata-rata {m} mnt', { m: Math.round(i.mttr) }) : ''); };
+    html += rankList('5 line tersering rusak', d.linesFreq || [], {
+      note: t('Jumlah kerusakan di periode ini (termasuk yang masih berjalan). Paling menurunkan MTBF.'), sub: freqSub
+    });
+    html += rankList('5 line terlama diperbaiki', d.linesLong || [], {
+      note: t('Total waktu aktif perbaikan di periode ini. Paling menaikkan MTTR.'), sub: longSub, byMinutes: true
+    });
+    html += rankList('Masalah terbanyak', d.problems, { sub: mttrSub });
+    html += rankList('Jenis kerusakan', d.jenis || [], { note: t('Pekerjaan selesai di periode ini.'), sub: mttrSub });
+    html += rankList('Sparepart paling sering dipakai', d.parts || [], {
+      note: t('Berapa kali dipakai (jumlah pekerjaan). Data dari sheet <b>Pemakaian Sparepart</b>.'),
+      sub: function (i) { return t('total {n}', { n: i.qty }) + ' · ' + L(i.jenis); }
+    });
+
+    html += '<div class="card"><div class="caps">Teknisi</div>' + (d.techs.length ? '<div class="table-wrap"><table class="tbl"><thead><tr><th>Teknisi</th><th>Selesai</th><th>MTTR</th><th>Total aktif</th></tr></thead><tbody>' +
+      d.techs.map(function (x) {
+        return '<tr><td>' + esc(x.key) + '</td><td>' + x.count + '</td><td>' + (x.mttr != null ? esc(t('{n} mnt', { n: mnt(x.mttr) })) : '–') + '</td><td>' + esc(dur(x.minutes * 60000)) + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty small">Belum ada data di periode ini.</div>') + '</div>';
+
+    if (d.others.length) {
+      html += rankList('Isian "Lainnya" terbanyak', d.others, {
+        note: t('Yang sering muncul sebaiknya dijadikan pilihan tetap di sheet <b>Pilihan</b> supaya teknisi cukup tap.')
+      });
+    }
+    if (isAdmin()) {
+      html += '<div class="card"><div class="caps">Laporan format Excel</div><p class="small muted" style="margin:6px 0 12px">' +
+        t('Tab <b>Laporan {y}</b> & <b>Rekap</b> di Google Sheet diperbarui langsung setiap aksi. Tekan tombol ini setelah mengedit sheet Maintenance atau Format Laporan secara manual.', { y: new Date(serverNow()).getFullYear() }) + ' ' +
+        t('Tab <b>TPM &lt;project&gt;</b> (format Excel manager, 中文 + English) diperbarui tiap malam dan saat tombol ini ditekan.') + '</p>' +
+        '<button class="btn ghost" id="d-report">Perbarui Laporan, Rekap, TPM & KPI</button><div id="d-report-out"></div></div>';
+    }
+    if (d.warnings.length) {
+      html += '<div class="card"><div class="caps" style="color:var(--warn)">' + t('Perlu dicek di Google Sheet ({n})', { n: d.warnings.length }) + '</div><ul class="small" style="margin:10px 0 0;padding-left:18px">' +
+        d.warnings.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') + '</ul></div>';
+    }
+    $('d-body').innerHTML = html;
+    if ($('d-close')) $('d-close').onclick = function () { closeMonth(this); };
+    if ($('d-report')) $('d-report').onclick = function () {
+      var b = this;
+      busy(b, true, t('Membuat laporan…'));
+      call('apiBuildReports').then(function (res) {
+        busy(b, false);
+        var tpm = (res.tpm || []).map(function (s) { return s.sheet + ' (' + s.rows + ')'; }).join(', ');
+        $('d-report-out').innerHTML = '<p class="small" style="margin:10px 0 0">' + esc(t('✓ {l} ({n} baris) & {r} diperbarui.', { l: res.laporan, n: res.rows, r: res.rekap })) + ' ' +
+          (tpm ? esc(t('✓ TPM: {s}.', { s: tpm })) + ' ' : '') +
+          (res.tpmError ? '<span style="color:var(--warn)">' + esc(t('TPM gagal: {e}', { e: res.tpmError })) + '</span> ' : '') +
+          (res.tpmWarn ? '<span style="color:var(--warn)">' + esc(res.tpmWarn) + '</span> ' : '') +
+          (res.tpmUntranslated ? esc(t('{n} teks belum diterjemahkan (kuota Google); tekan lagi nanti.', { n: res.tpmUntranslated })) + ' ' : '') +
+          (res.kpi ? esc(t('✓ {s} diperbarui.', { s: res.kpi })) + ' ' : '') +
+          (res.kpiError ? '<span style="color:var(--warn)">' + esc(t('KPI gagal: {e}', { e: res.kpiError })) + '</span> ' : '') +
+          '<a href="' + esc(res.spreadsheetUrl) + '" target="_blank" style="color:var(--accent)">Buka Google Sheet</a></p>';
+      }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+    };
+    var cols = document.querySelectorAll('#d-cols .col');
+    for (var i = 0; i < cols.length; i++) {
+      cols[i].onclick = function () {
+        var w = d.weeks[Number(this.getAttribute('data-i'))];
+        for (var j = 0; j < cols.length; j++) cols[j].classList.toggle('sel', cols[j] === this);
+        $('d-cols-cap').innerHTML = t('Minggu {w}: <b>{n}</b> selesai · MTTR {m} mnt', { w: esc(w.label), n: w.count, m: mnt(w.mttr) });
+      };
+    }
+  }
+
+  // ---------- PANDUAN (teks di Panduan.html + catatan admin dari sheet Catatan Panduan) ----------
+  function openGuide() {
+    closeSheet();
+    markSeen();
+    setView('guide');
+    renderGuide();
+  }
+  function renderGuide() {
+    var tpl = function (id) { var el = (LANG === 'zh' && document.getElementById(id + '-zh')) || document.getElementById(id); return el ? el.innerHTML : ''; };
+    var sec = isAdmin() ? (state.guideSec || 'teknisi') : 'teknisi';
+    var notes = (state.boot.notes || []).filter(function (n) { return sec === 'admin' ? n.untuk !== 'Teknisi' : n.untuk !== 'Admin'; });
+    var rencana = M().rencana || [];
+    var html = '<button class="back" id="g-back">← Kembali</button><div class="hello"><div><div class="hi">' + esc(t('{a} · versi {v}', { a: M().appName, v: M().version })) +
+      '</div><h1>Panduan</h1></div></div>' +
+      (isAdmin() ? '<div style="margin:0 0 14px">' + chips('gsec', [{ value: 'teknisi', label: 'Untuk teknisi' }, { value: 'admin', label: 'Untuk admin' }], { selected: sec, big: true }) + '</div>' : '') +
+      '<div class="card guide">' + tpl(sec === 'admin' ? 'guide-admin' : 'guide-teknisi') + '</div>' +
+      (notes.length ? '<div class="card guide" data-trbox><div class="caps">Catatan lokal (dari admin)</div>' + notes.map(function (n) {
+        return '<details class="g"><summary data-tr>' + esc(n.judul || 'Catatan') + '</summary><div class="small" style="white-space:pre-line" data-tr>' + esc(n.isi) + '</div></details>';
+      }).join('') + '</div>' : '') +
+      (rencana.length ? '<div class="card guide" data-trbox><div class="caps">Rencana update</div>' + rencana.map(function (r) {
+        return '<details class="g"><summary><span data-tr>' + esc(r.judul) + '</span><span class="tag-lite"><span>' + esc(r.status) + '</span>' + (r.target ? ' · <span data-tr>' + esc(r.target) + '</span>' : '') + '</span></summary>' +
+          '<div class="small" style="white-space:pre-line" data-tr>' + esc(r.isi) + '</div></details>';
+      }).join('') + '<p class="tiny muted" style="margin:10px 0 0">' + t('Punya ide? Kirim lewat <b>💡 Saran</b> di Beranda.') + '</p></div>' : '') +
+      '<div class="card guide">' + tpl('guide-baru') + '</div>';
+    $('view-guide').innerHTML = html;
+    var tbs = $('view-guide').querySelectorAll('[data-trbox]');
+    for (var k = 0; k < tbs.length; k++) trButton(tbs[k]);
+    var vs = $('view-guide').querySelectorAll('[data-v]');
+    for (var i = 0; i < vs.length; i++) vs[i].textContent = M().version;
+    bindChips($('view-guide'), function (n, v) { state.guideSec = v; renderGuide(); });
+    $('g-back').onclick = function () {
+      if (state.lineView && state.tab === 'home') { setView('line'); renderLine(); } else showTab(state.tab);
+    };
+  }
+
+  // ---------- SARAN (teknisi → admin) ----------
+  function openSaran() {
+    closeSheet();
+    setView('saran');
+    $('view-saran').innerHTML = '<div class="loading">Memuat…</div>';
+    call('apiSaranList').then(renderSaran).catch(function (e) { $('view-saran').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
+  }
+  function saranCard(s, isAdm) {
+    var showTr = isAdm && s.terjemahan;
+    return '<div class="card saran" data-sid="' + esc(s.id) + '" data-trbox><div class="row between"><span class="tag-lite">' + esc(s.kategori) + '</span>' +
+      '<span class="pill sr-' + esc(s.status) + '">' + esc(s.status) + '</span></div>' +
+      '<div class="small muted" style="margin:6px 0">' + esc(s.nama) + ' · ' + esc(fmtShort(s.whenIso)) + '</div>' +
+      '<div style="white-space:pre-line"' + (showTr ? '' : ' data-tr') + '>' + esc(s.isi) + '</div>' +
+      (showTr ? '<div class="small muted" style="margin-top:6px;white-space:pre-line">' + t('Terjemahan: {x}', { x: esc(s.terjemahan) }) + '</div>' : '') +
+      (s.tanggapan ? '<div class="reply"><b>' + esc(s.oleh || 'Admin') + ':</b> <span data-tr>' + esc(s.tanggapan) + '</span></div>' : '') +
+      (isAdm ? '<div class="stack" style="margin-top:12px">' + chips('sst', state.saran.statuses, { selected: s.status }) +
+        '<textarea data-f="tanggapan" maxlength="1000" placeholder="Tanggapan untuk teknisi (opsional)">' + esc(s.tanggapan) + '</textarea>' +
+        '<button class="btn ghost" data-sr-save>Simpan tanggapan</button></div>' : '') + '</div>';
+  }
+  function renderSaran(res) {
+    state.saran = res;
+    var kat = state.saranKat && res.kategori.indexOf(state.saranKat) !== -1 ? state.saranKat : res.kategori[0];
+    var html = '<button class="back" id="sr-back">← Beranda</button><div class="hello"><div><div class="hi">' + (res.isAdmin ? 'Semua saran teknisi' : 'Untuk admin') +
+      '</div><h1>Saran</h1></div></div>' +
+      '<div class="card stack" id="sr-form"><div class="caps">Kirim saran</div><p class="small muted" style="margin:4px 0 0">Apa yang perlu ditambah atau diperbaiki di aplikasi? Boleh pakai bahasa apa saja.</p>' +
+      chips('skat', res.kategori, { selected: kat }) +
+      '<textarea id="sr-isi" maxlength="1000" placeholder="Tulis saran…"></textarea><button class="btn" id="sr-send">Kirim saran</button></div>' +
+      '<div class="caps" style="margin:4px 4px 8px">' + t(res.isAdmin ? 'Semua saran ({n})' : 'Saran saya ({n})', { n: res.items.length }) + '</div>' +
+      (res.items.length ? res.items.map(function (s) { return saranCard(s, res.isAdmin); }).join('') : '<div class="empty">Belum ada saran.</div>');
+    $('view-saran').innerHTML = html;
+    $('sr-back').onclick = function () { showTab('home'); };
+    bindChips($('sr-form'), function (n, v) { state.saranKat = v; });
+    $('sr-send').onclick = function () {
+      var b = this, isi = $('sr-isi').value.trim();
+      if (!isi) { toast('Tulis saranmu dulu.', 'err'); $('sr-isi').focus(); return; }
+      busy(b, true, t('Mengirim…'));
+      call('apiSaranKirim', { kategori: chipVal($('sr-form'), 'skat'), isi: isi }).then(function (r) {
+        toast('Terima kasih! Saran terkirim ke admin.', 'ok');
+        renderSaran(r);
+        refresh();
+      }).catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+    };
+    var cards = $('view-saran').querySelectorAll('.card.saran');
+    for (var i = 0; i < cards.length; i++) {
+      (function (card) {
+        bindChips(card);
+        trButton(card);
+        var save = card.querySelector('[data-sr-save]');
+        if (save) save.onclick = function () {
+          var b = this;
+          busy(b, true, t('Menyimpan…'));
+          call('apiSaranTanggapi', card.getAttribute('data-sid'), { status: chipVal(card, 'sst'), tanggapan: card.querySelector('[data-f="tanggapan"]').value })
+            .then(function (r) { toast('Tanggapan tersimpan.', 'ok'); renderSaran(r); refresh(); })
+            .catch(function (e) { busy(b, false); toast(cleanErr(e), 'err'); });
+        };
+      })(cards[i]);
     }
   }
 
   // ---------- QR (Admin) ----------
+  /** Library QR hanya dimuat saat halaman QR dibuka (tidak memperlambat teknisi). */
+  var qrLibPromise = null;
+  function loadQrLib() {
+    if (window.QRCode) return Promise.resolve();
+    if (qrLibPromise) return qrLibPromise;
+    qrLibPromise = new Promise(function (resolve) {
+      var sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+      sc.onload = resolve;
+      sc.onerror = function () { qrLibPromise = null; resolve(); }; // tanpa library: URL ditampilkan sebagai teks
+      document.head.appendChild(sc);
+    });
+    return qrLibPromise;
+  }
+
   function loadQr() {
     $('view-qr').innerHTML = '<div class="loading">Memuat line…</div>';
-    call('apiListLinesForQr').then(function (res) {
+    Promise.all([call('apiListLinesForQr'), loadQrLib()]).then(function (all) {
+      var res = all[0];
       var base = res.baseUrl || '';
-      var devWarn = /\/dev$/.test(base) ? '<div class="alert warn">URL saat ini adalah /dev (hanya untuk editor). Buka dari URL deployment /exec sebelum mencetak QR.</div>' : '';
-      $('view-qr').innerHTML =
-        '<div class="card no-print stack"><h2>QR code per line</h2>' +
-        '<p class="small muted">Tambah line baru di sheet <b>Lines</b>, lalu refresh halaman ini. Setiap QR berisi URL web app + <code>?line=ID</code>.</p>' +
-        devWarn + '<button class="btn secondary" onclick="window.print()">Cetak</button></div>' +
-        '<div class="qr-grid">' + res.lines.map(function (l, i) {
-          var url = base + '?line=' + encodeURIComponent(l.lineId);
-          return '<div class="qr-card"><b>' + esc(l.lineId) + '</b><div class="small">' + esc(l.lineName) + '</div>' +
-            '<div class="qr" id="qr-' + i + '"></div><div class="small">' + esc(l.machine) + ' · ' + esc(l.location) + '</div>' +
-            (l.active ? '' : '<div class="small" style="color:#b42318">NONAKTIF</div>') + '</div>';
-        }).join('') + '</div>';
-      res.lines.forEach(function (l, i) {
-        var url = base + '?line=' + encodeURIComponent(l.lineId);
-        if (window.QRCode) new QRCode($('qr-' + i), { text: url, width: 160, height: 160, correctLevel: QRCode.CorrectLevel.M });
-        else $('qr-' + i).innerHTML = '<div class="small" style="word-break:break-all">' + esc(url) + '</div>';
+      var devWarn = /\/dev$/.test(base) ? '<div class="alert warn">URL saat ini /dev (hanya untuk editor). Buka dari URL deployment /exec sebelum mencetak QR.</div>' : '';
+      var qrs = [];
+      var html = '<button class="back no-print" id="qr-back">← Dashboard</button><div class="hello no-print"><div><div class="hi">Admin</div><h1>QR Line</h1></div>' +
+        '<button class="btn" style="width:auto" onclick="window.print()">Cetak</button></div>' + devWarn +
+        '<p class="small muted no-print" style="margin:0 4px 14px">' + t('Satu QR per baris sheet <b>Lines</b> (satu unit kerja). QR mesin lama tetap bisa dipakai: membuka line-nya.') + '</p>' +
+        '<div class="qr-grid">';
+      res.lines.forEach(function (l) {
+        qrs.push({ url: base + '?line=' + encodeURIComponent(l.id) });
+        html += '<div class="qr-card"><b style="font-size:18px">' + esc(l.id) + '</b><div class="small">' + esc(l.name) + '</div>' +
+          '<div class="qr" id="qr-' + (qrs.length - 1) + '"></div><div class="small muted">' + esc([l.factoryName, l.proses, l.area].filter(String).join(' · ')) + '</div>' +
+          '<div class="tiny muted notr">Scan: status & mulai kerja<br>扫码：查看状态 / 开始维修</div>' + (l.active ? '' : '<div class="small notr" style="color:var(--danger)">NONAKTIF · 已停用</div>') + '</div>';
       });
-    }).catch(function (e) { flash(cleanErr(e)); });
+      html += '</div>';
+      $('view-qr').innerHTML = html;
+      $('qr-back').onclick = function () { showTab('dashboard'); };
+      qrs.forEach(function (q, i) {
+        if (window.QRCode) new QRCode($('qr-' + i), { text: q.url, width: 150, height: 150, correctLevel: QRCode.CorrectLevel.M });
+        else $('qr-' + i).innerHTML = '<div class="small" style="word-break:break-all">' + esc(q.url) + '</div>';
+      });
+    }).catch(function (e) { $('view-qr').innerHTML = '<div class="alert err">' + esc(cleanErr(e)) + '</div>'; });
   }
+
+  boot();
 })();
 </script>

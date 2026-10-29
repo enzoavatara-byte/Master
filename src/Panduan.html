@@ -1,0 +1,333 @@
+<!--
+  Teks halaman Panduan (tombol ? di Beranda / Dashboard).
+  Ubah teks di sini jika fitur berubah. Catatan khusus per factory → sheet "Catatan Panduan" (tanpa ubah kode).
+  Template "-zh" = versi 中文 (dipakai jika bahasa aplikasi 中文). Ubah keduanya bersamaan.
+-->
+<template id="guide-teknisi">
+  <h3>Ingat 4 langkah</h3>
+  <ol>
+    <li><b>Scan</b> QR di line. QR rusak → <b>Cari line</b> (ketik ID, nama, atau proses).</li>
+    <li><b>MULAI</b>: cek <b>stop line</b> (Ya = line berhenti), tekan MULAI. Tidak perlu pilih mesin.</li>
+    <li>Kerjakan. Tinggal sebentar → <b>Pause</b>. Belum bisa selesai → <b>Pending</b>.</li>
+    <li><b>SELESAI</b>: jenis kerusakan → masalah → penyebab → penanganan → <b>PIC tambahan</b> (teman yang ikut) → <b>sparepart</b>.</li>
+  </ol>
+  <p class="small muted">MTTR hanya menghitung waktu <b>aktif</b>. Waktu pause & pending tidak dihitung. Tekan MULAI saat mulai memperbaiki, SELESAI saat mesin jalan lagi: angka ini masuk KPI bulanan.</p>
+
+  <details class="g"><summary>Tombol & artinya</summary><div><ul>
+    <li><b>Pause</b>: istirahat / menunggu sebentar. Timer aktif berhenti.</li>
+    <li><b>Pending</b>: belum selesai (menunggu part, dll). Muncul di tab Pending; teknisi lain bisa melanjutkan dengan scan QR line yang sama.</li>
+    <li><b>Cancel</b>: salah input / masalah hilang sendiri. Masuk review admin.</li>
+    <li><b>PIC tambahan</b> (saat Selesai): tap nama teknisi lain yang ikut mengerjakan. Nama mereka ikut masuk laporan & TPM. Boleh lebih dari satu, boleh kosong.</li>
+    <li><b>Masih lanjut</b>: muncul setelah 3 jam. Tidak dijawab sampai 4 jam → Abandoned.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Pasang di layar utama HP (seperti aplikasi)</summary><div><ol>
+    <li>Buka aplikasi dari <b>link resmi</b> (sama dengan QR line), tunggu sampai Beranda tampil.</li>
+    <li><b>Android (Chrome)</b>: menu <b>⋮</b> kanan atas → <b>Tambahkan ke layar utama</b> → Tambahkan.</li>
+    <li><b>iPhone (Safari)</b>: tombol <b>Bagikan</b> (kotak dengan panah) → <b>Tambah ke Layar Utama</b> → Tambah.</li>
+  </ol><p class="small muted">Ikon terbuka di browser (bukan aplikasi Play Store). Login Google tetap dibutuhkan; pakai akun yang terdaftar.</p></div></details>
+
+  <details class="g"><summary>Sinyal lemah / putus</summary><div><ul>
+    <li>Isian Selesai, Pending & Cancel <b>tersimpan di HP</b> sambil diketik. Sinyal putus atau aplikasi tertutup → buka lagi form yang sama, isian kembali.</li>
+    <li>Muncul "Sinyal terputus" → <b>ketuk lagi</b> saat sinyal ada. Aplikasi tidak mencatat dua kali; bila ternyata sudah tersimpan, muncul "Sudah tersimpan sebelumnya".</li>
+    <li>Tombol bertulisan "Masih memproses…" → tunggu, jangan tutup aplikasi.</li>
+    <li>Pekerjaan yang sama sekali tidak sempat dicatat → kabari admin (Input Manual).</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Sparepart (cara cepat)</summary><div><ol>
+    <li>Tidak ganti apa-apa → <b>Tidak ada pergantian</b>.</li>
+    <li>Ganti part → <b>Ada part</b>, lalu <b>ketik di kolom cari</b> (mis. "6205") <i>atau</i> pilih Jenis → Nama → Model.</li>
+    <li>Atur jumlah dengan <b>− / +</b>. Salah pilih → <b>×</b>.</li>
+    <li>Tidak ada di daftar → <b>Tambah manual</b>, lalu kabari admin supaya dimasukkan ke katalog.</li>
+  </ol><p class="small muted">Jenis sparepart otomatis mengikuti jenis kerusakan yang dipilih.</p></div></details>
+
+  <details class="g"><summary>Stop line</summary><div><ul>
+    <li><b>Ya</b> = line berhenti produksi selama perbaikan. Otomatis <b>Ya</b>; ganti ke <b>Tidak</b> jika line tetap jalan.</li>
+    <li>Durasi stop line di laporan = jam selesai − jam mulai. Ini juga <b>downtime</b> di KPI.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Bahasa, terjemahan & saran</summary><div><ul>
+    <li>Tombol <b>中</b> / <b>ID</b> di kanan atas Beranda = ganti bahasa tampilan (Indonesia / 中文). Tersimpan di HP ini.</li>
+    <li>Teks yang ditulis teknisi lain (catatan, pekerjaan dilakukan, isian "Lainnya") tetap bahasa aslinya → tekan <b>🌐 Terjemahkan</b>.</li>
+    <li>Boleh menulis dalam bahasa apa saja. Laporan tetap menyimpan teks asli.</li>
+    <li><b>💡 Saran</b> di Beranda: usul fitur / pilihan baru ke admin, lalu lihat status & tanggapannya.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Kekurangan yang perlu diketahui</summary><div><ul>
+    <li>Butuh internet. Sinyal hilang saat menekan tombol → tunggu, lalu coba lagi.</li>
+    <li>Satu teknisi hanya bisa punya <b>satu</b> pekerjaan terbuka, dan satu line hanya bisa punya <b>satu</b> pekerjaan terbuka. Line sedang dikerjakan orang lain → bantu dia, lalu dia menambahkan Anda sebagai <b>PIC tambahan</b>.</li>
+    <li>Data yang sudah disimpan tidak bisa diedit dari aplikasi. Salah isi → lapor admin.</li>
+    <li>Belum bisa melampirkan foto.</li>
+    <li>Terjemahan (tombol <b>🌐 Terjemahkan</b>) memakai Google Translate: istilah teknis kadang kurang tepat. Teks asli tetap tersimpan.</li>
+    <li>HP/browser login <b>beberapa akun Google</b> → aplikasi bisa menolak atau muncul "Akun Google tidak cocok" (bug Google). Pakai Incognito, atau satu browser khusus akun kerja.</li>
+  </ul></div></details>
+</template>
+
+<template id="guide-admin">
+  <h3>Semua diatur dari Google Sheet</h3>
+  <p class="small">Edit sheet → muat ulang aplikasi → perubahan terlihat. Tidak perlu mengubah kode.</p>
+  <p class="small">Spreadsheet baru: baris abu-abu <b>CONTOH</b> (Aktif = Contoh) di Factory, Projects, Lines, Sparepart hanya contoh cara mengisi dan diabaikan aplikasi — timpa (lalu Aktif = Ya) atau hapus. Ingin melihat data per Line / Status: <b>Data → Create filter view</b>, jangan urutkan tab Maintenance (bila terlanjur, data tetap benar; Dashboard mengingatkan cara mengembalikan urutannya). Dashboard menulis <b>Sistem: …</b> bila pembaruan malam / trigger gagal.</p>
+
+  <details class="g" open><summary>Mau ubah apa? → sheet mana</summary><div><ul>
+    <li><b>Users</b>: tambah teknisi (Email, Nama, Peran Teknisi/Admin, Aktif, <b>Bahasa</b> id/zh). Nama ini yang tampil di laporan.</li>
+    <li><b>Lines</b>: satu baris = satu unit = satu QR (= Station di laporan, Machine di TPM). Mesin yang perlu dicatat sendiri → baris sendiri (mis. L01-W "Assy Cell 1 - Welding"). <b>Proses</b> = grup di atas line. <b>Nama (中文)</b> / <b>Nama (English)</b> untuk TPM. Jangan ganti Line ID yang sudah dipakai.</li>
+    <li><b>Projects</b>: baterai per factory, <b>Target MTTR (menit)</b> & <b>Target MTBF (jam)</b> untuk KPI.</li>
+    <li><b>Sparepart</b>: katalog Jenis → Nama → Model. Aktif = Tidak untuk menyembunyikan. Daftar dari gudang (ribuan baris) boleh di-paste sekaligus; kode part ditulis di kolom Model (mis. <i>E3Z-D61 · 100234</i>) supaya bisa dicari teknisi.</li>
+    <li><b>Tab "Backup minggu …" / "Backup bulan …"</b> dibuat otomatis tiap Senin (minggu lalu) dan tanggal 3 (bulan lalu), isinya sama dengan tab Laporan. <b>File → Download</b> atau klik kanan tab → <b>Copy to</b>, simpan di tempat lain, lalu <b>hapus tabnya</b> (Dashboard mengingatkan bila lebih dari 35 hari). Atur di Config → BACKUP_TAB.</li>
+    <li><b>Pilihan</b>: isi pilihan (Jenis Kerusakan, Masalah, Penyebab, Penanganan, …). Kolom <b>Discipline</b> (hanya Jenis Kerusakan) = isi kolom Discipline tab TPM.</li>
+    <li><b>Form</b>: label, wajib/opsional, urutan, field tambahan. Matikan pertanyaan dengan Aktif = Tidak (jangan hapus barisnya).</li>
+    <li><b>Format Laporan</b>: judul & urutan kolom tab Laporan.</li>
+    <li><b>Catatan Panduan</b>: catatan lokal yang tampil di halaman ini (Untuk: Teknisi / Admin / Semua).</li>
+    <li><b>Config</b>: NAMA_APLIKASI, jam peringatan, shift, STOP_LINE_DEFAULT, judul laporan, TPM (TPM_MULAI, TPM_TIPE, TPM_JUDUL, TPM_PROJECT), KPI (<b>JAM_OPERASI_PER_HARI</b>, <b>HARI_OPERASI</b>, <b>TANGGAL_LIBUR</b>, <b>KPI_MULAI</b>).</li>
+    <li>Nama tab pengaturan (Users, Lines, Pilihan, …) <b>boleh diganti</b>; aplikasi tetap mengenalinya. Tab yang ditulis aplikasi (Maintenance, Laporan, KPI, TPM, …) jangan diganti.</li>
+    <li><b>Saran</b>: saran dari teknisi (juga tampil di aplikasi → 💡 Saran). <b>Rencana</b>: daftar rencana update yang tampil di halaman ini.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Membaca spreadsheet (Ringkasan, warna, tab tersembunyi)</summary><div><ul>
+    <li>Tab <b>Ringkasan</b> paling depan: angka hari ini, sekarang & bulan ini, grafik, pekerjaan yang masih terbuka. Ganti tanggal di <b>sel kuning</b> (kosong = hari ini).</li>
+    <li>Tab <b>Baca Saya</b>: arti setiap tab & warna, dalam bahasa Indonesia + 中文.</li>
+    <li>Warna tab: hijau = mulai di sini, kuning = laporan, biru = pengaturan (boleh diedit admin), abu-abu = ditulis aplikasi (jangan diedit).</li>
+    <li>Tab jarang dipakai (Log, Config, Form, Projects, Arsip, …) disembunyikan. Menu → <b>Tampilkan semua tab</b>; rapikan lagi: menu → <b>Rapikan tampilan spreadsheet</b>.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Bahasa 中文 & terjemahan</summary><div><ul>
+    <li>Teknisi China: Users → kolom <b>Bahasa</b> = <b>zh</b> (bisa juga diganti sendiri lewat tombol 中 / ID).</li>
+    <li>Label pilihan, form & line dalam 中文 diambil dari kolom <b>Nilai (中文)</b>, <b>Label (中文)</b>, <b>Nama (中文)</b>. Kosong = tampil bahasa Indonesia.
+      Yang disimpan di data tetap nilai Indonesia, jadi laporan & filter tidak pecah.</li>
+    <li>Menu spreadsheet → <b>Isi terjemahan otomatis (中文 / English)…</b> mengisi sel yang masih kosong. Cek istilah teknisnya bersama teknisi China.</li>
+    <li>Sheet <b>Terjemahan</b> = hasil tombol 🌐 (Google Translate). Kolom zh / id / en boleh dikoreksi; koreksi langsung dipakai.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Laporan (format Excel)</summary><div><ul>
+    <li>Tab <b>Laporan &lt;tahun&gt;</b> = format Form Stop Line. Diperbarui <b>langsung</b> setiap Mulai / Pause / Selesai / Cancel / review.</li>
+    <li>Habis mengedit sheet Maintenance atau Format Laporan secara manual → Dashboard → <b>Perbarui Laporan, Rekap, TPM & KPI</b> (otomatis juga tiap malam).</li>
+    <li>Jangan edit tab Laporan / Rekap (selalu ditulis ulang). Perbaiki datanya di sheet Maintenance.</li>
+    <li>Data mentah sparepart: sheet <b>Pemakaian Sparepart</b> (1 baris per part, bisa di-pivot).</li>
+    <li>Riwayat → <b>⬇ Download</b>: file Excel (.xlsx) dengan kolom tab Laporan, untuk hari / tanggal / bulan / tahun / rentang. Gagal memuat library Excel → otomatis CSV.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>KPI MTTR & MTBF bulanan</summary><div><ul>
+    <li>Tab <b>KPI &lt;tahun&gt;</b>: per bulan, per <b>Plant / Project / Line</b>: kerusakan, MTTR, downtime, jam operasi, MTBF, target & ✓ / ✗.</li>
+    <li><b>MTTR</b> = rata-rata waktu aktif. <b>MTBF</b> = (jam operasi − downtime) ÷ jumlah kerusakan. <b>Jam operasi</b> = hari operasi × JAM_OPERASI_PER_HARI × jumlah line (Config).</li>
+    <li>Isi <b>Target MTBF (jam)</b> di Projects dan jadwal operasi di Config. Jadwal salah → MTBF salah.</li>
+    <li><b>Availability</b> (%) per factory × proses = (running hour − downtime) ÷ running hour × 100. <b>Running hour</b> = hari operasi × JAM_OPERASI_PER_HARI, dihitung <b>sekali per proses</b>; downtime = jumlah downtime stop line semua line proses itu (waktu pending ikut). Ada juga rata-rata semua proses. Isi kolom <b>Proses</b> di Lines dari dropdown (daftarnya di Pilihan → Proses).</li>
+    <li><b>Tutup bulan</b>: awal bulan, selesaikan dulu review (Abandoned / Cancelled), lalu Dashboard → <b>Tutup bulan …</b> (atau menu → Tutup bulan KPI…). Angka bulan itu dikunci. Tutup ulang boleh; dicatat di Log.</li>
+    <li>Dashboard → <b>Statistik</b>: lihat per line / proses / project / teknisi / jenis / masalah / sparepart / hari / bulan; Pareto (biru = ±80% kerusakan); tap batang → daftar pekerjaan.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Excel TPM untuk manager</summary><div><ul>
+    <li>Tab <b>TPM &lt;project&gt;</b> (satu per project) = format Excel TPM manager: kotak Status Overview, judul kolom baris 8, data mulai <b>B9</b>. Teks: <b>中文</b> lalu <b>(English)</b> di baris bawahnya.</li>
+    <li>Isinya pekerjaan <b>Corrective</b> yang sudah <b>Completed</b>, sejak 1 Januari (Config → <b>TPM_MULAI</b> untuk tanggal lain, <b>TPM_TIPE</b> untuk tipe lain).</li>
+    <li>Cara kirim: buka tab TPM → blok <b>B9</b> sampai baris terakhir kolom <b>K</b> → Copy → paste di Excel manager.</li>
+    <li>Diperbarui tiap malam, lewat Dashboard → <b>Perbarui Laporan, Rekap, TPM & KPI</b>, atau menu spreadsheet → <b>Perbarui tab TPM</b>. Jangan edit tab TPM (tertimpa).</li>
+    <li><b>Discipline</b> otomatis dari jenis kerusakan: Elektrikal/Mekanikal/Pneumatik/Program = Machine, Operasional = Operation, Produk = Product Item, MES = MES. Ubah di Pilihan → kolom Discipline.</li>
+    <li>Machine = nama line (kolom Nama (中文) / Nama (English) di Lines); Responsibility = semua PIC, termasuk PIC tambahan. Teks bebas (detail, catatan) diterjemahkan Google; salah → koreksi di sheet <b>Terjemahan</b>, lalu perbarui lagi.</li>
+  </ul></div></details>
+
+  <details class="g"><summary>Dua factory (data terpisah)</summary><div><ol>
+    <li>File → <b>Make a copy</b> spreadsheet ini.</li>
+    <li>Di salinan: hapus baris data (bukan judul kolom) di Maintenance, Log, Pemakaian Sparepart; hapus tab Arsip / Rekap / Laporan.</li>
+    <li>Isi Users, Lines, Projects (target KPI) untuk factory tsb. Config → <b>NAMA_APLIKASI</b> (mis. "MTTR Factory 2") & jam operasi KPI.</li>
+    <li>Extensions → Apps Script → Run <b>setup</b> → Deploy → New deployment → cetak QR dari URL baru.</li>
+  </ol><p class="small muted">Update kode = paste ke <b>kedua</b> file. Cek versi lewat menu → Tentang.</p></div></details>
+
+  <details class="g"><summary>Bersihkan data testing (sebelum mulai pakai)</summary><div><ol>
+    <li>Backup: File → <b>Make a copy</b>.</li>
+    <li>Spreadsheet → menu aplikasi → <b>Hapus data testing…</b></li>
+    <li>Isi tanggal mulai pakai sungguhan (dd/mm/yyyy) → yang dimulai <b>sebelum</b> tanggal itu dihapus. Kosongkan = hapus semua.</li>
+    <li>Cek jumlahnya, ketik <b>HAPUS</b>.</li>
+  </ol><p class="small muted">Ikut bersih: Maintenance, Log, Pemakaian Sparepart, Arsip, Laporan, Rekap, TPM, KPI (bulan yang sudah ditutup dibuka lagi), tab per baterai. Users, Lines, Sparepart, Pilihan, Form, Config tetap.
+  Jangan hapus baris langsung di tab Laporan/Rekap: tab itu dibuat ulang dari Maintenance.</p></div></details>
+
+  <details class="g"><summary>Update ke versi baru</summary><div><ol>
+    <li>Ganti isi file kode sesuai CHANGELOG.</li>
+    <li>Run <b>setup</b> (menambah sheet/kolom baru; data lama aman).</li>
+    <li>Deploy → Manage deployments → Edit → Version: <b>New version</b>. URL & QR tetap sama.</li>
+  </ol><p class="small muted">Aman walau ada yang sedang maintenance: data di sheet tidak berubah, timer tetap jalan. HP yang masih versi lama melihat banner "Muat ulang".
+  Bermasalah → pilih versi sebelumnya di Manage deployments. Jangan pakai <b>New deployment</b> (QR mati).</p></div></details>
+
+  <details class="g"><summary>Kekurangan & risiko</summary><div><ul>
+    <li>Siapa pun yang punya akses <b>edit</b> spreadsheet bisa mengubah data. Batasi akses edit.</li>
+    <li>Sparepart hanya catatan pemakaian, <b>bukan stok</b>.</li>
+    <li>Batas Google Sheets 10 juta sel per file. Arsipkan tiap Januari (menu → Arsipkan) supaya tetap cepat.</li>
+    <li>Tidak bisa offline, belum ada foto.</li>
+    <li>Bug Google multi-akun: browser yang login beberapa akun mengirim tombol atas nama akun utamanya. Aplikasi mendeteksi & berhenti dengan petunjuk; solusinya di sisi browser (Incognito / browser atau profil khusus kerja).</li>
+    <li>Mengganti nama/model di katalog tidak mengubah data lama (riwayat tetap seperti saat dicatat).</li>
+    <li>MTTR dihitung sejak teknisi menekan <b>Mulai</b>: waktu tunggu teknisi datang tidak tercatat.</li>
+    <li>Line = unit: satu line fisik dengan beberapa mesin penting butuh beberapa baris Lines & QR.</li>
+  </ul></div></details>
+</template>
+
+<template id="guide-baru">
+  <h3>Apa yang baru di versi <span data-v></span></h3>
+  <ul>
+    <li><b>2.6.9</b>: Dashboard menampilkan <b>Availability per proses</b> (running hour − downtime) ÷ running hour; tombol tetap aman bila banyak teknisi menekan bersamaan (dicoba ulang otomatis bila server sibuk).</li>
+    <li><b>Sinyal putus tidak membuat repot</b>: isian form tetap tersimpan di HP, ketuk lagi saat ada sinyal — tidak tercatat dua kali. Bisa dipasang di <b>layar utama HP</b> seperti aplikasi (lihat panduan di atas). PIC tambahan s/d 15 orang, sparepart s/d 20 jenis.</li>
+    <li><b>Lebih sedikit tap</b>: scan QR line → MULAI. Tidak ada pilih mesin & tipe lagi (satu QR per line / unit).</li>
+    <li><b>PIC tambahan</b> saat Selesai: tap nama teman yang ikut mengerjakan.</li>
+    <li><b>Dashboard</b>: KPI bulan ini (MTTR, MTBF, kerusakan, downtime per project), 5 line tersering & terlama, mode <b>Statistik</b>.</li>
+    <li><b>Riwayat → ⬇ Download</b> file Excel.</li>
+    <li>Admin: tab <b>KPI &lt;tahun&gt;</b> + <b>Tutup bulan</b>; tab pengaturan boleh diganti nama; fitur Cek (Pending), Preventive, Alias & Grup dihapus.</li>
+    <li><b>Excel TPM</b> (admin): tab <b>TPM &lt;project&gt;</b> di Google Sheet, format sama dengan Excel manager (中文 + English), siap di-copy. Jenis kerusakan baru: <b>Operasional</b>, <b>Produk</b>, <b>MES</b>.</li>
+    <li><b>Bahasa 中文</b>: tombol <b>中</b> / <b>ID</b> di Beranda. Semua menu, tombol & pilihan tampil dalam bahasa Mandarin.</li>
+    <li><b>🌐 Terjemahkan</b> di detail & kartu pekerjaan: teks yang ditulis teknisi lain diterjemahkan (Indonesia ⇄ 中文).</li>
+    <li><b>💡 Saran</b> di Beranda: kirim usul ke admin, lihat status & tanggapannya.</li>
+    <li><b>Rencana update</b> di halaman ini: fitur yang sedang direncanakan.</li>
+    <li>Admin: spreadsheet lebih mudah dibaca: tab <b>Ringkasan</b> & <b>Baca Saya</b>, warna status, tab jarang dipakai disembunyikan.</li>
+  </ul>
+</template>
+
+<!-- ===================== 中文 ===================== -->
+<template id="guide-teknisi-zh">
+  <h3>记住 4 个步骤</h3>
+  <ol>
+    <li><b>扫描</b>产线上的二维码。二维码损坏 → <b>搜索产线</b>（输入编号、名称或工序）。</li>
+    <li><b>开始</b>：确认<b>停线</b>（是 = 产线停止生产），点开始。不需要选择设备。</li>
+    <li>进行维修。暂时离开 → <b>暂停</b>。暂时无法完成 → <b>挂起</b>。</li>
+    <li><b>完成</b>：故障类型 → 现象 → 原因 → 处理措施 → <b>其他参与人员</b>（一起维修的同事）→ <b>备件</b>。</li>
+  </ol>
+  <p class="small muted">MTTR 只计算<b>有效</b>时间。暂停和挂起的时间不计入。开始维修时按“开始”，设备恢复运行时按“完成”：这些数字计入每月 KPI。</p>
+
+  <details class="g"><summary>按钮说明</summary><div><ul>
+    <li><b>暂停</b>：休息 / 短暂等待。有效时间停止计时。</li>
+    <li><b>挂起</b>：还没完成（等待备件等）。显示在“挂起”页；其他技术员扫描同一产线的二维码即可继续。</li>
+    <li><b>取消</b>：录入错误 / 问题自行消失。进入管理员审核。</li>
+    <li><b>其他参与人员</b>（完成时）：点选一起维修的其他技术员。他们的名字也会进入报表和 TPM。可多选，也可不选。</li>
+    <li><b>仍在进行</b>：3 小时后出现。到 4 小时仍未回复 → 已放弃。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>添加到手机主屏幕（像应用一样）</summary><div><ol>
+    <li>从<b>官方链接</b>（与产线二维码相同）打开应用，等首页显示。</li>
+    <li><b>安卓（Chrome）</b>：右上角 <b>⋮</b> → <b>添加到主屏幕</b> → 添加。</li>
+    <li><b>iPhone（Safari）</b>：<b>分享</b>按钮（带箭头的方框）→ <b>添加到主屏幕</b> → 添加。</li>
+  </ol><p class="small muted">图标会在浏览器中打开（不是应用商店的应用）。仍需登录 Google，请使用已登记的账号。</p></div></details>
+
+  <details class="g"><summary>信号弱 / 中断</summary><div><ul>
+    <li>完成、挂起和取消的填写内容会在输入时<b>保存在手机上</b>。信号中断或应用关闭 → 重新打开同一表单，内容会恢复。</li>
+    <li>出现“信号中断” → 有信号时<b>再点一次</b>。不会重复记录；如果其实已保存，会显示“之前已保存”。</li>
+    <li>按钮显示“仍在处理中…” → 请等待，不要关闭应用。</li>
+    <li>完全没来得及记录的工作 → 告诉管理员（手工录入）。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>备件（快速方法）</summary><div><ol>
+    <li>没有更换 → <b>无更换</b>。</li>
+    <li>有更换 → <b>有更换备件</b>，然后在<b>搜索框输入</b>（如 “6205”）<i>或</i>依次选择 类别 → 名称 → 型号。</li>
+    <li>用 <b>− / +</b> 调整数量。选错 → <b>×</b>。</li>
+    <li>列表里没有 → <b>手动添加</b>，并告诉管理员加入目录。</li>
+  </ol><p class="small muted">备件类别会自动跟随所选的故障类型。</p></div></details>
+
+  <details class="g"><summary>停线</summary><div><ul>
+    <li><b>是</b> = 维修期间产线停止生产。默认<b>是</b>；产线仍在运行时改为<b>否</b>。</li>
+    <li>报表中的停线时长 = 完成时间 − 开始时间。也是 KPI 中的<b>停机时间</b>。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>语言、翻译和建议</summary><div><ul>
+    <li>首页右上角 <b>中</b> / <b>ID</b> 按钮 = 切换显示语言（中文 / 印尼语），保存在本手机上。</li>
+    <li>其他技术员写的内容（备注、已完成的工作、“其他”填写）保持原文 → 点 <b>🌐 翻译</b>。</li>
+    <li>可以用中文填写。报表保存原文；印尼同事可以用同一个按钮翻译。</li>
+    <li>首页 <b>💡 建议</b>：向管理员提出功能 / 新选项建议，并查看状态和回复。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>需要了解的限制</summary><div><ul>
+    <li>需要网络。按按钮时信号中断 → 稍等后重试。</li>
+    <li>每位技术员同一时间只能有<b>一项</b>未结束的工作，每条产线也只能有<b>一项</b>未结束的工作。产线正在被别人维修 → 帮他一起修，完成时由他把您加为<b>其他参与人员</b>。</li>
+    <li>保存后的数据不能在应用中修改。填错 → 告诉管理员。</li>
+    <li>暂时不能附加照片。</li>
+    <li>翻译使用 Google 翻译，技术术语有时不准确。原文始终保留。</li>
+    <li>手机 / 浏览器登录了<b>多个 Google 账号</b> → 应用可能拒绝操作或显示 “Google 账号不一致”（Google 的缺陷）。请用无痕模式，或只登录工作账号的专用浏览器。</li>
+  </ul></div></details>
+</template>
+
+<template id="guide-admin-zh">
+  <p class="small">新表格：Factory、Projects、Lines、Sparepart 中灰色的 <b>CONTOH</b> 行（Aktif = Contoh）只是填写示例，应用会忽略——可直接覆盖（再把 Aktif 改为 Ya）或删除。想按产线 / 状态查看数据：<b>数据 → 创建筛选视图</b>，不要对 Maintenance 页排序（若已排序，数据仍正确；看板会提示如何恢复原顺序）。夜间更新 / 触发器失败时，看板会显示 <b>Sistem: …</b>。</p>
+  <h3>一切都在 Google Sheet 中设置</h3>
+  <p class="small">编辑表格 → 重新加载应用 → 即可看到变化。无需修改代码。表格名称保持印尼语（与 Google Sheet 的标签一致）。</p>
+
+  <details class="g" open><summary>要改什么 → 哪个表</summary><div><ul>
+    <li><b>Users</b>：添加技术员（Email、Nama 姓名、Peran 角色 Teknisi/Admin、Aktif、<b>Bahasa</b> id/zh）。报表显示此姓名。</li>
+    <li><b>Lines</b>：一行 = 一个单元 = 一个二维码（= 报表中的 Station，TPM 中的 Machine）。需要单独记录的设备 → 单独一行（如 L01-W “Assy Cell 1 - Welding”）。<b>Proses</b> = 工序。<b>Nama (中文)</b> / <b>Nama (English)</b> 用于 TPM。已使用的 Line ID 不要修改。</li>
+    <li><b>Projects</b>：各工厂的电池项目，KPI 用的 <b>Target MTTR (menit)</b> 和 <b>Target MTBF (jam)</b>。</li>
+    <li><b>Sparepart</b>：备件目录 类别 → 名称 → 型号。Aktif = Tidak 即隐藏。仓库清单（上千行）可一次粘贴；备件编码写在 Model 列（如 <i>E3Z-D61 · 100234</i>），技术员即可搜索。</li>
+    <li><b>“Backup minggu …” / “Backup bulan …” 页</b>：每周一（上周）和每月 3 日（上月）自动生成，内容与 Laporan 页相同。<b>文件 → 下载</b> 或右键标签 → <b>复制到</b>，保存到别处后<b>删除该页</b>（超过 35 天 Dashboard 会提醒）。在 Config → BACKUP_TAB 设置。</li>
+    <li><b>Pilihan</b>：选项（故障类型、现象、原因、处理措施 …）。<b>Nilai (中文)</b> / <b>Nilai (English)</b> = 显示名称。<b>Discipline</b> 列（仅故障类型）= TPM 页的“范围”。</li>
+    <li><b>Form</b>：标题、必填 / 选填、顺序、附加字段。<b>Label (中文)</b> = 中文标题。停用问题请设 Aktif = Tidak（不要删除行）。</li>
+    <li><b>Format Laporan</b>：Laporan 页的列标题和顺序。</li>
+    <li><b>Catatan Panduan</b>：显示在本页的本地说明。<b>Saran</b>：技术员的建议。<b>Rencana</b>：更新计划。</li>
+    <li><b>Config</b>：NAMA_APLIKASI、提醒时间、班次、STOP_LINE_DEFAULT、报表标题、TPM 设置（TPM_MULAI、TPM_TIPE、TPM_JUDUL、TPM_PROJECT）、KPI（<b>JAM_OPERASI_PER_HARI</b>、<b>HARI_OPERASI</b>、<b>TANGGAL_LIBUR</b>、<b>KPI_MULAI</b>）。</li>
+    <li>设置类标签页（Users、Lines、Pilihan …）<b>可以改名</b>，应用仍能识别。应用写入的标签页（Maintenance、Laporan、KPI、TPM …）不要改名。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>阅读表格（Ringkasan、颜色、隐藏的标签页）</summary><div><ul>
+    <li>最前面的 <b>Ringkasan</b> 标签页：今天、现在和本月的数据、图表、未完成的工作。在<b>黄色单元格</b>中更改日期（空白 = 今天）。</li>
+    <li><b>Baca Saya</b> 标签页：每个标签页和颜色的说明（印尼语 + 中文）。</li>
+    <li>标签页颜色：绿色 = 从这里开始，黄色 = 报表，蓝色 = 设置（管理员可编辑），灰色 = 应用写入（请勿编辑）。</li>
+    <li>不常用的标签页已隐藏。菜单 → <b>Tampilkan semua tab</b>；重新整理：菜单 → <b>Rapikan tampilan spreadsheet</b>。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>给经理的 TPM Excel</summary><div><ul>
+    <li><b>TPM &lt;项目&gt;</b> 页（每个项目一页）= 经理的 TPM Excel 格式：Status Overview、第 8 行列标题、数据从 <b>B9</b> 开始。文字为<b>中文</b>，下一行为 <b>(English)</b>。</li>
+    <li>内容：已<b>完成</b>的<b>故障维修</b>（Corrective），从 1 月 1 日起（Config → <b>TPM_MULAI</b> 可改日期，<b>TPM_TIPE</b> 可改类型）。</li>
+    <li>发送方法：打开 TPM 页 → 选中 <b>B9</b> 到最后一行的 <b>K</b> 列 → 复制 → 粘贴到经理的 Excel。</li>
+    <li>每晚自动更新；也可在 Dashboard → <b>更新 Laporan、Rekap、TPM 和 KPI</b>，或表格菜单 → <b>Perbarui tab TPM</b>。请勿编辑 TPM 页（会被覆盖）。</li>
+    <li><b>范围 Discipline</b> 由故障类型自动决定：电气/机械/气动/程序 = Machine，操作 = Operation，产品 = Product Item，MES = MES。可在 Pilihan → Discipline 列修改。</li>
+    <li>Machine = 产线名称（Lines 表的 Nama (中文) / Nama (English) 列）；Responsibility = 所有维修人员，包括其他参与人员。自由文字（详情、备注）由 Google 翻译；有误 → 在 <b>Terjemahan</b> 表中修改后再更新。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>中文和翻译</summary><div><ul>
+    <li>选项、表单和产线的中文名称来自 <b>(中文)</b> 列；为空则显示印尼语。数据中保存的始终是印尼语原值，报表和筛选不会分裂。</li>
+    <li>表格菜单 → <b>Isi terjemahan otomatis (中文 / English)…</b> 自动填写空白单元格。请与同事一起检查技术术语。</li>
+    <li><b>Terjemahan</b> 表 = 🌐 翻译按钮的结果（Google 翻译）。zh / id / en 列可以直接修改，修改后立即生效。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>报表（Excel 格式）</summary><div><ul>
+    <li><b>Laporan &lt;年份&gt;</b> 页 = 停线表格式。每次 开始 / 暂停 / 完成 / 取消 / 审核 后<b>实时</b>更新。</li>
+    <li>手动编辑 Maintenance 或 Format Laporan 表后 → 看板 → <b>更新 Laporan、Rekap、TPM 和 KPI</b>（每晚也会自动更新）。</li>
+    <li>不要编辑 Laporan / Rekap 页（会被重写）。请在 Maintenance 表中修正数据。</li>
+    <li>备件原始数据：<b>Pemakaian Sparepart</b> 表（每个备件一行，可做数据透视）。</li>
+    <li>记录 → <b>⬇ 下载</b>：Excel 文件（.xlsx），列与 Laporan 页相同，可选今天 / 日期 / 月 / 年 / 日期范围。无法加载 Excel 组件 → 自动下载 CSV。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>每月 KPI：MTTR 和 MTBF</summary><div><ul>
+    <li><b>KPI &lt;年份&gt;</b> 页：每月按<b>工厂 / 项目 / 产线</b>：故障次数、MTTR、停机时间、运行时间、MTBF、目标和 ✓ / ✗。</li>
+    <li><b>MTTR</b> = 平均有效维修时间。<b>MTBF</b> =（运行时间 − 停机时间）÷ 故障次数。<b>运行时间</b> = 运行天数 × JAM_OPERASI_PER_HARI × 产线数（Config）。</li>
+    <li>在 Projects 填写 <b>Target MTBF (jam)</b>，在 Config 填写运行安排。安排不对 → MTBF 不对。</li>
+    <li><b>可用率</b>（%）按工厂 × 工序 =（运行时间 − 停机时间）÷ 运行时间 × 100。<b>运行时间</b> = 运行天数 × JAM_OPERASI_PER_HARI，<b>每个工序只计一次</b>；停机时间 = 该工序所有产线停线时间之和（含挂起时间）。另有所有工序平均。Lines 的 <b>Proses</b> 列请从下拉选择（清单在 Pilihan → Proses）。</li>
+    <li><b>关账</b>：月初先完成审核（已放弃 / 已取消），再在看板 → <b>关账 …</b>（或菜单 → Tutup bulan KPI…）。该月数字被锁定。可以重新关账，会记录在 Log 中。</li>
+    <li>看板 → <b>统计</b>：按产线 / 工序 / 项目 / 技术员 / 故障类型 / 现象 / 备件 / 日 / 月查看；帕累托（蓝色 = 约 80% 的故障）；点击柱形 → 工作列表。</li>
+  </ul></div></details>
+
+  <details class="g"><summary>更新到新版本</summary><div><ol>
+    <li>按 CHANGELOG 替换代码文件。</li>
+    <li>运行 <b>setup</b>（添加新表 / 新列；旧数据安全）。</li>
+    <li>Deploy → Manage deployments → 编辑 → Version：<b>New version</b>。网址和二维码不变。</li>
+  </ol><p class="small muted">即使有人正在维修也安全。出现问题 → 在 Manage deployments 选择上一个版本。不要使用 <b>New deployment</b>（二维码会失效）。</p></div></details>
+
+  <details class="g"><summary>限制和风险</summary><div><ul>
+    <li>任何拥有表格<b>编辑</b>权限的人都能修改数据。请限制编辑权限。</li>
+    <li>备件只是使用记录，<b>不是库存</b>。</li>
+    <li>每个 Google 表格上限 1000 万个单元格。每年一月归档（菜单 → Arsipkan）。</li>
+    <li>不能离线使用，暂不支持照片。</li>
+    <li>Google 多账号缺陷：应用会检测并停止，解决方法在浏览器端（无痕 / 工作专用浏览器或个人资料）。</li>
+    <li>MTTR 从技术员按<b>开始</b>时计算：等待技术员到达的时间不记录。</li>
+    <li>产线 = 单元：一条实体产线有多台重要设备时，需要多行 Lines 和多个二维码。</li>
+  </ul></div></details>
+</template>
+
+<template id="guide-baru-zh">
+  <h3>版本 <span data-v></span> 新功能</h3>
+  <ul>
+    <li><b>2.6.9</b>：看板显示<b>各工序可用率</b>（运行时间 − 停机时间）÷ 运行时间；多名技术员同时操作也安全（服务器繁忙时自动重试）。</li>
+    <li><b>信号中断也不怕</b>：表单内容保存在手机里，有信号时再点一次即可，不会重复记录。可以像应用一样<b>添加到手机主屏幕</b>（见上方说明）。其他参与人员最多 15 人，备件最多 20 种。</li>
+    <li><b>点击更少</b>：扫描产线二维码 → 开始。不再选择设备和类型（每条产线 / 单元一个二维码）。</li>
+    <li>完成时的<b>其他参与人员</b>：点选一起维修的同事。</li>
+    <li><b>看板</b>：本月 KPI（各项目的 MTTR、MTBF、故障次数、停机时间）、故障最多 / 维修最久的 5 条产线、<b>统计</b>模式。</li>
+    <li><b>记录 → ⬇ 下载</b> Excel 文件。</li>
+    <li>管理员：<b>KPI &lt;年份&gt;</b> 页 + <b>关账</b>；设置标签页可改名；删除了挂起审核、预防性维护、别名和分组。</li>
+    <li><b>TPM Excel</b>（管理员）：Google Sheet 中的 <b>TPM &lt;项目&gt;</b> 页，格式与经理的 Excel 相同（中文 + English），可直接复制。新增故障类型：<b>操作</b>、<b>产品</b>、<b>MES</b>。</li>
+    <li><b>中文界面</b>：首页的 <b>中</b> / <b>ID</b> 按钮。所有菜单、按钮和选项都以中文显示。</li>
+    <li><b>🌐 翻译</b>：在详情和工作卡片中翻译其他技术员写的内容（印尼语 ⇄ 中文）。</li>
+    <li><b>💡 建议</b>：在首页向管理员发送建议，查看状态和回复。</li>
+    <li>本页的<b>更新计划</b>：正在计划的功能。</li>
+    <li>管理员：表格更易读：<b>Ringkasan</b> 和 <b>Baca Saya</b> 标签页、状态颜色、隐藏不常用的标签页。</li>
+  </ul>
+</template>
