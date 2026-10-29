@@ -530,10 +530,9 @@ function statsUsage_(rows, rg) {
   var ids = {}, out = {};
   rows.forEach(function (r) { ids[String(r['Maintenance ID'])] = true; });
   var add = function (u) { var id = String(u['Maintenance ID']); if (ids[id]) (out[id] = out[id] || []).push(u); };
-  if (findSheet_(APP.SHEETS.PEMAKAIAN)) readTable_(APP.SHEETS.PEMAKAIAN).forEach(add);
-  for (var y = yearOf_(rg.from); y <= yearOf_(new Date(rg.to.getTime() - 1)); y++) {
-    if (findSheet_(archiveUsageName_(y))) readTable_(archiveUsageName_(y)).forEach(add);
-  }
+  var names = [APP.SHEETS.PEMAKAIAN];
+  for (var y = yearOf_(rg.from); y <= yearOf_(new Date(rg.to.getTime() - 1)); y++) names.push(archiveUsageName_(y));
+  usageDari_(names, add);
   return out;
 }
 

@@ -82,8 +82,7 @@ function tpmRows_(from) {
   years.forEach(function (y) { if (ss.getSheetByName(archiveName_(y))) readTable_(archiveName_(y)).forEach(add); });
   rows.sort(function (a, b) { return (a['Mulai'] - b['Mulai']) || String(a['Maintenance ID']).localeCompare(String(b['Maintenance ID'])); });
   var addUsage = function (u) { var id = String(u['Maintenance ID']); if (seen[id]) (usage[id] = usage[id] || []).push(u); };
-  if (ss.getSheetByName(APP.SHEETS.PEMAKAIAN)) readTable_(APP.SHEETS.PEMAKAIAN).forEach(addUsage);
-  years.forEach(function (y) { if (ss.getSheetByName(archiveUsageName_(y))) readTable_(archiveUsageName_(y)).forEach(addUsage); });
+  usageDari_([APP.SHEETS.PEMAKAIAN].concat(years.map(archiveUsageName_)), addUsage);
   return { rows: rows, usage: usage };
 }
 

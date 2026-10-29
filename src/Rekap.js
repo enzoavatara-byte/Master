@@ -147,11 +147,12 @@ function refreshRekap() {
     try { fn(); } catch (e) { gagal.push(nama + ': ' + (e && e.message || e)); console.warn(nama + ' gagal (dicoba lagi besok / lewat Dashboard): ' + e); }
   };
   resetMaster_();
+  var urut = null;   // 2.6.11: hanya dibaca (tab tidak ditulis ulang), hasilnya → Dashboard admin
+  langkah('Cek urutan Maintenance', function () { urut = urutanMaintenance_(); });
   langkah('Laporan & Rekap', function () {
     withLock_(function () {
       var now = new Date();
       var y = yearOf_(now);
-      try { urutkanMaintenance_(now); } catch (e) { gagal.push('Urut ulang Maintenance: ' + (e && e.message || e)); }
       buildRekap_(y);
       buildLaporan_(y);
       if (monthOf_(now) === 1) { buildRekap_(y - 1); buildLaporan_(y - 1); }
@@ -166,44 +167,38 @@ function refreshRekap() {
     kpiTutupOtomatis_();
   });
   langkah('Tampilan', function () { rapikanTampilan_({}); });
-  sehatCatat_('malam', { mulai: t0.toISOString(), selesai: new Date().toISOString(), gagal: gagal, dtk: Math.round((Date.now() - t0.getTime()) / 1000) });
+  sehatCatat_('malam', { mulai: t0.toISOString(), selesai: new Date().toISOString(), gagal: gagal, dtk: Math.round((Date.now() - t0.getTime()) / 1000), urut: urut });
   if (gagal.length) throw new Error('Pembaruan malam gagal sebagian: ' + gagal.join(' · '));
 }
 
 var MALAM_LOCK_MS_ = 120000;   // trigger malam menunggu teknisi shift malam selesai menekan tombol (bukan gagal)
 
 /**
- * 2.6.9: tab Maintenance diurutkan admin (mis. per Line) → ekor tab bukan lagi pekerjaan terbaru (readHot_, layar line).
- * Malam hari, di dalam lock, bila lebih dari URUT_MIN_ baris tidak urut naik menurut Mulai: tab diurutkan ulang menurut Mulai
- * lalu ID dan dicatat di Log. Input Manual bertanggal mundur (beberapa baris, sudah selesai) tidak memicu tulis ulang.
- * 2.6.10: tanpa Range.sort (di Sheets asli tab berfilter tidak ikut terurut, uji 2 tahun 6c): seluruh tab dibaca, diurutkan
- * di memori, ditulis kembali dengan cellText_ seperti rewriteKeeping_ (arsip). Baris tanpa ID (ketikan admin) tetap di bawah.
- * @return {boolean} diurutkan
+ * 2.6.11: urutan tab Maintenance hanya DIBACA (kolom Mulai, ±1–2 dtk). 2.6.9/2.6.10 mengurutkan ulang seluruh tab di sini
+ * (tulis ulang ±17 ribu baris × 43 kolom, ±2 menit di dalam lock). Di uji 2 tahun Google asli tulisan sebesar itu bertabrakan
+ * dengan penulis lain di tab yang sama (di produksi: admin yang mengedit spreadsheet, yang tidak ikut lock aplikasi) → isi sel
+ * tercampur, pekerjaan hilang. Urutan tab tidak menentukan benar-tidaknya data: ID baru dan baris yang ditulis tombol dicari di
+ * server (newMaintenanceId_, pastikanBaris_). Bila tab diurutkan manual, admin cukup diberi tahu (sehatPeringatan_).
+ * @return {{turun:number, n:number}} n = baris bertanggal; turun = baris yang Mulai-nya lebih awal dari baris mana pun di atasnya
  */
-var URUT_MIN_ = 50;
-function urutkanMaintenance_(now) {
-  var sh = sheet_(APP.SHEETS.MAINT), last = sh.getLastRow();
-  if (last < 3) return false;
-  var h = headers_(sh, APP.SHEETS.MAINT), cm = h.indexOf('Mulai'), ci = h.indexOf('Maintenance ID');
-  if (cm < 0 || ci < 0) return false;
-  var prev = -Infinity, turun = 0;
+function urutanMaintenance_() {
+  var sh = sheet_(APP.SHEETS.MAINT), last = sh.getLastRow(), out = { turun: 0, n: 0 };
+  if (last < 3) return out;
+  var cm = headers_(sh, APP.SHEETS.MAINT).indexOf('Mulai');
+  if (cm < 0) return out;
+  var prev = -Infinity;
   sh.getRange(2, cm + 1, last - 1, 1).getValues().forEach(function (r) {
     if (!(r[0] instanceof Date)) return;
+    out.n++;
     var t = r[0].getTime();
-    if (t < prev) turun++;
+    if (t < prev) out.turun++;
     else prev = t;
   });
-  if (turun <= URUT_MIN_) return false;
-  var w = sh.getLastColumn(), body = sh.getRange(2, 1, last - 1, w).getValues();
-  var tm = function (r) { return r[cm] instanceof Date ? r[cm].getTime() : Infinity; };
-  var ada = [], tanpa = [];
-  body.forEach(function (r, i) { (isBlank_(r[ci]) ? tanpa : ada).push([r, i]); });
-  ada.sort(function (a, b) { return (tm(a[0]) - tm(b[0])) || String(a[0][ci]).localeCompare(String(b[0][ci])) || (a[1] - b[1]); });
-  var out = ada.concat(tanpa).map(function (x) { return x[0].map(cellText_); });   // teks "16:53" tetap teks
-  sh.getRange(2, 1, out.length, w).setValues(out);
-  log_(now, 'Tab Maintenance', APP.EVENTS.URUT, APP.SYSTEM_USER, 'Tab Maintenance tidak urut (' + turun + ' baris, mis. diurutkan manual) → diurutkan ulang menurut Mulai.');
-  return true;
+  return out;
 }
+
+/** Input Manual bertanggal mundur ≈ 1% baris "turun"; tab yang diurutkan per Line / per Status ≈ 50–99%. */
+var URUT_PERSEN_ = 10;
 
 // ---------- 2.6.9 Kesehatan sistem: tugas terjadwal yang gagal / tidak jalan terlihat di Dashboard admin ----------
 var SEHAT_KEY_ = 'MTTR_SEHAT_';   // + malam / timeout / backup (satu kunci per tugas: tidak saling menimpa)
@@ -223,6 +218,9 @@ function sehatPeringatan_(props, now) {
     if (!m.selesai && umur(m.mulai) > 15 * 60000) out.push('Sistem: pembaruan malam ' + tgl(m.mulai) + ' tidak selesai (kemungkinan lewat batas waktu Apps Script 6 menit).' + obat);
     else if (m.gagal && m.gagal.length) out.push('Sistem: pembaruan malam ' + tgl(m.mulai) + ' gagal sebagian — ' + m.gagal.join(' · ').slice(0, 300) + '.' + obat);
     if (umur(m.mulai) > 36 * H) out.push('Sistem: pembaruan malam terakhir ' + tgl(m.mulai) + ' (lebih dari sehari lalu) — trigger malam mungkin hilang. Jalankan setup sekali.');
+    if (m.urut && m.urut.n && m.urut.turun * 100 > URUT_PERSEN_ * m.urut.n) out.push('Tab Maintenance tidak urut menurut Mulai (' + m.urut.turun + ' dari ' +
+      m.urut.n + ' baris, mis. diurutkan per Line). Data tetap aman, tapi riwayat line / "Riwayat saya" bisa tidak lengkap dan tombol lebih lambat. ' +
+      'Kembalikan di luar jam kerja: buka tab Maintenance → klik kolom Mulai → Data → Urutkan sheet A → Z. Untuk melihat per line, pakai Data → Tampilan filter (bukan Urutkan).');
   }
   if (t) {
     if (umur(t.at) > 2 * H) out.push('Sistem: cek pekerjaan lewat waktu terakhir jalan ' + tgl(t.at) + ' — trigger mungkin hilang (pekerjaan lupa ditutup tidak jadi Abandoned). Jalankan setup sekali.');
@@ -310,11 +308,21 @@ function syncLaporan_(r, parts, loc) {
 
 /** Pemakaian sparepart satu pekerjaan (jalur jarang: sinkron pekerjaan Completed tanpa data part di memori). */
 function usageOf_(id, year) {
-  var ss = SpreadsheetApp.getActive(), out = [];
-  [APP.SHEETS.PEMAKAIAN, archiveUsageName_(year)].forEach(function (name) {
-    if (ss.getSheetByName(name)) readTable_(name).forEach(function (u) { if (String(u['Maintenance ID']) === id) out.push(u); });
-  });
+  var out = [];
+  usageDari_([APP.SHEETS.PEMAKAIAN, archiveUsageName_(year)], function (u) { if (String(u['Maintenance ID']) === id) out.push(u); });
   return out;
+}
+
+/**
+ * 2.6.11: baris pemakaian sparepart dari tab aktif + tab arsip; baris yang sama persis (usageKey_) dipakai sekali. Arsip yang
+ * berhenti aman di tengah (sebagian) menyisakan salinan di kedua tab sampai menu Arsip dijalankan lagi → part tidak terhitung dua kali.
+ */
+function usageDari_(names, fn) {
+  var seen = {};
+  names.forEach(function (name) {
+    if (!findSheet_(name)) return;
+    readTable_(name).forEach(function (u) { var k = usageKey_(u); if (seen[k]) return; seen[k] = true; fn(u); });
+  });
 }
 
 function syncRekap_(year, rows) {
@@ -357,8 +365,7 @@ function laporanRows_(year) {
     if (!seen[id]) return;
     (usage[id] = usage[id] || []).push(u);
   };
-  if (ss.getSheetByName(APP.SHEETS.PEMAKAIAN)) readTable_(APP.SHEETS.PEMAKAIAN).forEach(addUsage);
-  if (ss.getSheetByName(archiveUsageName_(year))) readTable_(archiveUsageName_(year)).forEach(addUsage);
+  usageDari_([APP.SHEETS.PEMAKAIAN, archiveUsageName_(year)], addUsage);
   return { rows: rows, usage: usage };
 }
 
@@ -557,9 +564,12 @@ function rewriteKeeping_(sh, values, keep) {
   var k = keyIdx_(head.map(function (x) { return String(x).trim(); }), sh.getName());   // 2.6.9: kolom kunci menurut nama (kolom disisip admin di A)
   var body = values.slice(1).filter(function (row) { return row[k] !== '' && row[k] !== null && keep(row); });
   if (text) body = body.map(function (row) { return row.map(cellText_); });   // ditulis ulang: teks "16:53" tidak berubah jadi jam
+  // 2.6.11: tulis dulu, baru kosongkan sisa ekor. Dulu kosongkan seluruh tab dulu: eksekusi yang terbunuh batas 6 menit tepat di
+  // antara keduanya (arsip Januari: 193–278 dtk) = semua baris yang disimpan hilang. Sekarang terbunuh di tengah = sisa baris lama
+  // di ekor (kelihatan, dobel), bukan data hilang.
   var oldN = values.length - 1;
-  if (oldN > 0) sh.getRange(2, 1, oldN, head.length).clearContent();
   if (body.length) sh.getRange(2, 1, body.length, head.length).setValues(body);
+  if (oldN > body.length) sh.getRange(2 + body.length, 1, oldN - body.length, head.length).clearContent();
   return body.length;
 }
 
@@ -577,8 +587,14 @@ var logKey_ = function (o) {
  * Pindahkan pekerjaan final tahun `year` (beserta Log-nya) ke tab arsip.
  * Urutan aman: rekap final → salin ke arsip → verifikasi → baru hapus dari tab aktif.
  * Pekerjaan yang masih Aktif/Pause/Pending atau menunggu review TIDAK dipindah.
+ * 2.6.11: bila sesudah salin + verifikasi waktu eksekusi sudah lewat ARSIP_BATAS_MS_, berhenti di keadaan aman (data ada di arsip
+ * DAN masih di tab aktif) dengan `sebagian: true`; dijalankan lagi → salinan dilewati (appendArchive_), lalu baru dihapus. Bagian
+ * hapus (±60–100 dtk di hari Google lambat) tidak pernah dimulai dekat batas 6 menit.
+ * @param {number=} t0 waktu eksekusi mulai (menu: sebelum dialog konfirmasi, yang ikut terhitung batas 6 menit)
  */
-function arsipkanTahun_(year) {
+var ARSIP_BATAS_MS_ = 200000;
+function arsipkanTahun_(year, t0) {
+  t0 = t0 || Date.now();
   year = checkYear_(year);
   var nowYear = yearOf_(new Date());
   if (year >= nowYear) throw new Error('Hanya tahun yang sudah lewat yang bisa diarsipkan (sekarang ' + nowYear + ').');
@@ -611,6 +627,7 @@ function arsipkanTahun_(year) {
     readTable_(archiveName_(year)).forEach(function (r) { have[String(r['Maintenance ID'])] = true; });
     var lost = Object.keys(ids).filter(function (id) { return !have[id]; });
     if (lost.length) throw new Error('Arsip gagal diverifikasi (' + lost.length + ' baris tidak tersalin). Tidak ada data yang dihapus.');
+    if (Date.now() - t0 > ARSIP_BATAS_MS_) return { year: year, maintenance: n, log: lRows.length, sparepart: uRows.length, rekap: rekap, sebagian: true };
 
     rewriteKeeping_(msh, mvals, function (row) { return !ids[String(row[mId])]; });
     rewriteKeeping_(lsh, lvals, function (row) { return !ids[String(row[lId])]; });
@@ -770,6 +787,7 @@ function menuHapusDataTesting() {
 }
 
 function menuArsipkanTahun() {
+  var t0 = Date.now();
   requireUser_([APP.ROLES.ADMIN]);
   var ui = SpreadsheetApp.getUi();
   var def = yearOf_(new Date()) - 1;
@@ -781,8 +799,14 @@ function menuArsipkanTahun() {
   var ok = ui.alert('Konfirmasi arsip ' + year,
     n + ' pekerjaan final tahun ' + year + ' (beserta Log & pemakaian sparepart-nya) akan dipindah ke tab "' + archiveName_(year) + '", "' +
     archiveLogName_(year) + '" dan "' + archiveUsageName_(year) + '". Rekap & Laporan ' + year + ' dibuat ulang lebih dulu. Pekerjaan yang masih berjalan, pending, atau menunggu review tidak dipindah.\n\n' +
-    'Setelah diarsipkan, pekerjaan itu tidak tampil lagi di Riwayat aplikasi (tetap ada di sheet arsip). Lanjutkan?', ui.ButtonSet.YES_NO);
+    'Setelah diarsipkan, pekerjaan itu tidak tampil lagi di Riwayat aplikasi (tetap ada di sheet arsip). Jangan mengedit tab Maintenance / Log ' +
+    'selama arsip berjalan (±5 menit); sebaiknya di luar jam kerja. Lanjutkan?', ui.ButtonSet.YES_NO);
   if (ok !== ui.Button.YES) return;
-  var out = arsipkanTahun_(year);
+  var out = arsipkanTahun_(year, t0);
+  if (out.sebagian) {
+    ui.alert('Arsip ' + year + ' belum selesai (aman)', out.maintenance + ' pekerjaan sudah tersalin ke "' + archiveName_(year) + '" dan terverifikasi, tetapi waktu Apps Script ' +
+      'hampir habis, jadi belum dihapus dari tab aktif. Tidak ada data yang hilang. Jalankan menu ini sekali lagi untuk menyelesaikan.', ui.ButtonSet.OK);
+    return;
+  }
   ui.alert('Selesai: ' + out.maintenance + ' pekerjaan, ' + out.log + ' baris Log dan ' + out.sparepart + ' baris sparepart dipindah ke arsip ' + year + '.');
 }

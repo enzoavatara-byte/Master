@@ -284,11 +284,36 @@ function rowsAt_(sh, name, n) {
   return at;
 }
 
-/** Menulis ulang satu baris penuh (satu panggilan API, bukan per sel). */
+/** Menulis ulang satu baris penuh (satu panggilan API, bukan per sel). Tab Maintenance: barisnya dipastikan dulu (pastikanBaris_). */
 function writeObj_(name, obj) {
   var sh = sheet_(name);
   var headers = headers_(sh, name);
+  if (name === APP.SHEETS.MAINT && obj._baris !== obj._row) pastikanBaris_(obj);
   sh.getRange(obj._row, 1, 1, headers.length).setValues([objToRow_(headers, obj, TEXT_SHEETS_.indexOf(name) !== -1)]);
+}
+
+/**
+ * 2.6.11: `_row` berasal dari baca di awal tombol. Admin yang mengurutkan / menghapus baris di spreadsheet tidak ikut lock aplikasi;
+ * bila itu terjadi di tengah tombol, baris itu kini milik pekerjaan lain dan writeObj_ akan menimpanya diam-diam. ID di baris itu
+ * dicek (1 baca); beda → baris dicari ulang di server (TextFinder kolom ID). Tidak ketemu / tertulis dua kali → error, tidak ada
+ * yang ditulis. Dipanggil sebelum tulisan pertama tombol (mutate_), jadi tidak menambah kirim-terpaksa (K8).
+ * @return {number} nomor baris yang benar (obj._row diperbarui)
+ */
+function pastikanBaris_(obj) {
+  var sh = sheet_(APP.SHEETS.MAINT), h = headers_(sh, APP.SHEETS.MAINT), c = h.indexOf('Maintenance ID');
+  var id = String(obj['Maintenance ID'] == null ? '' : obj['Maintenance ID']);
+  if (c < 0 || !id) return obj._row;
+  if (!(obj._row >= 2) || String(sh.getRange(obj._row, c + 1).getValue()) !== id) {
+    var last = sh.getLastRow();
+    var hits = last < 2 ? [] : sh.getRange(2, c + 1, last - 1, 1).createTextFinder(id).matchEntireCell(true).findAll();
+    if (hits.length !== 1) {
+      throw new Error('Pekerjaan ' + id + (hits.length ? ' tertulis ' + hits.length + ' kali' : ' tidak ditemukan') + ' di tab Maintenance (tab sedang ' +
+        'diurutkan / diedit di spreadsheet?). Tidak ada yang disimpan — coba lagi sebentar lagi; bila berulang, minta admin memeriksa tab Maintenance.');
+    }
+    obj._row = hits[0].getRow();
+  }
+  obj._baris = obj._row;
+  return obj._row;
 }
 
 /** Selalu cari berdasarkan Maintenance ID, tidak pernah berdasarkan nomor baris dari client. */

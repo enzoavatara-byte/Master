@@ -5,7 +5,7 @@
  */
 var APP = {
   NAME: 'MTTR',          // nama default; per lokasi diubah lewat Config → NAMA_APLIKASI
-  VERSION: '2.6.10',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
+  VERSION: '2.6.11',      // tampil di Panduan & menu: cek kedua factory memakai versi yang sama
   TZ: 'Asia/Jakarta',
   DATE_FMT: 'yyyy-MM-dd HH:mm:ss',
 
@@ -141,7 +141,7 @@ var APP = {
   EVENTS: {
     START: 'start', PAUSE: 'pause', RESUME: 'resume', PENDING: 'pending', CONTINUE: 'lanjut',
     COMPLETE: 'complete', CANCEL: 'cancel', WARN: 'peringatan', CONFIRM: 'masih lanjut',
-    ABANDON: 'abandoned', REVIEW: 'review', TUTUP_BULAN: 'tutup bulan', INPUT_MANUAL: 'input manual', URUT: 'urut ulang'
+    ABANDON: 'abandoned', REVIEW: 'review', TUTUP_BULAN: 'tutup bulan', INPUT_MANUAL: 'input manual'
   },
 
   SYSTEM_USER: 'SYSTEM',

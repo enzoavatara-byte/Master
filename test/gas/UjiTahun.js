@@ -199,6 +199,20 @@ function ujtRunner_(tahap) {
   return R;
 }
 
+/**
+ * 2.6.11: seberapa cepat Google saat ini. Putaran 2 berjalan saat Google 1,3–2,9× lebih lambat (buka bundel, hitung murni tanpa
+ * Sheets: 2,6× dibanding 2.6.8), jadi waktu tombol tidak bisa dibandingkan antar putaran tanpa angka ini.
+ */
+function ujtKecepatan_(R, tag) {
+  var teks = new Array(250001).join('x'), t = Date.now();
+  for (var i = 0; i < 20; i++) Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, teks);
+  var hitung = Date.now() - t, baca = [];
+  for (var k = 0; k < 5; k++) { var t1 = Date.now(); findSheet_(APP.SHEETS.CONFIG).getDataRange().getValues(); baca.push(Date.now() - t1); }
+  var srt = baca.slice().sort(function (a, b) { return a - b; });
+  R.info('Kecepatan Google saat ini' + (tag || ''), 'hitung murni ' + hitung + ' ms (SHA-256 20 × 250 KB) · baca tab kecil (Config) median ' + srt[2] + ' ms (' +
+    baca.join(' / ') + ') · bandingkan antar putaran: angka 2× lebih besar = Google 2× lebih lambat, bukan kode', hitung);
+}
+
 // ---------- 1 · isi data ----------
 
 function ujtIsi() {
@@ -249,7 +263,8 @@ function ujtIsi() {
       });
       if (!habis) { st.pos[name] = 'ok'; forgetHeaders_(name); }
     });
-    R.info('Waktu: buka ' + dibuka + ' potongan data (gzip ' + UJT_.meta.kb + ' KB total)', tBuka + ' ms', tBuka);
+    R.info('Waktu: buka ' + dibuka + ' potongan data (gzip ' + UJT_.meta.kb + ' KB total)', tBuka + ' ms · hitung murni tanpa Sheets; semua potongan: ' +
+      '2.6.8 = 2.284 ms, putaran 2 (Google lambat) = 5.948 ms', tBuka);
     props.setProperty(UJT_ISI_, JSON.stringify(st));
     var done = TABEL.filter(function (n) { return st.pos[n] === 'ok'; });
     R.ok('Tulis ' + done.length + ' / ' + TABEL.length + ' tab', !habis, done.join(', ') + (habis ? '\nBelum selesai: jalankan menu 1 sekali lagi (melanjutkan, tidak mengulang).' : ''));
@@ -266,6 +281,7 @@ function ujtIsi() {
       }).map(function (name) { var sh = findSheet_(name, ss); return name + ' ' + (sh ? sh.getLastRow() : 0) + ' (harap ' + UJT_.meta.rows[name] + ')'; });
       rusak = !!beda.length;
       R.ok('Data uji lengkap: jumlah baris semua tab = bundel', !rusak, rusak ? beda.join(' · ') + '\nDATA TIDAK LENGKAP: jalankan menu 1 dari awal.' : TABEL.length + ' tab cocok');
+      ujtKecepatan_(R, '');
     }
   });
   } finally { ujtSewa_('UJT_ISI_SEWA', false); }
@@ -274,11 +290,30 @@ function ujtIsi() {
 
 // ---------- 2 · setup ----------
 
+/** 2.6.11: bagian setup yang dicatat (penanda + lama). Putaran 2: setup terbunuh di 360 dtk tanpa tahu di bagian mana. */
+var UJT_SETUP_FN_ = ['cekFile', 'registerMasterSheets_', 'trimSheet_', 'configDateText_', 'migrateDiscipline_', 'migrate26_', 'migrateTr261_',
+  'migrateCancel261_', 'isiContoh_', 'isiTerjemahanMaster_', 'ensureMaintColumns_', 'buildDerivedSheets_', 'buildRekap_', 'buildLaporan_', 'buildTpm_',
+  'buildKpi_', 'rapikanTampilan_'];
+
 function ujtSetup() {
-  var R = ujtRunner_(2), y = UJT_.meta.year;
+  var R = ujtRunner_(2), y = UJT_.meta.year, G = globalThis, asli = {}, lama = {};
   R.safe('setup dengan data penuh', function () {
-    var s = R.timed('setup() dengan data setahun', UJT_BATAS_.setup, function () { return setup(); });
+    UJT_SETUP_FN_.forEach(function (name) {
+      var f = G[name];
+      if (typeof f !== 'function') return;
+      asli[name] = f;
+      G[name] = function () {   // terbunuh di tengah → menu berikutnya menulis "berhenti di setup() → <bagian>" + detik mulainya
+        var t = Date.now();
+        R.mark('setup() → ' + name);
+        try { return f.apply(this, arguments); } finally { lama[name] = (lama[name] || 0) + Date.now() - t; }
+      };
+    });
+    var s;
+    try { s = R.timed('setup() dengan data setahun', UJT_BATAS_.setup, function () { return setup(); }); }
+    finally { Object.keys(asli).forEach(function (n) { G[n] = asli[n]; }); }
     R.info('Pesan setup', String(s.v).slice(0, 1500));
+    R.info('Rincian setup (termasuk bagian bersarang)', Object.keys(lama).sort(function (a, b) { return lama[b] - lama[a]; })
+      .map(function (n) { return n + ' ' + Math.round(lama[n] / 100) / 10 + ' dtk'; }).join(' · '));
   });
   if (UJT_DUA_) return R.selesai('Lanjut menu 2b.');
   ujtTahunLalu_(R);
@@ -310,8 +345,9 @@ function ujtMalam() {
   var R = ujtRunner_(3), y = UJT_.meta.year, total = 0;
   resetMaster_();
   R.safe('Trigger malam per tahap (sama dengan refreshRekap)', function () {
-    total += R.timed('Malam: cek urutan Maintenance + Rekap + Laporan ' + y + ' (di dalam lock)', 0, function () {
-      return withLock_(function () { urutkanMaintenance_(new Date()); buildRekap_(y); return buildLaporan_(y); });
+    total += R.timed('Malam: cek urutan Maintenance (baca saja)', 0, function () { return urutanMaintenance_(); }).ms;
+    total += R.timed('Malam: Rekap + Laporan ' + y + ' (di dalam lock)', 0, function () {
+      return withLock_(function () { buildRekap_(y); return buildLaporan_(y); });
     }).ms;
     var t = R.timed('Malam: TPM (+ terjemahan baru, maks ' + TPM_TR_MAX_ + ' teks per bahasa)', 0, function () { return buildTpm_(); });
     total += t.ms;
@@ -459,27 +495,96 @@ function ujtLayarTahap_(tahap, tag, next) {
   return R.selesai(next);
 }
 
+/**
+ * Hapus data uji (2.6.11). Di dalam lock aplikasi: putaran 2 menulis ulang tab Maintenance TANPA lock bersamaan dengan pembaruan
+ * malam (yang memegang lock) → isi sel tercampur, 83 pekerjaan hilang. Sekarang hanya baris uji yang dihapus (ID berawalan UJI-,
+ * atau ID uji tahap ini; sisa tahap yang terbunuh ikut terhapus), tab tidak ditulis ulang. Laporan & KPI dibangun ulang di awal
+ * menu periksa (ujtPerbarui_), supaya tahap tombol / layar tetap < 6 menit di hari Google lambat.
+ */
+var UJT_PERBARUI_ = 'UJT_PERBARUI';
 function ujtBersih_(ids, R) {
-  var ss = SpreadsheetApp.getActive(), drop = {};
-  ids.forEach(function (x) { drop[x] = true; });
-  [APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN].forEach(function (n) {
-    var sh = ss.getSheetByName(n), v = sh.getDataRange().getValues(), c = v[0].map(String).indexOf('Maintenance ID');
-    rewriteKeeping_(sh, v, function (row) { return !drop[row[c]]; });
-  });
-  var M = findSheet_(APP.SHEETS.MANUAL, ss);
-  if (M) rewriteKeeping_(M, M.getDataRange().getValues(), function (row) { return String(row.join('|')).indexOf('Uji beban (dihapus otomatis)') === -1; });
-  var L = findSheet_('Lines', ss);
-  rewriteKeeping_(L, L.getDataRange().getValues(), function (row) { return !/^UJI-/.test(String(row[0])); });   // UJI-1 + line serbuan UJI-S1…
+  var ss = SpreadsheetApp.getActive(), n = {};
+  var esc = function (x) { return String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
+  var re = '^(UJI-.*' + (ids || []).filter(function (x) { return x && !/^UJI-/.test(String(x)); }).map(function (x) { return '|' + esc(x); }).join('') + ')$';
+  withLock_(function () {
+    [APP.SHEETS.MAINT, APP.SHEETS.LOG, APP.SHEETS.PEMAKAIAN].forEach(function (name) {
+      var sh = findSheet_(name, ss), last = sh ? sh.getLastRow() : 0, c = sh ? headers_(sh, name).indexOf('Maintenance ID') : -1;
+      if (last < 2 || c < 0) return;
+      var rows = sh.getRange(2, c + 1, last - 1, 1).createTextFinder(re).useRegularExpression(true).matchEntireCell(true).findAll()
+        .map(function (rg) { return rg.getRow(); });
+      rowBlocks_(rows).reverse().forEach(function (b) { sh.deleteRows(b[0], b[1] - b[0] + 1); });
+      n[name] = rows.length;
+    });
+    var M = findSheet_(APP.SHEETS.MANUAL, ss);
+    if (M && M.getLastRow() > 1) rewriteKeeping_(M, M.getDataRange().getValues(), function (row) { return String(row.join('|')).indexOf('Uji beban (dihapus otomatis)') === -1; });
+    var L = findSheet_('Lines', ss);
+    rewriteKeeping_(L, L.getDataRange().getValues(), function (row) { return !/^UJI-/.test(String(row[0])); });   // UJI-1 + line serbuan UJI-S1…
+  }, MALAM_LOCK_MS_);
   resetHeaders_(); invalidateMaster_(); resetMaster_();
-  R.timed('Perbarui Laporan & KPI setelah data uji dibersihkan', 0, function () {
+  PropertiesService.getDocumentProperties().setProperty(UJT_PERBARUI_, '1');
+  if (R) R.info('Data uji dihapus (di dalam lock, baris saja)', JSON.stringify(n));
+}
+
+/** Laporan & KPI tahun ini dibangun ulang bila data uji dihapus sejak terakhir, sebelum isinya dibandingkan (menu periksa). */
+function ujtPerbarui_(R) {
+  var props = PropertiesService.getDocumentProperties();
+  if (!props.getProperty(UJT_PERBARUI_)) return;
+  R.timed('Perbarui Laporan & KPI (data uji tahap sebelumnya sudah dihapus)', 0, function () {
     withLock_(function () { buildLaporan_(UJT_.meta.year); });
     return buildKpi_(UJT_.meta.year);
   });
+  props.deleteProperty(UJT_PERBARUI_);
+}
+
+/**
+ * 2.6.11: isi Maintenance (+ arsip tahun lalu) = bundel PER PEKERJAAN: tiap ID tepat sekali, Line / Status / Mulai / Selesai sama.
+ * Putaran 2 hanya menghitung jumlah & status, sehingga 83 pekerjaan hilang + ±250 baris campuran (ID satu pekerjaan, Mulai pekerjaan
+ * lain) tidak tertangkap. Baris uji (UJI-…) diabaikan.
+ * @param {boolean} arsip sesudah arsip tahun lalu: Maintenance ∪ Arsip <tahun lalu>, dan tiap pekerjaan di tab yang benar
+ */
+function ujtKeutuhan_(R, tag, arsip) {
+  var y0 = UJT_.meta.year - 1, cols = ['Line', 'Status', 'Mulai', 'Selesai'], act = {}, dobel = [], salah = [];
+  var simpan = function (tab) {
+    return function (r) {
+      var id = String(r['Maintenance ID']);
+      if (/^UJI-/.test(id)) return;
+      if (act[id]) { dobel.push(id); return; }
+      act[id] = { tab: tab, v: cols.map(function (c) { return ujtNorm_(r[c]); }).join(' / '), r: r };
+    };
+  };
+  resetHeaders_();
+  readTable_(APP.SHEETS.MAINT).forEach(simpan('Maintenance'));
+  if (arsip && findSheet_(archiveName_(y0))) readTable_(archiveName_(y0)).forEach(simpan(archiveName_(y0)));
+  var hilang = [], campur = [], h = null, n = 0;
+  UJT_.meta.blobs['tab:Maintenance'].forEach(function (b) {
+    var rows = ujtBlob_(b[0]).rows;
+    if (b[1] === 0) { h = rows[0]; rows = rows.slice(1); }
+    var idx = cols.map(function (c) { return h.indexOf(c); }), iI = h.indexOf('Maintenance ID');
+    rows.forEach(function (row) {
+      n++;
+      var id = String(row[iI]), a = act[id];
+      if (!a) { hilang.push(id); return; }
+      a.ada = true;
+      var e = idx.map(function (j) { return ujtNorm_(row[j]); }).join(' / ');
+      if (e !== a.v) campur.push(id + ': harap ' + e + ' ≠ ' + a.v);
+      if (arsip) {   // tertinggal di tab aktif padahal final di tahun lalu / masuk arsip padahal bukan tahun lalu
+        var d = finalDate_(a.r);
+        if (a.tab === 'Maintenance' ? isArchivable_(a.r, y0) : !(d && yearOf_(d) === y0)) salah.push(id + ' di ' + a.tab);
+      }
+    });
+  });
+  var lebih = Object.keys(act).filter(function (id) { return !act[id].ada; });
+  var bad = hilang.length + dobel.length + campur.length + lebih.length + salah.length;
+  var contoh = function (a) { return a.length ? a.length + ' (' + a.slice(0, 4).join(' · ') + ')' : '0'; };
+  R.ok('Keutuhan isi' + tag + ': tiap pekerjaan bundel tepat sekali, Line / Status / Mulai / Selesai sama' + (arsip ? ', di tab yang benar' : ''), !bad,
+    n + ' pekerjaan dibanding · hilang ' + contoh(hilang) + ' · dobel ' + contoh(dobel) + ' · isi campur / berubah ' + contoh(campur) +
+    ' · bukan dari bundel ' + contoh(lebih) + (arsip ? ' · salah tab ' + contoh(salah) : ''));
 }
 
 function ujtTombol() {
   var R = ujtRunner_(4), ids = [];
   resetMaster_();
+  R.safe('Kecepatan Google', function () { ujtKecepatan_(R, ' (sebelum tombol)'); });
   try {
     ujtProfPasang_(true);
     ids = ujtAlur_(R, '', UJT_DUA_ ? { layar: false } : {});   // 2.6.10: profil 2 tahun → layar di menu 4b
@@ -568,6 +673,8 @@ function ujtPeriksa_(tahap) {
   var R = ujtRunner_(tahap), ss = SpreadsheetApp.getActive(), y = UJT_.meta.year, E = ujtExp_(), gen = UJT_.meta.generatedMs;
   var todayKey = Utilities.formatDate(new Date(), APP.TZ, 'yyyy-MM-dd'), curKey = todayKey.slice(0, 7), sameDay = todayKey === UJT_.meta.todayKey;
   resetMaster_();
+  R.safe('Perbarui sesudah data uji dihapus', function () { ujtPerbarui_(R); });
+  R.safe('Keutuhan isi per pekerjaan', function () { ujtKeutuhan_(R, '', false); });
   R.safe('Jumlah baris', function () {
     var C = UJT_.meta.counts, M = readTable_(APP.SHEETS.MAINT), st = {};
     M.forEach(function (r) { var k = r['Status'] + (r['Status review'] ? '/' + r['Status review'] : ''); st[k] = (st[k] || 0) + 1; });
@@ -667,17 +774,30 @@ function ujtPeriksa_(tahap) {
 
 // ---------- 7 · arsip ----------
 
+var UJT_ARSIP_LANJUT_ = 'UJT_ARSIP_LANJUT';
 function ujtArsip() {
-  var R = ujtRunner_(7), y0 = UJT_.meta.year - 1, ids = [];
+  var props = PropertiesService.getDocumentProperties(), lanjut = !!props.getProperty(UJT_ARSIP_LANJUT_);
+  var R = ujtRunner_(lanjut ? 7.1 : 7), y0 = UJT_.meta.year - 1, sebagian = false;   // 7.1 = arsip lanjutan (hasil 7 tetap tersimpan)
   resetMaster_();
   R.safe('Arsip ' + y0, function () {
-    var w = apiDashboard({ periode: 30 }).warnings || [];
-    R.ok('Dashboard memperingatkan data ' + y0 + ' belum diarsipkan', w.some(function (x) { return /belum diarsipkan/.test(x); }), w.join(' · '));
-    var a = R.timed('Arsipkan data ' + y0, UJT_BATAS_.malam, function () { return arsipkanTahun_(y0); });
+    if (!lanjut) {
+      ujtKeutuhan_(R, ' sebelum arsip', false);
+      var w = apiDashboard({ periode: 30 }).warnings || [];
+      R.ok('Dashboard memperingatkan data ' + y0 + ' belum diarsipkan', w.some(function (x) { return /belum diarsipkan/.test(x); }), w.join(' · '));
+    }
+    var a = R.timed((lanjut ? 'Arsip lanjutan (hapus dari tab aktif): ' : 'Arsipkan data ') + y0, UJT_BATAS_.malam, function () { return arsipkanTahun_(y0); });
+    if (a.v.sebagian) {   // 2.6.11: waktu hampir habis sesudah salin + verifikasi → berhenti aman, rantai menjalankan menu 7 lagi
+      sebagian = true;
+      props.setProperty(UJT_ARSIP_LANJUT_, '1');
+      R.info('Arsip berhenti aman di batas waktu (2.6.11)', a.v.maintenance + ' pekerjaan tersalin & terverifikasi di "' + archiveName_(y0) + '", belum dihapus dari tab aktif (tidak ada yang hilang). Menu 7 dijalankan lagi.');
+      return;
+    }
+    props.deleteProperty(UJT_ARSIP_LANJUT_);
     R.ok('Arsip: ' + UJT_.meta.arsip + ' pekerjaan dipindah', a.v.maintenance === UJT_.meta.arsip, JSON.stringify({ maintenance: a.v.maintenance, log: a.v.log, sparepart: a.v.sparepart }));
     resetMaster_();
     R.info('Maintenance setelah arsip', readTable_(APP.SHEETS.MAINT).length + ' baris');
   });
+  if (sebagian) return R.selesai('BELUM SELESAI: jalankan menu 7 lagi (arsip melanjutkan, aman)');
   if (UJT_DUA_) return R.selesai('Lanjut menu 7b.');   // arsip 2 tahun ±3 menit: tombol & layar di menu sendiri
   // arsip ±90 dtk: layar diukur 2× (bukan 3×) supaya tahap ini tetap ≤ 6 menit
   ujtSesudahArsip_(R);
@@ -696,6 +816,7 @@ function ujtSesudahArsip_(R) {
 function ujtTombolArsip() {
   var R = ujtRunner_(7.5);
   resetMaster_();
+  R.safe('Kecepatan Google', function () { ujtKecepatan_(R, ' (sebelum tombol)'); });
   ujtSesudahArsip_(R);
   return R.selesai('Lanjut menu 7d.');
 }
@@ -734,13 +855,17 @@ function ujtProfPasang_(lambat) {
     };
   });
   // kunci dipecah: tunggu kunci · isi · flush (flush = tulisan diterapkan; sering menunggu hitung ulang rumus)
+  // 2.6.11: sama persis dengan withLock_ (src/Db.js) termasuk LOCK_DEPTH_. Dulu tanpa LOCK_DEPTH_ → appendObj_ memakai appendRow
+  // (jalur lambat, 0,3–2,4 dtk per baris Log) selama diukur: waktu tombol tahap 4 / 7b lebih lambat dari produksi.
   asli.withLock_ = G.withLock_;
-  G.withLock_ = function (fn) {
+  G.withLock_ = function (fn, waitMs) {
     var t0 = Date.now(), lock = LockService.getScriptLock();
-    if (!lock.tryLock(APP.LOCK_TIMEOUT_MS)) throw new Error('Server sedang sibuk, coba lagi beberapa detik.');
+    if (!lock.tryLock(waitMs || APP.LOCK_TIMEOUT_MS)) throw new Error('Server sedang sibuk, coba lagi beberapa detik.');
     ujtProfAdd_('kunci: tunggu', Date.now() - t0);
     var t1 = Date.now();
+    LOCK_DEPTH_++;
     try { return fn(); } finally {
+      LOCK_DEPTH_--;
       ujtProfAdd_('kunci: isi', Date.now() - t1);
       var t2 = Date.now();
       SpreadsheetApp.flush();
@@ -846,6 +971,10 @@ function ujtKapasitas() {
   var R = ujtRunner_(sesudah ? 7.9 : 6.5);   // 6b sebelum arsip tahun lalu, 7c sesudah (dua hasil tersimpan berdampingan)
   if (!sesudah) R.safe('Tab backup (2.6.6)', function () {   // seperti trigger 03:00: minggu & bulan lalu, lalu dihapus lagi (tidak ikut terhitung)
     var props = PropertiesService.getDocumentProperties(), simpan = props.getProperty(BACKUP_PROP_);
+    // 2.6.11: tab backup sisa putaran sebelumnya (terbunuh sebelum dihapus) membuat tidak ada tab "baru" → putaran 2 GAGAL palsu
+    var sisa = ss.getSheets().filter(function (sh) { return BACKUP_RE_.test(sh.getName()); });
+    if (sisa.length) R.info('Tab backup sisa uji sebelumnya dihapus dulu', sisa.map(function (sh) { return sh.getName(); }).join(', '));
+    sisa.forEach(function (sh) { ss.deleteSheet(sh); });
     var ada = {};
     ss.getSheets().forEach(function (sh) { ada[sh.getName()] = true; });
     var t = R.timed('Buat tab backup minggu & bulan lalu (trigger harian 03:00)', 120000, function () { return backupJalan_(new Date(), true); });
@@ -875,6 +1004,7 @@ function ujtKapasitas() {
     R.info('Tab dengan > 2.000 baris kosong', boros.length ? boros.map(function (t) { return t.n + ' ' + fmt(t.r - t.lr) + ' baris × ' + t.c; }).join(' · ') : 'tidak ada');
     R.ok('Kapasitas sesudah ' + Math.round(tahun * 10) / 10 + ' tahun data < 50% batas', total < BATAS / 2, pct(total));
   });
+  if (sesudah) R.safe('Keutuhan isi sesudah arsip', function () { ujtKeutuhan_(R, ' sesudah arsip (Maintenance + ' + archiveName_(UJT_.meta.year - 1) + ')', true); });
   return R.selesai(sesudah ? 'Lanjut menu 9 (opsional) atau kirim "sudah" ke Claude.' : 'Lanjut menu 7.');
 }
 
@@ -887,7 +1017,8 @@ function ujtKapasitas() {
 function ujtJanuari() {
   var R = ujtRunner_(3.5), y = UJT_.meta.year, total = 0, stop = false;
   resetMaster_();
-  var langkah = [['Cek urutan Maintenance + Rekap + Laporan ' + y + ' (di dalam lock)', function () { return withLock_(function () { urutkanMaintenance_(new Date()); buildRekap_(y); return buildLaporan_(y); }); }],
+  var langkah = [['Cek urutan Maintenance (baca saja)', function () { return urutanMaintenance_(); }],
+    ['Rekap + Laporan ' + y + ' (di dalam lock)', function () { return withLock_(function () { buildRekap_(y); return buildLaporan_(y); }); }],
     ['Rekap + Laporan ' + (y - 1) + ' (Januari)', function () { return withLock_(function () { buildRekap_(y - 1); return buildLaporan_(y - 1); }); }],
     ['TPM', function () { return buildTpm_(); }],
     ['KPI ' + y + ' + KPI ' + (y - 1) + ' (Januari) + tutup bulan otomatis', function () { buildKpi_(y); buildKpi_(y - 1); return kpiTutupOtomatis_(); }],
@@ -927,7 +1058,8 @@ function ujtLineUji_(id, nama) {
 /**
  * Yang wajar dilakukan admin di spreadsheet: mengurutkan tab Maintenance per Line, menyaring, menyisipkan kolom "No." di kiri
  * (juga di Users), menyisipkan kolom catatan di tengah, mengetik di bawah data. Sesudahnya aplikasi harus tetap benar:
- * login, ID baru unik, nilai masuk kolom yang benar, Laporan lengkap; malam mengurutkan ulang. Lalu tab dipulihkan + menu 6d.
+ * login, ID baru unik, nilai masuk kolom yang benar, Laporan lengkap; malam mendeteksi (tanpa menulis ulang) dan Dashboard memberi
+ * tahu; tombol yang berjalan saat admin menyisipkan baris tetap menulis ke baris yang benar (2.6.11). Lalu tab dipulihkan + menu 6d.
  */
 function ujtCeroboh() {
   var R = ujtRunner_(6.6), ss = SpreadsheetApp.getActive(), ids = [], B = UJT_BATAS_, SAMPAH = 'cek lagi besok (admin)';
@@ -975,12 +1107,33 @@ function ujtCeroboh() {
       R.ok('Nilai masuk kolom yang benar (menurut nama kolom)', !!r3 && r3['Line'] === UJT_LINE_ && r3['Status'] === APP.STATUS.COMPLETED && r3['No.'] === '' && r3['Catatan admin'] === '',
         r3 ? r3['Line'] + ' · ' + r3['Status'] + ' · No.="' + r3['No.'] + '" · Catatan admin="' + r3['Catatan admin'] + '"' : 'tidak ada');
       R.timed('Dashboard 30 hari (tab bergeser & diurutkan)', B.layar, function () { return apiDashboard({ periode: 30 }); });
-      var t = R.timed('Malam: cek urutan → urutkan ulang (di dalam lock)', 60000, function () { return withLock_(function () { return urutkanMaintenance_(new Date()); }, MALAM_LOCK_MS_); });
-      R.ok('Malam mendeteksi tab tidak urut dan mengurutkan ulang', t.v === true, String(t.v));
+      // 2.6.11: malam hanya MEMBACA urutan (2.6.10 menulis ulang seluruh tab → bertabrakan di putaran 2) → Dashboard memberi tahu admin
+      var u = R.timed('Malam: cek urutan Maintenance (baca saja)', 10000, function () { return urutanMaintenance_(); }).v, sekarang = new Date().toISOString(), sp = {};
+      sp[SEHAT_KEY_ + 'malam'] = JSON.stringify({ mulai: sekarang, selesai: sekarang, gagal: [], urut: u });
+      var wu = sehatPeringatan_(sp, new Date()).filter(function (x) { return /tidak urut menurut Mulai/.test(x); });
+      R.ok('Malam mendeteksi tab diurutkan → Dashboard admin diberi tahu cara mengembalikan (tab tidak ditulis ulang)', wu.length === 1,
+        u.turun + ' dari ' + u.n + ' baris turun · ' + (wu[0] || 'tanpa peringatan'));
+      // 2.6.11 pengaman baris: admin menyisipkan baris di atas TEPAT di antara baca & tulis tombol (spreadsheet tidak ikut lock aplikasi)
+      var id4 = mulai().open.id, SELA = 'baris disisipkan admin (uji pengaman)';
+      ids.push(id4);
       resetHeaders_();
-      var cm = headers_(sh, APP.SHEETS.MAINT).indexOf('Mulai'), prev = 0, turun = 0;
-      sh.getRange(2, cm + 1, sh.getLastRow() - 1, 1).getValues().forEach(function (v) { if (v[0] instanceof Date) { if (v[0].getTime() < prev) turun++; else prev = v[0].getTime(); } });
-      R.ok('Sesudah malam: kolom Mulai urut naik (ekor tab = pekerjaan terbaru lagi)', !turun, turun + ' baris turun');
+      var cL = headers_(sh, APP.SHEETS.MAINT).indexOf('Line'), G = globalThis, asliPlan = G.planWrites_;
+      var sidik = function (rows) {
+        return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, rows.filter(function (r) { return String(r['Maintenance ID']) !== id4; })
+          .map(function (r) { return [r['Maintenance ID'], r['Line'], r['Status'], ujtNorm_(r['Mulai']), ujtNorm_(r['Selesai'])].join('|'); }).sort().join('\n')));
+      };
+      var lain0 = sidik(readTable_(APP.SHEETS.MAINT));
+      G.planWrites_ = function () { var p = asliPlan.apply(this, arguments); sh.insertRowBefore(2); sh.getRange(2, cL + 1).setValue(SELA); return p; };
+      try {
+        R.timed('Pause saat admin menyisipkan baris di tengah tombol', B.tombol, function () { return act('apiPause', [id4, { values: { 'Alasan pause': UJT_.meta.isian.pause } }]); });
+      } finally { G.planWrites_ = asliPlan; }
+      resetHeaders_();
+      var M4 = readTable_(APP.SHEETS.MAINT), r4 = M4.filter(function (r) { return String(r['Maintenance ID']) === id4; }), lain1 = sidik(M4);
+      R.ok('Pengaman baris: Pause tertulis di baris pekerjaan itu, pekerjaan lain tidak tertimpa, tanpa dobel', r4.length === 1 && r4[0]['Status'] === APP.STATUS.PAUSE && lain1 === lain0,
+        r4.length + ' baris ' + id4 + (r4[0] ? ' · ' + r4[0]['Status'] + ' · baris ' + r4[0]._row : '') + ' · pekerjaan lain ' + (lain1 === lain0 ? 'sama persis' : 'BERUBAH'));
+      sh.createTextFinder(SELA).matchEntireCell(true).findAll().map(function (rg) { return rg.getRow(); }).sort(function (a, b) { return b - a; })
+        .forEach(function (n) { sh.deleteRow(n); });
+      resetHeaders_();
       R.timed('Laporan dibangun ulang (kolom bergeser)', B.malam, function () { return withLock_(function () { return buildLaporan_(UJT_.meta.year); }); });
       var lap = ss.getSheetByName(laporanName_(UJT_.meta.year)), ada = lap ? lap.createTextFinder(id3).matchEntireCell(true).findNext() : null;
       R.ok('Laporan memuat pekerjaan baru', !!ada, ada ? 'baris ' + ada.getRow() : 'tidak ada');
@@ -1076,7 +1229,7 @@ function ujtSerbuMalam(e) {
   if (Date.now() < plan.malam) Utilities.sleep(plan.malam - Date.now());
   var t = Date.now(), out = {};
   try {
-    withLock_(function () { out.mulaiLock = Date.now() - t; urutkanMaintenance_(new Date()); buildRekap_(UJT_.meta.year); buildLaporan_(UJT_.meta.year); }, MALAM_LOCK_MS_);
+    withLock_(function () { out.mulaiLock = Date.now() - t; buildRekap_(UJT_.meta.year); buildLaporan_(UJT_.meta.year); }, MALAM_LOCK_MS_);
     out.ms = Date.now() - t;
   } catch (err) { out.err = String(err && err.message || err).slice(0, 200); }
   props.setProperty(UJT_SERBU_ + '_m', JSON.stringify(out));
@@ -1088,6 +1241,16 @@ function ujtSerbuanHasil() {
   R.safe('Serbuan ' + UJT_SERBU_N_ + ' tombol bersamaan', function () {
     var plan = JSON.parse(props.getProperty(UJT_SERBU_) || 'null');
     if (!R.ok('Jadwal serbuan ada (menu 6e sudah dijalankan)', !!plan, '')) return;
+    // 2.6.11: tunggu sampai SEMUA tombol + pembaruan malam melapor (putaran 2 membaca & membersihkan saat masih berjalan)
+    var tw = Date.now(), lengkap = false;
+    for (var k = 0; k < 20 && !lengkap; k++) {
+      var P = PropertiesService.getDocumentProperties(), n = 0;
+      for (var q = 0; q < UJT_SERBU_N_ + 2; q++) if (P.getProperty(UJT_SERBU_ + '_r' + q)) n++;
+      lengkap = n >= UJT_SERBU_N_ + 2 && !!P.getProperty(UJT_SERBU_ + '_m');
+      if (!lengkap) Utilities.sleep(10000);
+    }
+    R.info('Menunggu semua tombol serbuan & pembaruan malam selesai', (lengkap ? 'lengkap' : 'TIDAK lengkap') + ' sesudah ' + Math.round((Date.now() - tw) / 1000) + ' dtk');
+    props = PropertiesService.getDocumentProperties();
     var res = [];
     for (var i = 0; i < UJT_SERBU_N_ + 2; i++) { var x = props.getProperty(UJT_SERBU_ + '_r' + i); if (x) res.push(JSON.parse(x)); }
     var siang = res.filter(function (r) { return !r.malam; }), malam = res.filter(function (r) { return r.malam; });
@@ -1157,7 +1320,7 @@ function ujtRantai() {
       (lama.i + 1) + ' / ' + UJT_LANGKAH_.length + ').\n\nMulai ulang DARI AWAL (data uji dimuat ulang)? Pilih No untuk membiarkannya berjalan.', ui.ButtonSet.YES_NO);
     if (tny !== ui.Button.YES) return;
   }
-  ['UJT_RANTAI_SEWA', 'UJT_ISI_SEWA', UJT_ISI_, UJT_MARK_].forEach(function (k) { props.deleteProperty(k); });
+  ['UJT_RANTAI_SEWA', 'UJT_ISI_SEWA', UJT_ISI_, UJT_MARK_, UJT_ARSIP_LANJUT_, UJT_PERBARUI_].forEach(function (k) { props.deleteProperty(k); });
   props.setProperty('UJT_ME', me);
   props.setProperty(UJT_RANTAI_, JSON.stringify({ i: 0, mulai: Date.now(), ulang: 0, log: [] }));
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'ujtRantaiJalan') ScriptApp.deleteTrigger(t); });
@@ -1197,7 +1360,7 @@ function ujtRantaiLangkah_() {
   try { hasil = String(UJT_FN_[name]()); } catch (err) { hasil = 'ERROR ' + (err && err.message || err); }
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'ujtRantaiJalan') ScriptApp.deleteTrigger(t); });
   st.berjalan = null;
-  var ulang = name === 'ujtIsi' && /BELUM SELESAI/.test(hasil) && st.ulang < 12;
+  var ulang = (name === 'ujtIsi' || name === 'ujtArsip') && /BELUM SELESAI/.test(hasil) && st.ulang < 12;   // 2.6.11: arsip yang berhenti aman
   if (ulang) st.ulang++; else st.i++;
   st.log.push(name + ': ' + hasil.slice(0, 160));
   if (!PropertiesService.getDocumentProperties().getProperty(UJT_RANTAI_)) return;   // dihentikan selama tahap berjalan

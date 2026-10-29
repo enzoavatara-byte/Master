@@ -89,6 +89,10 @@ Tahap berikutnya: download riwayat (.xlsx) dan **2.5.3** statistik.
 
 ## 2. Upgrade
 
+### Ke 2.6.11 (dari 2.6.10 / 2.6.9)
+Ganti `Rekap`, `Db`, `Maintenance`, `Kpi`, `Tpm`, `Config`, `Panduan` (atau paste semua `src/`), lalu Deploy → Manage deployments → ✏️ → **New version**. Run `setup` tidak wajib. Dari 2.6.8 atau lebih lama: lihat *Ke 2.6.9*.
+Tidak ada sheet, kolom, trigger, atau izin baru. Yang berubah: malam **tidak lagi menulis ulang** tab Maintenance (hanya membaca urutannya), tombol memastikan baris yang ditulis masih milik pekerjaannya, dan arsip tidak bisa menghapus data tahun berjalan bila terhenti di tengah.
+
 ### Ke 2.6.10 (dari 2.6.9)
 Ganti `Rekap`, `Config` (Script), lalu Deploy → Manage deployments → ✏️ → **New version**. Run `setup` tidak wajib. Dari 2.6.8 atau lebih lama: lihat *Ke 2.6.9*.
 
@@ -236,9 +240,9 @@ Cek kapan saja, login sebagai akun yang menjalankan `setup`: Apps Script → ⏰
 | Tiap Senin | Download tab **Backup minggu …**, simpan di tempat lain, lalu hapus tabnya | Spreadsheet → File → Download |
 | Tanggal 3 | Download & hapus tab **Backup bulan …**. Cek KPI bulan lalu sudah "Ditutup" (otomatis tanggal 2 bila tidak ada review) | Spreadsheet / Dashboard |
 | Ada pekerjaan "Perlu review" | Review Abandoned (hitung / keluarkan), lalu tutup ulang bulan itu bila sudah ditutup | Aplikasi → Review |
-| Tiap Januari (wajib) | Menu → **Arsipkan data tahun lalu** (±3 menit). Lupa = layar admin makin lambat & file makin penuh | Spreadsheet → menu MTTR |
+| Tiap Januari (wajib) | Menu → **Arsipkan data tahun lalu** (±3–5 menit), di luar jam kerja; jangan edit tab Maintenance / Log selama berjalan. Lupa = tombol & layar admin makin lambat (uji 2 tahun: tombol 7–15 dtk di hari Google lambat) & file makin penuh. Bila muncul "Arsip belum selesai (aman)": jalankan menu yang sama sekali lagi | Spreadsheet → menu MTTR |
 | Teknisi / line / part berubah | Edit tab `Users` / `Lines` / `Sparepart`; jangan hapus baris yang punya riwayat, cukup `Aktif = Tidak` | Spreadsheet |
-| Ingin melihat data per Line / Status | **Data → Create filter view** (tampilan pribadi). Jangan urutkan tab Maintenance; bila terlanjur, aplikasi tetap benar dan mengurutkan ulang malam itu | Spreadsheet |
+| Ingin melihat data per Line / Status | **Data → Create filter view** (tampilan pribadi). Jangan urutkan tab Maintenance; bila terlanjur, data tetap benar, dan Dashboard menulis cara mengembalikan urutannya (klik kolom Mulai → Data → Urutkan sheet A → Z, di luar jam kerja) | Spreadsheet |
 | Serah terima akun pemilik | Lihat *Serah terima ke akun lain* di atas | Apps Script |
 
 ### Uji 2 tahun sendiri (sebelum serah terima berikutnya)
@@ -412,6 +416,8 @@ Isian bebas murni membuat rekap tidak berguna ("sensor eror" ≠ "sensor error")
    Kamus UI 中文 (`src/I18n.html`) dibuat dengan bantuan AI: **minta teknisi China mengecek istilahnya** (koreksi cukup di file itu).
 7. **Kamera di dalam app tidak dijamin** di semua HP. Ada cadangan (kamera HP / cari line).
 8. **Performa**: jeda tetap ±1–2 detik per perjalanan ke server Apps Script tidak bisa dihilangkan. Tab `Maintenance` dibaca penuh per request → **arsipkan per tahun**.
+   Kecepatan Google sendiri berubah-ubah: di uji 2 tahun (29 Okt 2026) semua yang sama persis — termasuk hitungan murni tanpa spreadsheet — 1,3–2,9× lebih lambat daripada sehari sebelumnya. Di hari seperti itu, dengan 2 tahun data belum diarsip, tombol 7–15 detik; sesudah arsip 4–6 detik.
+14. **Edit manual tab Maintenance saat aplikasi menulis.** Spreadsheet tidak ikut kunci aplikasi. Sejak 2.6.11 tombol memeriksa lagi barisnya tepat sebelum menulis (pindah → dicari ulang; hilang → ditolak tanpa menulis), sehingga jendela risikonya kurang dari 1 detik, tetapi tidak nol. Jangan mengurutkan / menghapus baris tab Maintenance saat jam kerja.
 9. **MTTR dimulai saat teknisi menekan Mulai.** Waktu dari mesin rusak sampai teknisi datang (respon) tidak tercatat, jadi MTTR & downtime lebih kecil dari downtime produksi sebenarnya. Kalau KPI pabrik memakai downtime dari laporan produksi, angkanya akan berbeda.
 10. **MTBF sebagus jam operasinya.** `JAM_OPERASI_PER_HARI`, `HARI_OPERASI`, `TANGGAL_LIBUR` yang tidak sesuai jadwal produksi (mis. line yang berhenti 2 minggu) membuat MTBF terlalu tinggi. Line yang melayani dua project dihitung penuh di kedua project, jadi MTBF project lebih tinggi daripada MTBF Plant.
 11. **Line = unit**: satu line fisik dengan beberapa mesin penting butuh beberapa baris `Lines` dan beberapa QR. Kalau tidak, dua teknisi tidak bisa mencatat dua mesin di line yang sama bersamaan.

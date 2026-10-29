@@ -571,6 +571,7 @@ function mutate_(id, user, allowed, fn) {
     var now = new Date();
     // 2.6.8 K8: semua baca sebelum tulisan pertama → satu kali kirim. Pemakaian dibaca di fn (Selesai), juga sebelum tulisan.
     var plan = planWrites_(r, [APP.SHEETS.LOG]);
+    pastikanBaris_(r);   // 2.6.11: sebelum tulisan pertama (Selesai menulis Pemakaian dulu di fn)
     try {
       var ev = fn(r, now);    // [kejadian, detail log, sparepart (khusus Selesai)]
       setNames_(r);

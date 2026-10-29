@@ -989,7 +989,17 @@ test('arsip: pindah pekerjaan final 2026 + Log-nya; yang Pending/menunggu review
   const mBefore = ctx.readTable_('Maintenance').length, lBefore = ctx.readTable_('Log').length;
   const usageArchived = ctx.readTable_('Pemakaian Sparepart').filter(u => archived.includes(u['Maintenance ID'])).length;
   assert.ok(usageArchived >= 5, 'ada pemakaian sparepart yang ikut diarsip: ' + usageArchived);
+  // 2.6.11: waktu eksekusi seolah hampir habis sesudah salin + verifikasi → berhenti aman (tersalin, belum dihapus), run kedua menyelesaikan
+  const batas = ctx.ARSIP_BATAS_MS_;
+  ctx.ARSIP_BATAS_MS_ = -1;
+  let part;
+  try { part = ctx.arsipkanTahun_(2026); } finally { ctx.ARSIP_BATAS_MS_ = batas; }
+  assert.strictEqual(part.sebagian, true, 'berhenti sebelum menghapus');
+  assert.strictEqual(ctx.readTable_('Maintenance').length, mBefore, 'tab aktif belum disentuh');
+  assert.strictEqual(ctx.readTable_('Log').length, lBefore);
+  jeq(ctx.readTable_('Arsip 2026').map(r => r['Maintenance ID']).sort(), archived.slice().sort(), 'salinan arsip lengkap');
   const out = ctx.arsipkanTahun_(2026);
+  assert.ok(!out.sebagian, 'run kedua selesai');
   const lapBefore = lap(2026).rows;
   ['Maintenance', 'Log', 'Pemakaian Sparepart'].forEach(n => { const sh = ss.getSheetByName(n);
     assert.strictEqual(sh.getMaxRows(), sh.getLastRow() + 500, n + ': baris yang dikosongkan arsip dihapus, sisa 500 (2.6.5)'); });
@@ -1015,6 +1025,27 @@ test('arsip: pindah pekerjaan final 2026 + Log-nya; yang Pending/menunggu review
   jeq(rekapRows(2026), before, 'rekap 2026 sama sebelum & sesudah arsip');
   assert.strictEqual(ctx.arsipkanTahun_(2026).maintenance, 0, 'jalankan ulang: tidak ada yang dobel');
   assert.strictEqual(ctx.readTable_('Arsip 2026').length, archived.length);
+});
+
+test('2.6.11 tulis ulang tab (arsip / hapus data testing) terbunuh di tengah → tidak ada baris yang disimpan hilang', () => {
+  const sh = ss.insertSheet('Uji tulis ulang'), head = ['Maintenance ID', 'Isi'];
+  const vals = [head].concat(Array.from({ length: 10 }, (_, i) => ['M' + i, 'isi ' + i]));
+  sh.getRange(1, 1, vals.length, 2).setValues(vals);
+  const keep = (row) => Number(String(row[0]).slice(1)) % 3 !== 0;   // simpan 6 dari 10
+  const kept = vals.slice(1).filter(keep).map(r => r[0]);
+  const proto = Object.getPrototypeOf(sh.getRange(1, 1)), asli = { setValues: proto.setValues, clearContent: proto.clearContent };
+  let n = 0;
+  const mati = function () { if (++n > 1) throw new Error('Exceeded maximum execution time'); };
+  proto.setValues = function () { mati(); return asli.setValues.apply(this, arguments); };
+  proto.clearContent = function () { mati(); return asli.clearContent.apply(this, arguments); };
+  try { assert.throws(() => ctx.rewriteKeeping_(sh, vals, keep), /maximum execution/); }
+  finally { proto.setValues = asli.setValues; proto.clearContent = asli.clearContent; }
+  const ada = sh.data.slice(1).map(r => r[0]);
+  assert.ok(kept.every(id => ada.includes(id)), 'semua baris yang disimpan masih ada: ' + ada.join(','));
+  jeq(ada.slice(0, kept.length), kept, 'baris yang disimpan sudah di atas; sisa lama di ekor');
+  assert.strictEqual(ctx.rewriteKeeping_(sh, vals, keep), kept.length);
+  jeq(sh.data.slice(1).filter(r => r[0] !== '').map(r => r[0]), kept, 'tanpa gangguan: hanya yang disimpan');
+  ss.deleteSheet(sh);
 });
 
 test('arsip: aplikasi tetap jalan; arsip tidak tampil di Riwayat; peringatan hilang', () => {
@@ -2966,7 +2997,7 @@ test('2.6.9 KPI tab kolom M Availability + baris Proses, salinan KPI data pulang
   assert.ok(findCell(R, new RegExp('^' + ctx.KPI_RATA_.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$')), 'baris rata-rata');
 });
 
-test('2.6.9 integritas: tab Maintenance diurutkan admin → ID baru tetap unik; malam mengurutkan ulang + Log', () => {
+test('2.6.9 integritas: tab Maintenance diurutkan admin → ID baru tetap unik; 2.6.11 malam tidak menulis ulang, Dashboard memberi tahu', () => {
   const sh = ss.getSheetByName('Maintenance'), h = sh.data[0], cid = h.indexOf('Maintenance ID'), cl = h.indexOf('Line'), cm = h.indexOf('Mulai');
   const open = (id) => ctx.readTable_('Maintenance').some(r => r.Line === id && ['Aktif', 'Pause', 'Pending'].includes(r.Status));
   const line = ctx.readTable_('Lines').map(l => l['Line ID']).filter(id => /^L\d+$/.test(id) && !open(id))[0];
@@ -2984,29 +3015,76 @@ test('2.6.9 integritas: tab Maintenance diurutkan admin → ID baru tetap unik; 
   assert.strictEqual(sh.data.filter(r => r[cid] === id3).length, 1, 'ID unik');
   assert.strictEqual(Number(id3.slice(-2)), Math.max(...ids.map(x => Number(x.slice(-2)))) + 1, 'urutan berikutnya');
   as(tech, () => ctx.apiCancel(id3, { values: { 'Alasan cancel': 'Lainnya' }, other: { 'Alasan cancel': 'uji urut' } }));
-  // malam: tab diurutkan admin (per Line, Z→A) → diurutkan ulang menurut Mulai di memori (2.6.10, tanpa Range.sort) + dicatat
-  const sig = (rows) => rows.map(r => JSON.stringify(r.map(v => (v instanceof Date ? v.getTime() : v)))).sort().join('\n');
+  // 2.6.11 malam: tab diurutkan admin (per Line, Z→A) → TIDAK ditulis ulang (2.6.9/2.6.10 menulis ulang seluruh tab: di Google asli
+  // bertabrakan dengan penulis lain → isi tercampur); hanya dibaca, Dashboard admin diberi tahu cara mengembalikan
+  const sig = (rows) => rows.map(r => JSON.stringify(r.map(v => (v instanceof Date ? v.getTime() : v)))).join('\n');
+  const peringatan = () => ctx.sehatPeringatan_(ctx.PropertiesService.getDocumentProperties().getProperties(), new FakeDate()).filter(w => /tidak urut menurut Mulai/.test(w));
+  const byMulai = (rows) => rows.slice().sort((a, b) => (a[cm] instanceof Date ? a[cm].getTime() : Infinity) - (b[cm] instanceof Date ? b[cm].getTime() : Infinity));
   sh.data = [h].concat(sh.data.slice(1).filter(r => r.some(v => v !== '')).sort((a, b) => String(b[cl]).localeCompare(String(a[cl]))));
-  sh.data.push(h.map((x, j) => (j === 2 ? 'cek lagi besok (admin)' : '')));   // ketikan admin di bawah data (tanpa ID)
-  const isi0 = sig(sh.data.slice(1)), urut = () => ctx.readTable_('Log').filter(r => r.Kejadian === 'urut ulang').length, u0 = urut();
-  const min0 = ctx.URUT_MIN_;
-  ctx.URUT_MIN_ = 5;   // data test kecil (±30 baris); produksi 50
-  try {
+  const isi0 = sig(sh.data.slice(1));
   ctx.refreshRekap();
-  const t = sh.data.slice(1).filter(r => r[cm] instanceof Date).map(r => r[cm].getTime());
-  assert.ok(t.length > 20 && t.every((v, i) => !i || t[i - 1] <= v), 'Mulai urut naik (' + t.length + ' baris)');
-  assert.strictEqual(sig(sh.data.slice(1)), isi0, 'isi baris identik, hanya urutannya');
-  assert.strictEqual(sh.data[sh.data.length - 1][2], 'cek lagi besok (admin)', 'baris tanpa ID tetap di bawah');
-  assert.strictEqual(urut(), u0 + 1, 'Log: urut ulang');
-  sh.data.pop();
-  ctx.refreshRekap();
-  assert.strictEqual(urut(), u0 + 1, 'sudah urut → tidak ditulis ulang');
-  // sedikit baris tidak urut (Input Manual bertanggal mundur ditambah di bawah) → tidak ditulis ulang tiap malam
-  const rest = sh.data.slice(1), few = rest.splice(5, 3);
+  assert.strictEqual(sig(sh.data.slice(1)), isi0, 'malam tidak menulis ulang tab (isi & urutan sama persis)');
+  const w = peringatan();
+  assert.strictEqual(w.length, 1, 'Dashboard: tab tidak urut');
+  assert.match(w[0], /Data tetap aman/);
+  assert.match(w[0], /Urutkan sheet A → Z/);
+  assert.ok(ctx.apiDashboard({ periode: 30 }).warnings.some(x => /tidak urut menurut Mulai/.test(x)), 'tampil di Dashboard admin');
+  // admin mengembalikan urutan; beberapa Input Manual bertanggal mundur di bawah (≈ 1%) → tanpa peringatan
+  const rest = byMulai(sh.data.slice(1)), few = rest.splice(5, 1);
   sh.data = [h].concat(rest, few);
   ctx.refreshRekap();
-  assert.strictEqual(urut(), u0 + 1, '3 baris bertanggal mundur di bawah → dibiarkan');
-  } finally { ctx.URUT_MIN_ = min0; }
+  assert.strictEqual(peringatan().length, 0, '1 baris mundur dari ' + rest.length + ' → tanpa peringatan');
+  sh.data = [h].concat(byMulai(sh.data.slice(1)));
+  ctx.refreshRekap();
+});
+
+test('2.6.11 pengaman baris: tab Maintenance diurutkan / baris dihapus admin DI TENGAH tombol → tulisan tetap di baris pekerjaan itu, atau ditolak tanpa menulis', () => {
+  const sh = ss.getSheetByName('Maintenance'), h = sh.data[0], cid = h.indexOf('Maintenance ID'), cst = h.indexOf('Status');
+  const open = (id) => ctx.readTable_('Maintenance').some(r => r.Line === id && ['Aktif', 'Pause', 'Pending'].includes(r.Status));
+  const line = ctx.readTable_('Lines').map(l => l['Line ID']).filter(id => /^L\d+$/.test(id) && !open(id))[0];
+  const tech = ['budi@gmail.com', 'andi@gmail.com', 'sari@gmail.com', 'dewi@gmail.com'].filter(e => !ctx.readTable_('Maintenance').some(r => String(r['Teknisi terakhir']).toLowerCase() === e && ['Aktif', 'Pause'].includes(r.Status)))[0];
+  const rowSig = (r) => JSON.stringify(r.map(v => (v instanceof Date ? v.getTime() : v)));
+  const lain = (id) => sh.data.slice(1).filter(r => r[cid] !== id).map(rowSig).sort().join('\n');
+  const asli = ctx.planWrites_;
+  const sela = (fn) => { ctx.planWrites_ = function () { const p = asli.apply(this, arguments); fn(); return p; }; };   // admin bertindak sesudah tombol membaca
+  const id = as(tech, () => ctx.apiStart(line, { baterai: 'E22H' })).open.id;
+  advance(2);
+  try {
+    // 1. diurutkan (dibalik) antara baca & tulis → Pause masuk ke baris pekerjaan itu; baris lain utuh; tanpa dobel
+    const lain0 = lain(id);
+    sela(() => { sh.data = [h].concat(sh.data.slice(1).reverse()); });
+    as(tech, () => ctx.apiPause(id, { values: { 'Alasan pause': 'Istirahat' } }));
+    const rows = sh.data.slice(1).filter(r => r[cid] === id);
+    assert.strictEqual(rows.length, 1, 'tanpa ID dobel');
+    assert.strictEqual(rows[0][cst], 'Pause', 'Pause tertulis di baris pekerjaan itu');
+    assert.strictEqual(lain(id), lain0, 'baris pekerjaan lain tidak tertimpa');
+    // 2. Selesai + part (Pemakaian ditulis lebih dulu di fn) dengan tab dibalik lagi
+    advance(2);
+    ctx.planWrites_ = asli;
+    as(tech, () => ctx.apiResume(id));
+    const lain1 = lain(id);
+    sela(() => { sh.data = [h].concat(sh.data.slice(1).reverse()); });
+    const part = ctx.masterData_().spareparts[0];
+    as(tech, () => ctx.apiComplete(id, Object.assign({}, done, { parts: [{ id: part.id, qty: 1 }] })));
+    assert.strictEqual(sh.data.slice(1).filter(r => r[cid] === id)[0][cst], 'Completed');
+    assert.strictEqual(lain(id), lain1, 'Selesai: baris lain tidak tertimpa');
+    // 3. baris pekerjaan dihapus admin di tengah tombol → error jelas, tidak ada yang ditulis (Maintenance, Log)
+    ctx.planWrites_ = asli;
+    const id2 = as(tech, () => ctx.apiStart(line, { baterai: 'E22H' })).open.id;
+    const log0 = ctx.readTable_('Log').length;
+    let hapus;
+    sela(() => { hapus = sh.data.find(r => r[cid] === id2); sh.data = sh.data.filter(r => r !== hapus); });
+    const isi0 = sh.data.filter(r => r[cid] !== id2).map(rowSig).join('\n');
+    assert.throws(() => as(tech, () => ctx.apiPause(id2, { values: { 'Alasan pause': 'Istirahat' } })), /tidak ditemukan di tab Maintenance/);
+    assert.strictEqual(sh.data.map(rowSig).join('\n'), isi0, 'tab = sesudah admin menghapus, tanpa tulisan tombol');
+    assert.strictEqual(ctx.readTable_('Log').length, log0, 'Log tidak bertambah');
+    ctx.planWrites_ = asli;
+    sh.data.push(hapus);   // admin mengembalikan barisnya
+    as(tech, () => ctx.apiCancel(id2, { values: { 'Alasan cancel': 'Lainnya' }, other: { 'Alasan cancel': 'uji pengaman' } }));
+    assert.strictEqual(sh.data.filter(r => r[cid] === id2)[0][cst], 'Cancelled');
+  } finally { ctx.planWrites_ = asli; }
+  const cm = h.indexOf('Mulai');
+  sh.data = [h].concat(sh.data.slice(1).sort((a, b) => (a[cm] instanceof Date ? a[cm].getTime() : Infinity) - (b[cm] instanceof Date ? b[cm].getTime() : Infinity)));
 });
 
 test('2.6.9 integritas: kolom disisipkan admin di kiri (Maintenance & Users) → data, login, tombol, laporan tetap benar', () => {

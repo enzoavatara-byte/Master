@@ -206,6 +206,7 @@ class Sheet {
     const p = new Proxy({}, { get: (_, k) => (...a) => { rs.forEach(r => r[k] && r[k](...a)); return p; } });
     return p;
   }
+  insertRowBefore(r) { const w = this.data[0] ? this.data[0].length : 0; if (this.data.length >= r) this.data.splice(r - 1, 0, new Array(w).fill('')); this.maxRows = this.getMaxRows() + 1; return this; }
   insertRowsAfter(after, n) { this.maxRows = this.getMaxRows() + n; this.inserted = (this.inserted || 0) + n; return this; }
   newChart() { return recorder('chart'); }
   insertChart(c) { this.charts.push(c); }
@@ -270,6 +271,9 @@ const Utilities = {
   },
   // Byte[] (Apps Script) → Buffer di sini; cukup untuk data uji gzip + base64 (test/gas-tahun.js)
   base64Decode: (s) => Buffer.from(String(s), 'base64'),
+  DigestAlgorithm: { SHA_256: 'sha256', MD5: 'md5' },
+  base64Encode: (b) => Buffer.from(Array.isArray(b) ? b.map(x => x & 255) : String(b)).toString('base64'),
+  computeDigest: (alg, s) => Array.from(require('crypto').createHash(alg).update(String(s)).digest()),
   sleep: () => {},
   newBlob: (data, type) => { const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
     return { _buf: buf, getContentType: () => type || '', getDataAsString: () => buf.toString('utf8'), getBytes: () => buf }; },

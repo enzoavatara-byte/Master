@@ -3,6 +3,39 @@
 Setiap update: ganti file yang tertulis, Run `setup`, lalu **Deploy → Manage deployments → ✏️ → New version** (URL & QR tetap).
 Dua factory = lakukan di kedua spreadsheet. Versi terpasang terlihat di menu spreadsheet → Tentang, dan di aplikasi → tombol **?**.
 
+## 2.6.11 — hasil putaran 2 uji 2 tahun: urut ulang malam DIBUANG, tulisan tombol dan arsip tidak bisa merusak data
+Ganti `Rekap`, `Db`, `Maintenance`, `Kpi`, `Tpm`, `Config`, `Panduan` (atau paste semua `src/`), lalu New version. Tidak ada sheet, kolom, trigger, atau izin baru (Run `setup` tidak wajib).
+
+**Putaran 2 di Apps Script asli** (▶, 29 Okt pagi, 103 menit): 94 LULUS, 54 GAGAL.
+
+- **Data uji rusak di tahap serbuan → arsip.** Dicocokkan per ID dengan data asli:
+  - 83 pekerjaan hilang dan 4 ID dobel;
+  - ±250 baris "campuran": ID satu pekerjaan, jam Mulai pekerjaan lain;
+  - 84 pekerjaan 2026 masuk Arsip 2025.
+- **Penyebab: dua tulis-ulang seluruh tab Maintenance bersamaan** — urut ulang malam (2.6.9/2.6.10: ±17 ribu baris × 43 kolom, ±2 menit) dan bersih-bersih alat uji yang tidak memakai kunci aplikasi. Tulisan sebesar itu di Google Sheets tidak atomik: isinya tercampur. Di produksi pasangan tabraknya bisa admin yang mengedit spreadsheet.
+- **Urut ulang malam juga terpicu sendiri** oleh Input Manual bertanggal mundur (bundel: 108 baris > 50) dan mendorong pembaruan malam pertama lewat batas 6 menit (KPI / tutup bulan tidak jalan). Manfaatnya nol: ID unik sudah dijamin pencarian di server, dan itu terbukti di Google asli.
+- **Kecepatan putaran ini tidak bisa dibandingkan:** Google 1,3–2,9× lebih lambat. Contoh: membuka data uji (hitung murni, tanpa spreadsheet) 5,9 dtk, padahal 2.6.8 2,3 dtk; backup 69 vs 30 dtk; setup > 360 vs 293 dtk.
+- **Tetap terbukti:** Laporan 2024/2025/2026 dan KPI 3 tahun identik per sel, TPM / tab per project / Ringkasan / Dashboard cocok, ID unik walau diurutkan admin, kolom sisipan, 1.460 part, ketuk ulang tanpa dobel, kapasitas 30%, malam Januari 281 dtk.
+
+**Diperbaiki — aplikasi:**
+- **Urut ulang malam dibuang.** Malam hanya membaca kolom Mulai (±1–2 dtk). Bila > 10% baris tidak urut (= admin mengurutkan tab), Dashboard admin menulis: data tetap aman, riwayat line bisa tidak lengkap, cara mengembalikan urutan.
+- **Pengaman baris tombol** (`pastikanBaris_`): sebelum menulis, ID di baris tujuan dicek. Pindah (admin mengurutkan / menyisipkan / menghapus baris saat tombol berjalan) → dicari ulang di server. Hilang / dobel → ditolak dengan pesan jelas, tanpa menulis apa pun. Tetap tanpa kirim-terpaksa tambahan (K8).
+- **Arsip tidak bisa menghapus data tahun berjalan:**
+  - tulis ulang tab sekarang *tulis dulu, baru kosongkan sisa*. Dulu *kosongkan dulu*: terbunuh di batas 6 menit di antara keduanya = semua baris yang disimpan hilang.
+  - Arsip yang mendekati batas waktu sesudah salin + verifikasi **berhenti aman** ("Arsip belum selesai (aman)", data di arsip DAN tab aktif); dijalankan lagi → selesai.
+  - Selama itu pemakaian sparepart yang ada di dua tab tidak dihitung dua kali (Laporan, TPM, Statistik).
+- Konfirmasi arsip mengingatkan: jangan edit tab Maintenance / Log selama arsip berjalan.
+
+**Diperbaiki — alat uji (proyek uji saja):**
+- Bersih-bersih data uji di dalam kunci aplikasi dan hanya menghapus baris uji (`UJI-…`), juga sisa tahap yang terbunuh. Laporan / KPI dibangun ulang di awal menu periksa, supaya tahap tombol tetap < 6 menit.
+- **Cek keutuhan per pekerjaan** vs data asli (hilang / dobel / campur / salah tab arsip) di menu 6, 6d, 7, dan sesudah arsip.
+- Serbuan menunggu semua tombol + pembaruan malam selesai sebelum menilai / membersihkan.
+- 6c menguji pengaman baris (baris disisipkan admin tepat di tengah tombol).
+- Pengukur waktu tombol kini memakai jalur tulis yang sama dengan produksi. Dulu Log ditulis lewat `appendRow` (0,3–2,4 dtk) saat diukur, jadi waktu tombol tahap 4 / 7b lebih lambat dari aslinya.
+- Baris "Kecepatan Google saat ini" di tahap 1 / 4 / 7b. Setup mencatat bagian yang sedang berjalan. Tab backup sisa putaran lalu dihapus dulu. Arsip yang berhenti aman dijalankan lagi otomatis.
+
+**Uji:** 116 + 4 test (baru: malam tidak menulis ulang + peringatan; tab diurutkan / baris dihapus di tengah tombol; arsip berhenti aman lalu selesai; tulis ulang yang terbunuh di tengah tidak menghilangkan baris).
+
 ## 2.6.10 — hasil putaran 1 uji 2 tahun: urut ulang malam yang pasti, uji otomatis tidak boleh ganda
 Ganti `Rekap`, `Config` (Script), lalu New version. Tidak ada sheet, kolom, trigger, atau izin baru (Run `setup` tidak wajib).
 
